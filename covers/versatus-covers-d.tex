@@ -1,0 +1,135 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{styles/versatus-covers}[2026/05/29 Versatus HPC Covers - Cover Geometric Final Split]
+
+\RequirePackage{tikz}
+\usetikzlibrary{calc,positioning}
+
+% --- Comando Principal da Capa ---
+\newcommand{\VSBookCover}{%
+\begin{titlepage}
+\thispagestyle{empty}
+\noindent
+\begin{tikzpicture}[remember picture, overlay, shift={(current page.south west)}, x=1cm, y=1cm]
+
+    % ==============================================================================
+    % 1. FUNDO CORPORATIVO ESCURO
+    % ==============================================================================
+    \fill[VSBlack] (-1, -1) rectangle (22, 31);
+
+    % ==============================================================================
+    % 2. MACRO-TRIÂNGULO INVERTIDO CAÓTICO (Ocupando os 50% Esquerdos)
+    % A geometria vai afunilando da largura X=10 (no topo) até X=2 (na base Y=0)
+    % ==============================================================================
+
+    % --- TOPO (Y=26 a 31 | Largura Máxima: X=0 a X=10) ---
+    \fill[VSTeal]       (0,28) -- (2,28) -- (0,30) -- cycle;
+    \fill[VSRed]        (2,28) -- (4,28) -- (2,30) -- cycle;
+    \fill[VSPaperWhite] (4,28) -- (6,28) -- (4,30) -- cycle;
+    \fill[VSBlack!75]   (7,29) circle (1); % Círculo caótico
+    \fill[VSTeal]       (8,28) -- (10,28) -- (8,30) -- cycle;
+    \fill[VSRed]        (10,30) arc (90:180:2) -- cycle; % Semicírculo de borda
+
+    \fill[VSPaperWhite] (0,26) -- (2,26) -- (0,28) -- cycle;
+    \fill[VSRed]        (2,26) -- (4,26) -- (4,28) -- cycle;
+    \fill[VSTeal]       (4,26) -- (6,26) -- (6,28) -- cycle;
+    \fill[VSPaperWhite] (6,26) -- (8,26) -- (8,28) -- cycle;
+    \fill[VSTeal]       (8,26) -- (10,26) -- (8,28) -- cycle;
+
+    % --- O GRANDE CÍRCULO CENTRAL (Centro em 4,22 | Raio 4) ---
+    % Quadrantes principais
+    \fill[VSRed]        (4,22) -- (8,22) arc (0:90:4) -- cycle;
+    \fill[VSTeal]       (4,22) -- (4,26) arc (90:180:4) -- cycle;
+    \fill[VSPaperWhite] (4,22) -- (0,22) arc (180:270:4) -- cycle;
+    \fill[VSBlack!75]   (4,22) -- (4,18) arc (270:360:4) -- cycle;
+    
+    % Recortes Caóticos Internos (Raio 2)
+    \fill[VSBlack]      (4,22) -- (6,22) arc (0:90:2) -- cycle;
+    \fill[VSPaperWhite] (4,22) -- (4,24) arc (90:180:2) -- cycle;
+    \fill[VSRed]        (4,22) -- (2,22) arc (180:270:2) -- cycle;
+    \fill[VSTeal]       (4,22) -- (4,20) arc (270:360:2) -- cycle;
+
+    % Formas satélites à direita do círculo (Fechando o X=10)
+    \fill[VSPaperWhite] (9,23) circle (1);
+    \fill[VSRed]        (8,20) -- (10,20) -- (8,22) -- cycle;
+    \fill[VSTeal]       (8,18) -- (10,18) -- (8,20) -- cycle;
+
+    % --- NÍVEL MÉDIO 1 (Y=14 a 18 | Afunilando para X=0 a X=6) ---
+    \fill[VSRed]        (0,16) -- (2,16) -- (0,18) -- cycle;
+    \fill[VSPaperWhite] (2,16) -- (4,16) -- (2,18) -- cycle;
+    \fill[VSTeal]       (4,16) -- (6,16) -- (4,18) -- cycle;
+    
+    \fill[VSTeal]       (0,14) -- (2,14) -- (0,16) -- cycle;
+    \fill[VSRed]        (2,14) -- (4,14) -- (4,16) -- cycle;
+    \fill[VSPaperWhite] (4,14) -- (6,14) -- (4,16) -- cycle;
+    
+    \fill[VSRed]        (7, 15) circle (1); % Círculo escapando do grid (caos)
+
+    % --- NÍVEL MÉDIO 2 (Y=8 a 14 | Afunilando para X=0 a X=4) ---
+    \fill[VSPaperWhite] (0,12) -- (2,12) -- (0,14) -- cycle;
+    \fill[VSTeal]       (2,12) -- (4,12) -- (2,14) -- cycle;
+    
+    \fill[VSTeal]       (0,10) -- (2,10) arc (0:90:2) -- cycle; % Quebra de padrão
+    \fill[VSRed]        (2,10) -- (4,10) -- (4,12) -- cycle;
+    
+    \fill[VSPaperWhite] (0,8) -- (2,8) -- (0,10) -- cycle;
+    \fill[VSRed]        (2,8) -- (4,8) -- (2,10) -- cycle;
+    
+    \fill[VSTeal]       (4,9) arc (-90:90:1) -- cycle; % Semicírculo caótico
+
+    % --- BASE (Y=0 a 8 | A Ponta do Triângulo em X=0 a X=2) ---
+    \fill[VSRed]        (0,6) -- (2,6) -- (0,8) -- cycle;
+    \fill[VSTeal]       (0,4) -- (2,4) -- (0,6) -- cycle;
+    \fill[VSPaperWhite] (0,2) -- (2,2) -- (0,4) -- cycle;
+    \fill[VSRed]        (0,0) -- (2,0) -- (0,2) -- cycle; % Bate no fundo da folha!
+    
+    \fill[VSPaperWhite] (2,3) circle (1); % Último detalhe caótico na base
+
+
+    % ==============================================================================
+    % 3. TIPOGRAFIA DO GRID SUÍÇO (Ocupando os 50% Direitos)
+    % Área restrita e blindada a partir de X=11. Formatação editorial polida.
+    % ==============================================================================
+
+    % --- Cabeçalho Corporativo ---
+   \node[anchor=north west, inner sep=0] at (11.5, 29) {
+    \VSLogoEscolhida[1.5] % O 1.5 é a escala. Pode ajustar para 1.2 ou 1.8 se quiser maior/menor
+};
+
+    % --- Agrupamento: Autoria e Categoria ---
+    \node[anchor=north west, text=VSPaperWhite, inner sep=0, text width=8.5cm, align=left] at (11, 26) {
+        {\fontsize{16}{18}\selectfont\textbf{\BookAuthor}\par}
+        \vspace{0.3cm}
+        {\fontsize{12}{14}\selectfont\color{VSTeal}\textbf{\MakeUppercase{\BookSeries}}\par}
+    };
+    
+    % Linha de Força Suíça
+    \fill[VSRed] (11, 23.3) rectangle (13.5, 23.4);
+
+    % --- Agrupamento Principal: Título ---
+    % Espaçamento ajustado para leitura elegante
+    \node[anchor=north west, text=VSPaperWhite, inner sep=0, text width=8.5cm, align=left] at (11, 22) {
+        {\raggedright\linespread{0.9}\selectfont\fontsize{46}{50}\selectfont\bfseries\BookTitle\par}
+        \vspace{1.5cm}
+        {\raggedright\linespread{1.3}\selectfont\fontsize{16}{22}\selectfont\color{VSRed}\BookSubtitle\par}
+    };
+
+    % --- Agrupamento Rodapé: Descrição e Metadados ---
+    \node[anchor=south west, text=VSPaperWhite, inner sep=0, text width=8cm, align=left] at (11, 2) {
+        {\raggedright\linespread{1.4}\selectfont\fontsize{11}{16}\selectfont\color{VSMutedText}\BookDescription\par}
+        \vspace{2.5cm}
+        {\fontsize{11}{15}\selectfont\textbf{DATA:} \BookDate\par}
+        {\fontsize{11}{15}\selectfont\textbf{VERSÃO:} \BookVersion\par}
+        \vspace{0.6cm}
+        {\fontsize{10}{14}\selectfont\color{VSTeal}\MakeUppercase{\BookConfidentiality}\par}
+    };
+
+\end{tikzpicture}
+\end{titlepage}%
+\clearpage
+} % <--- ESTA É A CHAVE QUE FALTOU NA SUA CÓPIA! ELA FECHA O \newcommand.
+
+% Failsafes: Garante que o documento compile caso procure pelas opções A ou B no main.tex
+\newcommand{\VSBookCoverA}{\VSBookCover}
+\newcommand{\VSBookCoverB}{\VSBookCover}
+
+\endinput

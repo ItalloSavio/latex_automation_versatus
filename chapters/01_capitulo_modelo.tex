@@ -1,0 +1,85 @@
+\chapter{Estruturas de Texto e Tabelas}
+
+Este capítulo funciona como uma página de referência para o desenho interno de livros técnicos da Versatus HPC. O conteúdo é propositalmente genérico: ele deve ser substituído pelo texto real do projeto, mas preserva exemplos de hierarquia, ritmo editorial, tabelas e parágrafos contínuos. A intenção é facilitar a validação do template antes do início da escrita final.
+
+\section{Três parágrafos contínuos}
+
+A documentação técnica deve privilegiar uma sequência de leitura estável: contexto, decisão, justificativa e consequência. Em materiais didáticos, essa ordem reduz ambiguidade e evita que o leitor precise inferir a arquitetura mental do autor. O texto corrido deve ser usado quando a explicação depende de continuidade conceitual, especialmente em capítulos introdutórios, fundamentos teóricos e discussões de projeto.
+
+Em documentos de engenharia, parágrafos longos demais tendem a prejudicar a manutenção editorial. A recomendação é preservar blocos com uma ideia central por parágrafo, usando listas apenas quando houver enumeração real. Essa disciplina ajuda a converter o mesmo conteúdo em livro, manual, relatório técnico ou white paper sem reescrita estrutural excessiva.
+
+Para programas de estudo, a redação deve separar claramente conceitos estáveis, hipóteses de trabalho, exemplos, restrições e decisões normativas. Essa separação permite que o material seja usado tanto para leitura sequencial quanto para consulta posterior. O template foi desenhado para aceitar ambos os modos sem alterar a identidade visual.
+
+\section{Tabela pequena}
+
+A tabela pequena deve ser usada para parâmetros, convenções, nomenclaturas ou comparações curtas. Ela não deve dominar a página.
+
+\begin{table}[htbp]
+\centering
+\caption{Exemplo de tabela pequena}
+\label{tab:pequena}
+\begin{tabular}{lll}
+\toprule
+Item & Valor & Observação \\
+\midrule
+CPU & 2 sockets & Nós de computação \\
+GPU & 8 unidades & Treinamento de modelos \\
+Rede & 400 Gb/s & Interconexão de baixa latência \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Tabela média}
+
+A tabela média é indicada quando há mais texto por célula. Neste caso, \texttt{tabularx} permite que as colunas se ajustem à largura útil da página.
+
+\begin{table}[htbp]
+\centering
+\caption{Exemplo de tabela média com largura controlada}
+\label{tab:media}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{0.22\textwidth}X X}
+\toprule
+Categoria & Uso recomendado & Critério de aceite \\
+\midrule
+Provisionamento & Descrever instalação, imagem base, dependências e sequência de boot. & O leitor consegue reproduzir o ambiente sem decisões implícitas. \\
+Operação & Explicar rotinas administrativas, telemetria e tratamento de falhas. & O procedimento apresenta pré-condições, passos e rollback. \\
+Validação & Registrar testes, métricas, hipóteses e limites conhecidos. & Os resultados são rastreáveis e repetíveis. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Tabela grande}
+
+A tabela grande deve ser usada com moderação. Em livros e manuais, ela é útil para matrizes de requisitos, listas de componentes, parâmetros de configuração e inventários técnicos. Quando a tabela atravessar páginas, use \texttt{longtable}.
+
+{\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{p{0.08\textwidth}p{0.15\textwidth}p{0.14\textwidth}p{0.12\textwidth}p{0.16\textwidth}p{0.14\textwidth}p{0.11\textwidth}}
+\caption{Exemplo de tabela grande com múltiplas linhas}\label{tab:grande}\\
+\toprule
+ID & Componente & Função & Prioridade & Métrica & Evidência & Estado \\
+\midrule
+\endfirsthead
+\toprule
+ID & Componente & Função & Prioridade & Métrica & Evidência & Estado \\
+\midrule
+\endhead
+\midrule
+\multicolumn{7}{r}{Continua na próxima página}\\
+\endfoot
+\bottomrule
+\endlastfoot
+R01 & Kernel & Base de execução do sistema & Alta & Latência e estabilidade & Testes de carga & Aberto \\
+R02 & Rede & Comunicação entre nós & Alta & Vazão e perda de pacotes & Benchmarks sintéticos & Aberto \\
+R03 & Storage & Persistência paralela & Alta & IOPS e throughput & IOR, mdtest & Aberto \\
+R04 & Scheduler & Alocação de recursos & Alta & Tempo de fila & Simulações de workload & Aberto \\
+R05 & Observabilidade & Eventos e métricas & Média & Custo de coleta & Telemetria contínua & Aberto \\
+R06 & Segurança & Controle de acesso & Alta & Superfície exposta & Revisão de configuração & Aberto \\
+R07 & Documentação & Reprodutibilidade & Média & Cobertura editorial & Checklist de publicação & Aberto \\
+R08 & CI/CD & Geração de artefatos & Média & Tempo de build & Pipeline automatizado & Aberto \\
+R09 & Instalação & Primeira implantação & Alta & Taxa de sucesso & Testes em ambiente limpo & Aberto \\
+R10 & Atualização & Evolução controlada & Média & Rollback funcional & Ensaios de versão & Aberto \\
+R11 & Diagnóstico & Suporte operacional & Média & Tempo de triagem & Casos simulados & Aberto \\
+R12 & Treinamento & Transferência de conhecimento & Baixa & Conclusão dos módulos & Avaliação interna & Aberto \\
+\end{longtable}
+}

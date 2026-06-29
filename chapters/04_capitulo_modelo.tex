@@ -1,0 +1,150 @@
+
+\chapter{Blocos de Código e Terminal}
+
+Este capítulo apresenta exemplos de código em dois regimes editoriais: blocos escuros, adequados para simular uma sessão de terminal ou uma janela de execução, e blocos claros, adequados para leitura de código-fonte em materiais didáticos. O template usa \texttt{listings} com \texttt{tcolorbox}, evitando \texttt{minted} para preservar portabilidade sem \texttt{shell-escape}.
+
+\section{Bloco pequeno de código em terminal}
+
+\begin{VSTerminalCode}[title={Terminal pequeno}]
+def normalize(value, scale):
+    if scale == 0:
+        return 0.0
+    return value / scale
+\end{VSTerminalCode}
+
+\clearpage
+\section{Bloco médio de código em terminal}
+
+\begin{VSTerminalCode}[title={Terminal médio}]
+def summarize_jobs(jobs):
+    total_gpus = 0
+    total_nodes = 0
+    failed_jobs = []
+
+    for job in jobs:
+        total_gpus += job.get("gpus", 0)
+        total_nodes += job.get("nodes", 0)
+        if job.get("state") == "FAILED":
+            failed_jobs.append(job.get("id"))
+
+    return {
+        "jobs": len(jobs),
+        "gpus": total_gpus,
+        "nodes": total_nodes,
+        "failed": failed_jobs,
+    }
+\end{VSTerminalCode}
+
+\clearpage
+\section{Bloco grande de código em terminal}
+
+\begin{VSTerminalCode}[title={Terminal grande}]
+class ClusterPolicy:
+    def __init__(self, max_gpus_per_user, reserved_nodes):
+        self.max_gpus_per_user = max_gpus_per_user
+        self.reserved_nodes = set(reserved_nodes)
+
+    def can_schedule(self, request, usage):
+        user = request["user"]
+        required_gpus = request.get("gpus", 0)
+        candidate_nodes = request.get("nodes", [])
+
+        if usage.get(user, 0) + required_gpus > self.max_gpus_per_user:
+            return False, "gpu quota exceeded"
+
+        for node in candidate_nodes:
+            if node in self.reserved_nodes and not request.get("admin", False):
+                return False, "reserved node requested"
+
+        if not self._has_required_topology(candidate_nodes):
+            return False, "topology constraint not satisfied"
+
+        return True, "accepted"
+
+    def _has_required_topology(self, nodes):
+        if len(nodes) <= 1:
+            return True
+        racks = {node.split("-")[0] for node in nodes}
+        return len(racks) <= 2
+
+policy = ClusterPolicy(max_gpus_per_user=32, reserved_nodes=["rack9-node01"])
+request = {
+    "user": "researcher",
+    "gpus": 8,
+    "nodes": ["rack1-node03", "rack1-node04"],
+    "admin": False,
+}
+usage = {"researcher": 16}
+accepted, reason = policy.can_schedule(request, usage)
+print(accepted, reason)
+\end{VSTerminalCode}
+
+\clearpage
+\section{Bloco pequeno de código claro}
+
+\begin{VSCodeBlock}[title={Código pequeno}]
+def bandwidth(bytes_written, seconds):
+    return bytes_written / seconds
+\end{VSCodeBlock}
+
+\section{Bloco médio de código claro}
+
+\begin{VSCodeBlock}[title={Código médio}]
+def moving_average(samples, window):
+    if window <= 0:
+        raise ValueError("window must be positive")
+
+    result = []
+    for index in range(len(samples)):
+        start = max(0, index - window + 1)
+        segment = samples[start:index + 1]
+        result.append(sum(segment) / len(segment))
+
+    return result
+\end{VSCodeBlock}
+
+\clearpage
+\section{Bloco grande de código claro}
+
+\begin{VSCodeBlock}[title={Código grande}]
+from dataclasses import dataclass
+
+@dataclass
+class Measurement:
+    timestamp: float
+    node: str
+    metric: str
+    value: float
+
+class TelemetryBuffer:
+    def __init__(self, limit):
+        self.limit = limit
+        self.samples = []
+
+    def append(self, measurement):
+        self.samples.append(measurement)
+        if len(self.samples) > self.limit:
+            self.samples = self.samples[-self.limit:]
+
+    def select(self, metric, node=None):
+        selected = []
+        for sample in self.samples:
+            if sample.metric != metric:
+                continue
+            if node is not None and sample.node != node:
+                continue
+            selected.append(sample)
+        return selected
+
+    def aggregate_mean(self, metric, node=None):
+        selected = self.select(metric, node=node)
+        if not selected:
+            return None
+        return sum(sample.value for sample in selected) / len(selected)
+
+buffer = TelemetryBuffer(limit=10000)
+buffer.append(Measurement(0.0, "node001", "gpu_util", 71.0))
+buffer.append(Measurement(1.0, "node001", "gpu_util", 78.0))
+buffer.append(Measurement(2.0, "node001", "gpu_util", 82.0))
+print(buffer.aggregate_mean("gpu_util", node="node001"))
+\end{VSCodeBlock}

@@ -1,0 +1,20 @@
+\newcommand{\RenderDynamicCover}{%
+\definecolor{c0}{HTML}{1A1A1A}
+\definecolor{c1}{HTML}{50B2B2}
+\definecolor{c2}{HTML}{D64D4D}
+\definecolor{c3}{HTML}{FFFFFF}
+\definecolor{c4}{HTML}{4D4D4D}
+\begin{tikzpicture}[remember picture, overlay,
+  shift={(current page.south west)}, x=1cm, y=1cm]
+  
+  % Background
+  \fill[c0] (-1,-1) rectangle (22, 30.7);
+
+  % Grid unit
+  \pgfmathsetmacro{\u}{2.1}
+
+  % Row 1 (y=29.7)
+  \fill[c1] (0,29.7) -- (\u,29.7) -- (0,29.7-\u) -- cycle;
+  \fill[c3] (\u,29.7-\u) -- (\u,29.7) -- (0,29.7-\u) -- cycle;
+  \fill[c2] (\u,29.7) -- (2*\u,29.7) -- (\u,29.7-\u) -- cycle;
+  \fill[c3] (2*\u,29.7-\u)

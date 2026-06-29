@@ -1,0 +1,18 @@
+# Versatus Intelligent Cover Compiler — Python dependencies
+#
+# Install with:
+#   pip install -r requirements.txt
+
+# ── Core pipeline ─────────────────────────────────────────────────────────────
+
+# Gemini Vision API and repair calls
+google-genai>=1.0.0
+
+# OpenRouter Vision API — OpenAI-compatible, free tier disponível (openrouter.ai)
+openai>=1.0.0
+
+# Canvas AST JSON schema validation
+jsonschema>=4.17.0
+
+# Reparação automática de JSON truncado (quando o modelo atinge o limite de tokens)
+json-repair>=0.30.0

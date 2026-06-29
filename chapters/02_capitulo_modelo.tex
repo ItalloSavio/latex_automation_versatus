@@ -1,0 +1,52 @@
+\chapter{Equações e Modelos Matemáticos}
+
+Este capítulo apresenta exemplos de equações pequenas, médias e grandes. A finalidade é validar espaçamento, numeração, quebras de linha, referências cruzadas e integração visual entre texto técnico e formalismo matemático.
+
+\section{Equação pequena}
+
+Equações pequenas podem aparecer em linha, como $E = mc^2$, ou em modo destacado quando forem usadas como referência posterior:
+
+\begin{equation}
+\label{eq:pequena}
+T = \frac{D}{B}.
+\end{equation}
+
+Na \cref{eq:pequena}, $T$ representa tempo, $D$ representa volume de dados e $B$ representa largura de banda efetiva.
+
+\section{Equação média}
+
+Equações médias costumam ocupar quase uma linha inteira. Elas devem permanecer legíveis, sem compressão manual excessiva.
+
+\begin{equation}
+\label{eq:media}
+\mathcal{C}_{\mathrm{total}}(n,m,k)=\alpha n + \beta m\log_2(m) + \gamma k^2 + \delta\sum_{i=1}^{n}\frac{x_i}{1+\rho_i}.
+\end{equation}
+
+A \cref{eq:media} ilustra uma expressão composta por termos lineares, logarítmicos, quadráticos e uma soma ponderada. Em documentação técnica, esse formato é adequado para modelos de custo, estimativas de capacidade e hipóteses analíticas.
+
+\section{Equação grande em múltiplas linhas}
+
+Equações grandes devem usar ambientes como \texttt{align}, \texttt{aligned} ou \texttt{multline}. O objetivo é preservar alinhamento sem sacrificar leitura.
+
+\begin{align}
+\label{eq:grande}
+\mathcal{L}(\theta) &=
+\sum_{b=1}^{B}\left[
+  \frac{1}{N_b}\sum_{i=1}^{N_b}
+  \left\| f_{\theta}(x_{b,i}) - y_{b,i} \right\|_2^2
+\right]
++ \lambda_1\left\|\theta\right\|_1
++ \lambda_2\left\|\theta\right\|_2^2 \\
+&\quad + \eta\sum_{j=1}^{J}
+\max\left(0,\tau_j - q_j(\theta)\right)^2
++ \mu\sum_{r=1}^{R}
+\left| c_r(\theta)-\widehat{c}_r \right|.
+\end{align}
+
+A \cref{eq:grande} mostra uma função objetivo com termo empírico, regularização, penalidades de restrição e distância a metas operacionais. Esse tipo de bloco é comum em capítulos de otimização, modelagem de desempenho e aprendizado de máquina.
+
+\section{Bloco técnico com equação}
+
+\begin{VSNote}[title={Regra editorial para matemática}]
+Use equações numeradas quando elas forem citadas, discutidas ou reutilizadas. Use equações não numeradas apenas para derivações locais ou exemplos transitórios. Evite transformar texto explicativo em sequência de símbolos quando o argumento puder ser expresso de forma mais clara em linguagem natural.
+\end{VSNote}

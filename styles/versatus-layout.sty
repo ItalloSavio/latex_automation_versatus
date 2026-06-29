@@ -1,0 +1,107 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{styles/versatus-layout}[2026/05/20 Versatus HPC book layout]
+
+\RequirePackage[a4paper,top=2.7cm,bottom=2.7cm,inner=2.8cm,outer=2.5cm,headheight=18pt,headsep=0.7cm,footskip=1.2cm]{geometry}
+\RequirePackage{graphicx}
+\RequirePackage{tikz}
+\RequirePackage{eso-pic}
+\RequirePackage{fancyhdr}
+\RequirePackage{titlesec}
+\RequirePackage{tocloft}
+\RequirePackage{hyperref}
+\RequirePackage{bookmark}
+\RequirePackage{zref-totpages}
+\RequirePackage[nameinlink,noabbrev]{cleveref}
+\RequirePackage{enumitem}
+\RequirePackage{booktabs}
+\RequirePackage{longtable}
+\RequirePackage{array}
+\RequirePackage{tabularx}
+\RequirePackage{csquotes}
+\RequirePackage{siunitx}
+\RequirePackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\RequirePackage{subcaption}
+\RequirePackage{wrapfig}
+\RequirePackage{multicol}
+\RequirePackage{float}
+\RequirePackage[acronym]{glossaries}
+\RequirePackage{imakeidx}
+
+\makeindex[name=general,title=Índice Remissivo]
+\numberwithin{equation}{chapter}
+\sisetup{output-decimal-marker={.}}
+\setlist{nosep,leftmargin=*}
+
+\AtBeginDocument{%
+  \color{VSBlack}%
+  \ifVSWarm\pagecolor{VSWarmPaper}\else\pagecolor{VSPaperWhite}\fi
+}
+
+\ifVSLinksColor
+  \hypersetup{colorlinks=true,linkcolor=VSRed,urlcolor=VSTeal,citecolor=VSRed,hypertexnames=false}
+\else
+  \hypersetup{colorlinks=true,linkcolor=VSBlack,urlcolor=VSBlack,citecolor=VSBlack,hypertexnames=false}
+\fi
+
+\newcommand{\VSFooterSymbol}{%
+  \ifVSFooterColor
+    \includegraphics[height=0.50cm,trim=310bp 97bp 308bp 88bp,clip]{assets/logos/vs-simbolo-principal.png}%
+  \else
+    \includegraphics[height=0.50cm,trim=310bp 97bp 308bp 88bp,clip]{assets/logos/vs-simbolo-preto-1cor.png}%
+  \fi
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\nouppercase{\leftmark}}
+\fancyhead[R]{\small\BookSeries}
+\fancyfoot[L]{\VSFooterSymbol}
+\fancyfoot[C]{\small Página \thepage\ de \ztotpages}
+\fancyfoot[R]{\small\BookVersion}
+\renewcommand{\headrulewidth}{0.3pt}
+\renewcommand{\footrulewidth}{0.3pt}
+
+\fancypagestyle{plain}{%
+  \fancyhf{}
+  \fancyfoot[L]{\VSFooterSymbol}
+  \fancyfoot[C]{\small Página \thepage\ de \ztotpages}
+  \fancyfoot[R]{\small\BookVersion}
+  \renewcommand{\headrulewidth}{0pt}
+  \renewcommand{\footrulewidth}{0.3pt}
+}
+
+\newcommand{\VersatusPageMark}{%
+  \ifVSWatermark
+  \begin{tikzpicture}[remember picture,overlay]
+    \node[opacity=0.030,anchor=center,inner sep=0pt]
+      at (current page.center)
+      {\includegraphics[width=12.0cm,trim=134bp 192bp 135bp 207bp,clip]{assets/logos/vs-horizontal-preto-1cor.png}};
+  \end{tikzpicture}%
+  \fi
+}
+\AddToShipoutPictureBG{\VersatusPageMark}
+
+\titleformat{\chapter}[display]
+  {\bfseries\Huge\color{VSBlack}}
+  {\filright\Large\VSAllCaps{\chaptername}\ \thechapter}
+  {1ex}
+  {\titlerule[0.5pt]\vspace{1.0ex}\filright}
+  [\vspace{0.8ex}{\ifVSColor\color{VSRed}\else\color{VSBlack}\fi\titlerule[1.2pt]}]
+
+\titleformat{\section}
+  {\Large\bfseries\color{VSBlack}}
+  {\thesection}{0.75em}{}
+
+\titleformat{\subsection}
+  {\large\bfseries\color{VSBlack}}
+  {\thesubsection}{0.75em}{}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt plus 2pt minus 1pt}
+
+\renewcommand{\cftchapfont}{\bfseries}
+\renewcommand{\cftchappagefont}{\bfseries}
+\renewcommand{\cftchapleader}{\cftdotfill{\cftdotsep}}
+
+\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}

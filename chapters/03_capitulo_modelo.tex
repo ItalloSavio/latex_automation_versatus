@@ -1,0 +1,190 @@
+\chapter{Figuras, Gráficos e Blocos Multicoluna}
+
+Este capítulo reúne exemplos visuais usados com frequência em materiais técnicos: gráficos individuais, painéis de gráficos, fotografia centralizada, fotografia acompanhada de texto e blocos editoriais em duas, três e quatro colunas.
+
+\ifVSColor
+  \def\VSPlotAColor{VSRed}
+  \def\VSPlotBColor{VSTeal}
+  \def\VSPlotCColor{VSBlack}
+  \def\VSPlotDColor{VSSilver}
+\else
+  \def\VSPlotAColor{VSBlack}
+  \def\VSPlotBColor{VSMutedText}
+  \def\VSPlotCColor{VSBlack}
+  \def\VSPlotDColor{VSSilver}
+\fi
+
+\section{Um gráfico}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=0.76\textwidth,
+  height=6.0cm,
+  grid=both,
+  xlabel={Tamanho do problema},
+  ylabel={Throughput normalizado},
+  ymin=0,
+  legend pos=south east]
+\addplot+[mark=*,color=\VSPlotAColor,line width=0.9pt] coordinates {(1,1.0) (2,1.8) (4,3.2) (8,5.9) (16,9.8)};
+\addlegendentry{Configuração A}
+\addplot+[mark=square*,color=\VSPlotBColor,line width=0.9pt] coordinates {(1,0.8) (2,1.5) (4,2.9) (8,5.2) (16,8.7)};
+\addlegendentry{Configuração B}
+\end{axis}
+\end{tikzpicture}
+\caption{Exemplo de gráfico individual gerado em TikZ/PGFPlots}
+\label{fig:grafico-unico}
+\end{figure}
+
+\section{Dois gráficos lado a lado}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}[t]{0.48\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=\textwidth,height=5.2cm,grid=major,xlabel={Tempo},ylabel={Uso de CPU},ymin=0,ymax=100]
+\addplot+[mark=none,color=\VSPlotAColor,line width=0.9pt] coordinates {(0,20) (1,28) (2,35) (3,50) (4,61) (5,66) (6,70)};
+\end{axis}
+\end{tikzpicture}
+\caption{Série temporal}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.48\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=\textwidth,height=5.2cm,grid=major,xlabel={Fila},ylabel={Jobs},ybar,bar width=8pt,ymin=0]
+\addplot+[fill=\VSPlotBColor,draw=\VSPlotBColor] coordinates {(1,12) (2,20) (3,15) (4,28)};
+\end{axis}
+\end{tikzpicture}
+\caption{Distribuição discreta}
+\end{subfigure}
+\caption{Exemplo de dois gráficos lado a lado}
+\label{fig:dois-graficos}
+\end{figure}
+
+\section{Quatro gráficos em matriz 2 x 2}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}[t]{0.48\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=\textwidth,height=4.7cm,grid=major,xlabel={Amostra},ylabel={Latência}]
+\addplot+[mark=*,color=\VSPlotAColor,line width=0.8pt] coordinates {(1,7) (2,6) (3,6.5) (4,5.8) (5,5.2)};
+\end{axis}
+\end{tikzpicture}
+\caption{Latência}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.48\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=\textwidth,height=4.7cm,grid=major,xlabel={Amostra},ylabel={IOPS}]
+\addplot+[mark=square*,color=\VSPlotBColor,line width=0.8pt] coordinates {(1,10) (2,14) (3,18) (4,21) (5,25)};
+\end{axis}
+\end{tikzpicture}
+\caption{IOPS}
+\end{subfigure}
+
+\vspace{0.4cm}
+
+\begin{subfigure}[t]{0.48\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=\textwidth,height=4.7cm,grid=major,xlabel={Amostra},ylabel={Eficiência},ymin=0,ymax=1]
+\addplot+[mark=triangle*,color=\VSPlotCColor,line width=0.8pt] coordinates {(1,0.60) (2,0.66) (3,0.71) (4,0.75) (5,0.78)};
+\end{axis}
+\end{tikzpicture}
+\caption{Eficiência}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.48\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=\textwidth,height=4.7cm,grid=major,xlabel={Amostra},ylabel={Erros},ybar,bar width=7pt,ymin=0]
+\addplot+[fill=\VSPlotDColor,draw=\VSPlotCColor] coordinates {(1,4) (2,3) (3,2) (4,2) (5,1)};
+\end{axis}
+\end{tikzpicture}
+\caption{Erros}
+\end{subfigure}
+\caption{Exemplo de quatro gráficos organizados em duas linhas e duas colunas}
+\label{fig:quatro-graficos}
+\end{figure}
+
+\section{Foto centralizada}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\textwidth]{assets/figures/versatus-photo-placeholder.png}
+\caption{Exemplo de fotografia centralizada. Substitua o arquivo por uma fotografia real do produto, laboratório, cluster ou instalação.}
+\label{fig:foto-centralizada}
+\end{figure}
+
+\section{Foto com texto ao lado}
+
+\begin{figure}[H]
+\centering
+\begin{minipage}[c]{0.47\textwidth}
+\includegraphics[width=\textwidth]{assets/figures/versatus-photo-placeholder.png}
+\end{minipage}\hfill
+\begin{minipage}[c]{0.48\textwidth}
+\textbf{Uso recomendado.} Esta composição é adequada para explicar uma imagem sem deslocar o leitor para outra página. Ela funciona bem em manuais, livros de laboratório, lâminas técnicas e relatórios de validação.
+
+\textbf{Critério editorial.} O texto lateral deve interpretar a imagem, não repetir a legenda. Para fotografias de produto, descreva o contexto, o componente visível, o papel operacional e a evidência técnica.
+\end{minipage}
+\caption{Exemplo de fotografia acompanhada de texto lateral}
+\label{fig:foto-texto-lado}
+\end{figure}
+
+\section{Dois blocos em duas colunas}
+
+\noindent\begin{minipage}[t]{0.48\textwidth}
+\begin{VSNote}[title={Bloco 1}]
+Use duas colunas quando houver comparação direta entre conceitos, decisões arquiteturais, variantes de produto ou modos de operação.
+\end{VSNote}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.48\textwidth}
+\begin{VSNote}[title={Bloco 2}]
+Evite colunas longas demais. Se o conteúdo exigir mais de meia página, prefira uma seção convencional com subtítulos.
+\end{VSNote}
+\end{minipage}
+
+\section{Três blocos em três colunas}
+
+\noindent\begin{minipage}[t]{0.31\textwidth}
+\begin{VSProcedure}[title={Entrada}]
+Defina pré-condições, arquivos, parâmetros e dependências externas.
+\end{VSProcedure}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.31\textwidth}
+\begin{VSProcedure}[title={Processo}]
+Liste os passos principais e destaque comandos ou decisões manuais.
+\end{VSProcedure}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.31\textwidth}
+\begin{VSProcedure}[title={Saída}]
+Registre artefatos, logs, métricas, relatórios e critérios de aceite.
+\end{VSProcedure}
+\end{minipage}
+
+\section{Quatro blocos em quatro colunas}
+
+\noindent\begin{minipage}[t]{0.235\textwidth}
+\begin{VSNote}[title={Contexto}]
+\small Descreva o problema técnico.
+\end{VSNote}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.235\textwidth}
+\begin{VSNote}[title={Decisão}]
+\small Declare a escolha adotada.
+\end{VSNote}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.235\textwidth}
+\begin{VSNote}[title={Evidência}]
+\small Aponte teste, métrica ou fonte.
+\end{VSNote}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.235\textwidth}
+\begin{VSNote}[title={Risco}]
+\small Registre limitações e mitigação.
+\end{VSNote}
+\end{minipage}

@@ -1,0 +1,161 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{styles/versatus-covers}[2026/05/20 Versatus HPC TikZ covers]
+
+\RequirePackage{tikz}
+\usetikzlibrary{calc,positioning,arrows.meta}
+
+\newcommand{\VSCoverLogo}{%
+  \ifVSCoverColor
+    \includegraphics[width=5.0cm,trim=134bp 192bp 135bp 207bp,clip]{assets/logos/vs-horizontal-fundo-preto.png}%
+  \else
+    \includegraphics[width=5.0cm,trim=134bp 192bp 135bp 207bp,clip]{assets/logos/vs-horizontal-preto-1cor.png}%
+  \fi
+}
+
+\newcommand{\VSCoverLogoPositive}{%
+  \ifVSCoverColor
+    \includegraphics[width=5.0cm,trim=134bp 192bp 135bp 207bp,clip]{assets/logos/vs-horizontal-principal.png}%
+  \else
+    \includegraphics[width=5.0cm,trim=134bp 192bp 135bp 207bp,clip]{assets/logos/vs-horizontal-preto-1cor.png}%
+  \fi
+}
+
+\newcommand{\VSBookCoverA}{%
+\begin{titlepage}
+\thispagestyle{empty}
+\begin{tikzpicture}[remember picture,overlay]
+  \ifVSCoverColor
+    \fill[VSBlack] (current page.south west) rectangle (current page.north east);
+    \fill[VSRed] (current page.north west) rectangle ([xshift=1.15cm]current page.south west);
+    \fill[VSTeal,opacity=0.18] ([xshift=1.15cm]current page.north west) rectangle ([xshift=1.55cm]current page.south west);
+    \foreach \x in {0,...,9}{
+      \draw[VSTeal,opacity=0.17,line width=0.25pt]
+        ([xshift=3.0cm+\x*0.85cm,yshift=-3.3cm]current page.north west) --
+        ([xshift=8.1cm+\x*0.85cm,yshift=2.3cm]current page.south west);
+    }
+    \draw[VSRed,line width=1.0pt] ([xshift=2.05cm,yshift=-2.4cm]current page.north west) -- ([xshift=2.05cm,yshift=2.4cm]current page.south west);
+    \node[anchor=north west,inner sep=0pt] at ([xshift=2.65cm,yshift=-2.10cm]current page.north west) {\includegraphics[width=5.0cm,trim=134bp 192bp 135bp 207bp,clip]{assets/logos/vs-horizontal-fundo-preto.png}};
+  \else
+    \fill[VSPaperWhite] (current page.south west) rectangle (current page.north east);
+    \draw[VSBlack,line width=0.9pt] ([xshift=1.15cm]current page.north west) -- ([xshift=1.15cm]current page.south west);
+    \draw[VSBlack,line width=0.5pt] ([xshift=2.05cm,yshift=-2.4cm]current page.north west) -- ([xshift=2.05cm,yshift=2.4cm]current page.south west);
+    \foreach \x in {0,...,9}{
+      \draw[VSBlack,opacity=0.16,line width=0.25pt]
+        ([xshift=3.0cm+\x*0.85cm,yshift=-3.3cm]current page.north west) --
+        ([xshift=8.1cm+\x*0.85cm,yshift=2.3cm]current page.south west);
+    }
+    \node[anchor=north west,inner sep=0pt] at ([xshift=2.65cm,yshift=-2.10cm]current page.north west) {\includegraphics[width=5.0cm,trim=134bp 192bp 135bp 207bp,clip]{assets/logos/vs-horizontal-preto-1cor.png}};
+  \fi
+\end{tikzpicture}
+
+\vspace*{5.3cm}
+\begin{flushleft}
+\hspace*{2.05cm}\begin{minipage}{0.80\textwidth}
+{\raggedright\hyphenpenalty=10000\exhyphenpenalty=10000\fontsize{28}{33}\selectfont\bfseries\ifVSCoverColor\color{white}\else\color{VSBlack}\fi\BookTitle\par}
+\vspace{0.85cm}
+{\fontsize{15}{20}\selectfont\ifVSCoverColor\color{white!86}\else\color{VSMutedText}\fi\BookSubtitle\par}
+\vspace{1.25cm}
+{\ifVSCoverColor\color{VSRed}\else\color{VSBlack}\fi\rule{0.44\textwidth}{1.2pt}\par}
+\vspace{1.10cm}
+{\Large\ifVSCoverColor\color{white!80}\else\color{VSBlack}\fi\BookDescription\par}
+\vfill
+{\large\ifVSCoverColor\color{white!72}\else\color{VSMutedText}\fi\BookAuthor\par}
+\vspace{0.20cm}
+{\normalsize\ifVSCoverColor\color{white!55}\else\color{VSMutedText}\fi\BookDate\quad | \quad \BookVersion\par}
+\end{minipage}
+\end{flushleft}
+\end{titlepage}%
+}
+
+
+\newcommand{\VSBookCoverB}{%
+\begin{titlepage}
+\thispagestyle{empty}
+\begin{tikzpicture}[remember picture,overlay]
+  \fill[VSPaperWhite] (current page.south west) rectangle (current page.north east);
+  \ifVSCoverColor
+    \fill[VSRed] ([xshift=-1.05cm]current page.north east) rectangle (current page.south east);
+    \draw[VSTeal,line width=0.7pt,opacity=0.65] ([xshift=-2.0cm,yshift=-2.3cm]current page.north east) -- ([xshift=-9.3cm,yshift=-10.4cm]current page.north east);
+    \draw[VSTeal,line width=0.7pt,opacity=0.45] ([xshift=-1.35cm,yshift=-4.2cm]current page.north east) -- ([xshift=-7.4cm,yshift=-10.7cm]current page.north east);
+    \foreach \p/\x/\y in {a/-6.6/-3.2,b/-4.8/-5.2,c/-7.9/-6.3,d/-3.5/-8.3,e/-6.1/-9.4,f/-9.0/-8.0}{
+      \coordinate (\p) at ([xshift=\x cm,yshift=\y cm]current page.north east);
+      \fill[VSTeal] (\p) circle (1.7pt);
+    }
+    \foreach \u/\v in {a/b,a/c,b/d,c/e,d/e,e/f,c/f}{\draw[VSTeal,opacity=0.55,line width=0.35pt] (\u) -- (\v);}
+    \node[anchor=north west,inner sep=0pt] at ([xshift=2.0cm,yshift=-2.0cm]current page.north west) {\includegraphics[width=5.0cm,trim=134bp 192bp 135bp 207bp,clip]{assets/logos/vs-horizontal-principal.png}};
+  \else
+    \draw[VSBlack,line width=0.7pt] ([xshift=-1.05cm]current page.north east) -- ([xshift=-1.05cm]current page.south east);
+    \draw[VSBlack,line width=0.7pt,opacity=0.45] ([xshift=-2.0cm,yshift=-2.3cm]current page.north east) -- ([xshift=-9.3cm,yshift=-10.4cm]current page.north east);
+    \draw[VSBlack,line width=0.7pt,opacity=0.35] ([xshift=-1.35cm,yshift=-4.2cm]current page.north east) -- ([xshift=-7.4cm,yshift=-10.7cm]current page.north east);
+    \foreach \p/\x/\y in {a/-6.6/-3.2,b/-4.8/-5.2,c/-7.9/-6.3,d/-3.5/-8.3,e/-6.1/-9.4,f/-9.0/-8.0}{
+      \coordinate (\p) at ([xshift=\x cm,yshift=\y cm]current page.north east);
+      \fill[VSBlack] (\p) circle (1.6pt);
+    }
+    \foreach \u/\v in {a/b,a/c,b/d,c/e,d/e,e/f,c/f}{\draw[VSBlack,opacity=0.45,line width=0.35pt] (\u) -- (\v);}
+    \node[anchor=north west,inner sep=0pt] at ([xshift=2.0cm,yshift=-2.0cm]current page.north west) {\includegraphics[width=5.0cm,trim=134bp 192bp 135bp 207bp,clip]{assets/logos/vs-horizontal-preto-1cor.png}};
+  \fi
+\end{tikzpicture}
+
+\vspace*{7.2cm}
+\begin{flushleft}
+\hspace*{1.9cm}\begin{minipage}{0.80\textwidth}
+{\raggedright\hyphenpenalty=10000\exhyphenpenalty=10000\fontsize{28}{33}\selectfont\bfseries\color{VSBlack}\BookTitle\par}
+\vspace{0.65cm}
+{\fontsize{15}{20}\selectfont\color{VSMutedText}\BookSubtitle\par}
+\vspace{1.10cm}
+{\ifVSCoverColor\color{VSRed}\else\color{VSBlack}\fi\rule{0.55\textwidth}{1.0pt}\par}
+\vspace{1.00cm}
+{\Large\color{VSBlack}\BookDescription\par}
+\vfill
+{\large\color{VSMutedText}\BookAuthor\par}
+\vspace{0.20cm}
+{\normalsize\color{VSMutedText}\BookDate\quad | \quad \BookVersion\par}
+\end{minipage}
+\end{flushleft}
+\end{titlepage}%
+}
+
+\newcommand{\VSBookCover}{%
+  \ifdefstring{\VSCoverOption}{B}{\VSBookCoverB}{\VSBookCoverA}%
+}
+
+% ── Dynamic cover: VLM-generated geometric background + template text ─────────
+% The geometric layer (\RenderDynamicCover) is produced by the automation
+% pipeline. The text layout is identical to CoverA so the typographic
+% hierarchy is preserved regardless of what the background looks like.
+\newcommand{\VSBookCoverDynamic}{%
+\begin{titlepage}
+\thispagestyle{empty}
+% Layer 1 — VLM geometry (TikZ overlay, drawn over the full page)
+\RenderDynamicCover
+% Layer 2 — text (normal LaTeX flow on top of the TikZ overlay)
+\vspace*{5.3cm}
+\begin{flushleft}
+\hspace*{2.05cm}\begin{minipage}{0.80\textwidth}
+  {\raggedright\hyphenpenalty=10000\exhyphenpenalty=10000%
+   \fontsize{28}{33}\selectfont\bfseries%
+   \ifVSCoverColor\color{white}\else\color{VSBlack}\fi%
+   \BookTitle\par}
+  \vspace{0.85cm}
+  {\fontsize{15}{20}\selectfont%
+   \ifVSCoverColor\color{white!86}\else\color{VSMutedText}\fi%
+   \BookSubtitle\par}
+  \vspace{1.25cm}
+  {\ifVSCoverColor\color{VSRed}\else\color{VSBlack}\fi%
+   \rule{0.44\textwidth}{1.2pt}\par}
+  \vspace{1.10cm}
+  {\Large%
+   \ifVSCoverColor\color{white!80}\else\color{VSBlack}\fi%
+   \BookDescription\par}
+  \vfill
+  {\large%
+   \ifVSCoverColor\color{white!72}\else\color{VSMutedText}\fi%
+   \BookAuthor\par}
+  \vspace{0.20cm}
+  {\normalsize%
+   \ifVSCoverColor\color{white!55}\else\color{VSMutedText}\fi%
+   \BookDate\quad | \quad \BookVersion\par}
+\end{minipage}
+\end{flushleft}
+\end{titlepage}%
+}

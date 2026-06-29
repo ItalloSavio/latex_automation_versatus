@@ -1,0 +1,40 @@
+\newcommand{\RenderDynamicCover}{%
+\definecolor{c0}{HTML}{E1E1D7}
+\definecolor{c1}{HTML}{252A71}
+\definecolor{c2}{HTML}{009EDB}
+\definecolor{c3}{HTML}{D5007E}
+\definecolor{c4}{HTML}{FFFFFF}
+\definecolor{c5}{HTML}{008B47}
+\definecolor{c6}{HTML}{D9B611}
+\definecolor{c7}{HTML}{D61F26}
+\definecolor{c8}{HTML}{313131}
+\begin{tikzpicture}[remember picture, overlay,
+  shift={(current page.south west)}, x=1cm, y=1cm]
+  % Background fill
+  \fill[c0] (-1,-1) rectangle (22, 30.7);
+  
+  % Top Left - Dark Blue
+  \fill[c1] (-1, 24.5) rectangle (5.25, 30.7);
+  
+  % Top Middle/Right - Bright Blue
+  \fill[c2] (5.25, 24.5) -- (15.75, 24.5) -- (21, 29.7) -- (22, 29.7) -- (22, 30.7) -- (5.25, 30.7) -- cycle;
+  
+  % Middle Left - Magenta
+  \fill[c3] (-1, 13.5) rectangle (5.25, 24.5);
+  
+  % Center Square - White Triangle
+  \fill[c4] (5.25, 13.5) -- (5.25, 24.5) -- (15.75, 24.5) -- cycle;
+  
+  % Center Square - Yellow Triangle
+  \fill[c6] (5.25, 13.5) -- (15.75, 13.5) -- (15.75, 24.5) -- cycle;
+  
+  % Middle Right - Green
+  \fill[c5] (15.75, 13.5) -- (22, 13.5) -- (22, 30.7) -- (21, 29.7) -- (15.75, 24.5) -- cycle;
+  
+  % Bottom Middle - Red Trapezoid
+  \fill[c7] (0, 8.5) -- (15.75, 8.5) -- (15.75, 13.5) -- (5.25, 13.5) -- cycle;
+  
+  % Bottom Right - Dark Grey
+  \fill[c8] (15.75, 8.5) rectangle (22, 13.5);
+\end{tikzpicture}%
+}

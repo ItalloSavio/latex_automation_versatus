@@ -1,0 +1,41 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{styles/versatus-variant}[2026/05/20 Versatus HPC document variants]
+
+\RequirePackage{etoolbox}
+
+\newif\ifVSColor
+\newif\ifVSWarm
+\newif\ifVSPrint
+\newif\ifVSCoverColor
+\newif\ifVSFooterColor
+\newif\ifVSLinksColor
+\newif\ifVSWatermark
+
+% Defaults: standard color edition.
+\VSColortrue
+\VSWarmfalse
+\VSPrintfalse
+\VSCoverColortrue
+\VSFooterColortrue
+\VSLinksColortrue
+\VSWatermarktrue
+
+\ifdefstring{\VSDocumentVariant}{standard}{%
+  \VSColortrue\VSWarmfalse\VSPrintfalse\VSCoverColortrue\VSFooterColortrue\VSLinksColortrue\VSWatermarktrue
+}{}
+\ifdefstring{\VSDocumentVariant}{print}{%
+  \VSColorfalse\VSWarmfalse\VSPrinttrue\VSCoverColorfalse\VSFooterColorfalse\VSLinksColorfalse\VSWatermarktrue
+}{}
+\ifdefstring{\VSDocumentVariant}{longread}{%
+  \VSColortrue\VSWarmtrue\VSPrintfalse\VSCoverColortrue\VSFooterColortrue\VSLinksColortrue\VSWatermarktrue
+}{}
+\ifdefstring{\VSDocumentVariant}{longread-mono}{%
+  \VSColorfalse\VSWarmtrue\VSPrintfalse\VSCoverColorfalse\VSFooterColorfalse\VSLinksColorfalse\VSWatermarktrue
+}{}
+
+\newcommand{\VSVariantName}{%
+  \ifdefstring{\VSDocumentVariant}{standard}{Standard color}{}%
+  \ifdefstring{\VSDocumentVariant}{print}{Print monochrome}{}%
+  \ifdefstring{\VSDocumentVariant}{longread}{Long-read warm color}{}%
+  \ifdefstring{\VSDocumentVariant}{longread-mono}{Long-read warm monochrome}{}%
+}

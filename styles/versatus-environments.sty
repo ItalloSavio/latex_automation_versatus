@@ -1,0 +1,207 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{styles/versatus-environments}[2026/05/20 Versatus HPC theorem, code and technical environments]
+
+\RequirePackage[most]{tcolorbox}
+\RequirePackage{amsthm}
+
+
+\RequirePackage{listings}
+\renewcommand{\proofname}{Demonstração}
+
+% Code listing styles. Minted is intentionally avoided to keep the template
+% portable without shell-escape or external Python/Pygments dependencies.
+\lstdefinestyle{VSTerminalListing}{%
+  language=Python,
+  basicstyle=\color{VSPaperWhite}\ttfamily\footnotesize,
+  keywordstyle=\bfseries\color{VSTeal},
+  commentstyle=\itshape\color{VSSilver},
+  stringstyle=\color{VSRed},
+  numbers=left,
+  numberstyle=\tiny\color{VSSilver},
+  stepnumber=1,
+  numbersep=6pt,
+  showstringspaces=false,
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  keepspaces=true,
+  tabsize=2
+}
+
+\lstdefinestyle{VSCodeListing}{%
+  language=Python,
+  basicstyle=\color{VSBlack}\ttfamily\footnotesize,
+  keywordstyle=\bfseries\color{VSBlack},
+  commentstyle=\itshape\color{VSMutedText},
+  stringstyle=\color{VSBlack},
+  numbers=left,
+  numberstyle=\tiny\color{VSMutedText},
+  stepnumber=1,
+  numbersep=6pt,
+  showstringspaces=false,
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  keepspaces=true,
+  tabsize=2
+}
+
+\newtcblisting{VSTerminalCode}[1][]{%
+  enhanced,
+  listing only,
+  listing engine=listings,
+  listing options={style=VSTerminalListing},
+  colback=VSBlack,
+  colframe=VSBlack,
+  coltitle=VSPaperWhite,
+  boxrule=0.4pt,
+  arc=1.2mm,
+  left=7mm,right=2mm,top=1.2mm,bottom=1.2mm,
+  fonttitle=\bfseries,
+  title={Código em terminal},
+  #1
+}
+
+\newtcblisting{VSCodeBlock}[1][]{%
+  enhanced,
+  listing only,
+  listing engine=listings,
+  listing options={style=VSCodeListing},
+  colback=VSRuleLight,
+  colframe=VSSilver,
+  coltitle=VSBlack,
+  boxrule=0.4pt,
+  arc=1.2mm,
+  left=7mm,right=2mm,top=1.2mm,bottom=1.2mm,
+  fonttitle=\bfseries,
+  title={Código},
+  #1
+}
+
+
+\newtheoremstyle{versatus}%
+  {10pt}{10pt}{\itshape}{}%
+  {\bfseries\color{VSBlack}}{}{0.5em}{}%
+\theoremstyle{versatus}
+\newtheorem{theorem}{Teorema}[chapter]
+\newtheorem{definition}[theorem]{Definição}
+\newtheorem{proposition}[theorem]{Proposição}
+\newtheorem{lemma}[theorem]{Lema}
+\newtheorem{corollary}[theorem]{Corolário}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Observação}
+
+\newtcolorbox{VSNote}[1][]{%
+  enhanced,
+  breakable,
+  colback=VSPaperWhite,
+  colframe=VSBlack,
+  coltitle=VSPaperWhite,
+  boxrule=0.4pt,
+  arc=1.2mm,
+  left=2mm,right=2mm,top=1.2mm,bottom=1.2mm,
+  fonttitle=\bfseries,
+  title={Nota técnica},
+  #1
+}
+
+\newtcolorbox{VSWarning}[1][]{%
+  enhanced,
+  breakable,
+  colback=VSPaperWhite,
+  colframe=VSRed,
+  coltitle=VSPaperWhite,
+  boxrule=0.6pt,
+  arc=1.2mm,
+  left=2mm,right=2mm,top=1.2mm,bottom=1.2mm,
+  fonttitle=\bfseries,
+  title={Atenção},
+  #1
+}
+
+\newtcolorbox{VSProcedure}[1][]{%
+  enhanced,
+  breakable,
+  colback=VSPaperWhite,
+  colframe=VSSilver,
+  coltitle=VSBlack,
+  boxrule=0.4pt,
+  arc=1.2mm,
+  left=2mm,right=2mm,top=1.2mm,bottom=1.2mm,
+  fonttitle=\bfseries,
+  title={Procedimento},
+  #1
+}
+
+\newtcolorbox{VSImportant}[1][]{%
+  enhanced,
+  breakable,
+  colback=VSPaperWhite,
+  colframe=VSBlack,
+  coltitle=VSPaperWhite,
+  boxrule=0.6pt,
+  arc=1.2mm,
+  left=2.2mm,right=2.2mm,top=1.4mm,bottom=1.4mm,
+  fonttitle=\bfseries,
+  title={Destaque importante},
+  #1
+}
+
+\newtcolorbox{VSImportantGray}[1][]{%
+  enhanced,
+  breakable,
+  colback=VSRuleLight,
+  colframe=VSSilver,
+  coltitle=VSBlack,
+  boxrule=0.5pt,
+  arc=1.2mm,
+  left=2.2mm,right=2.2mm,top=1.4mm,bottom=1.4mm,
+  fonttitle=\bfseries,
+  title={Destaque importante},
+  #1
+}
+
+\ifVSColor
+  \newtcolorbox{VSImportantColor}[1][]{%
+    enhanced,
+    breakable,
+    colback=VSRed!5!VSPaperWhite,
+    colframe=VSRed,
+    coltitle=VSPaperWhite,
+    boxrule=0.6pt,
+    arc=1.2mm,
+    left=2.2mm,right=2.2mm,top=1.4mm,bottom=1.4mm,
+    fonttitle=\bfseries,
+    title={Destaque importante},
+    #1
+  }
+\else
+  \newtcolorbox{VSImportantColor}[1][]{%
+    enhanced,
+    breakable,
+    colback=VSRuleLight,
+    colframe=VSBlack,
+    coltitle=VSPaperWhite,
+    boxrule=0.6pt,
+    arc=1.2mm,
+    left=2.2mm,right=2.2mm,top=1.4mm,bottom=1.4mm,
+    fonttitle=\bfseries,
+    title={Destaque importante},
+    #1
+  }
+\fi
+
+
+
+\AtBeginDocument{%
+  \crefname{theorem}{Teorema}{Teoremas}%
+  \Crefname{theorem}{Teorema}{Teoremas}%
+  \crefname{lemma}{Lema}{Lemas}%
+  \Crefname{lemma}{Lema}{Lemas}%
+  \crefname{corollary}{Corolário}{Corolários}%
+  \Crefname{corollary}{Corolário}{Corolários}%
+  \crefname{definition}{Definição}{Definições}%
+  \Crefname{definition}{Definição}{Definições}%
+  \crefname{proposition}{Proposição}{Proposições}%
+  \Crefname{proposition}{Proposição}{Proposições}%
+}

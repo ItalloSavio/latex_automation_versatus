@@ -1,0 +1,64 @@
+
+\chapter{Teoremas, Provas e Blocos de Destaque}
+
+Este capítulo valida a composição de enunciados matemáticos, demonstrações e blocos editoriais de ênfase. Esses elementos são importantes para livros de formação, materiais científicos, notas técnicas e documentação de arquitetura que contenha invariantes, propriedades formais ou regras normativas.
+
+\section{Enunciação de teorema matemático}
+
+\begin{theorem}[Monotonicidade de custo acumulado]
+\label{thm:monotonicidade}
+Seja $c_i \geq 0$ o custo incremental de uma sequência finita de operações técnicas. Defina
+\[
+C_n = \sum_{i=1}^{n} c_i.
+\]
+Então a sequência $(C_n)_{n\geq 1}$ é monotonicamente não decrescente.
+\end{theorem}
+
+\section{Prova de teorema matemático}
+
+\begin{proof}
+Considere dois índices consecutivos $n$ e $n+1$. Pela definição de custo acumulado,
+\[
+C_{n+1}=\sum_{i=1}^{n+1}c_i = \sum_{i=1}^{n}c_i + c_{n+1}=C_n+c_{n+1}.
+\]
+Como $c_{n+1}\geq 0$, segue que $C_{n+1}\geq C_n$. Portanto, a sequência de custos acumulados é monotonicamente não decrescente.
+\end{proof}
+
+\section{Enunciação de lema matemático}
+
+\begin{lemma}[Limite superior por capacidade]
+\label{lem:capacidade}
+Se cada tarefa consome no máximo $g_{\max}$ aceleradores e há $N$ tarefas concorrentes, então o consumo total $G$ satisfaz
+\[
+G \leq N g_{\max}.
+\]
+\end{lemma}
+
+O Lema~\ref{lem:capacidade} é um exemplo simples de limite usado em raciocínios de capacidade. Em um livro real, esse tipo de lema pode preparar uma proposição mais forte sobre escalabilidade, contenção de recursos ou escalonamento.
+
+\section{Enunciação de corolário matemático}
+
+\begin{corollary}[Quota suficiente]
+\label{cor:quota}
+Se a quota disponível $Q$ satisfaz $Q \geq N g_{\max}$, então a quota é suficiente para acomodar qualquer conjunto de $N$ tarefas que obedeça ao limite individual $g_{\max}$.
+\end{corollary}
+
+O Corolário~\ref{cor:quota} segue diretamente do Lema~\ref{lem:capacidade}. O corolário registra uma consequência operacional simples: uma política de quota pode ser dimensionada a partir de um limite superior conservador.
+
+\section{Destaque importante de texto}
+
+\begin{VSImportant}
+Use este bloco para uma afirmação normativa, uma restrição de projeto, uma decisão irreversível ou uma instrução que não deve ser confundida com observação lateral. Ele deve ser usado com parcimônia.
+\end{VSImportant}
+
+\section{Destaque importante em bloco cinza claro}
+
+\begin{VSImportantGray}
+Use este bloco quando o destaque for relevante, mas não crítico. Ele é adequado para recomendações editoriais, notas de implementação, critérios de revisão e advertências de baixa severidade.
+\end{VSImportantGray}
+
+\section{Destaque importante em bloco colorido}
+
+\begin{VSImportantColor}
+Use este bloco quando a variante colorida do documento puder reforçar visualmente um ponto de atenção. Nas variantes monocromáticas, o mesmo ambiente preserva legibilidade e passa automaticamente para uma composição sem cor.
+\end{VSImportantColor}

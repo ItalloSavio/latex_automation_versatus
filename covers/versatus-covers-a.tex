@@ -1,0 +1,45 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{styles/versatus-covers}[2026/05/28 Versatus HPC Covers - Cover A]
+
+\RequirePackage{tikz}
+\usetikzlibrary{calc,positioning}
+
+% --- Comando Principal da Capa ---
+\newcommand{\VSBookCover}{%
+\begin{titlepage}
+\thispagestyle{empty}
+\noindent
+\begin{tikzpicture}[remember picture, overlay, shift={(current page.south west)}, x=1cm, y=1cm]
+  
+  % 1. Fundo sólido Vibrante (VSRed)
+  \fill[VSRed] (-1, -1) rectangle (22, 31);
+  
+  % 2. Logomarca ancorada no topo esquerdo
+\node[anchor=north west, inner sep=0] at (11.5, 29) {
+    \VSLogoEscolhida[1.5]
+    % O 1.5 é a escala. Pode ajustar para 1.2 ou 1.8 se quiser maior/menor
+};
+  
+  % 3. Título Tipográfico Massivo 
+  \node[anchor=north west, text=VSBlack, inner sep=0, text width=18cm, align=left] at (1.5, 25) {
+    \linespread{0.8}\selectfont
+    \fontsize{75}{75}\selectfont\bfseries\BookTitle\par
+  };
+  
+  % 4. Bloco de Informações Estruturadas (Inferior Direito)
+  \node[anchor=north west, text=VSBlack, inner sep=0, text width=9cm, align=left] at (10.5, 9) {
+    {\fontsize{24}{28}\selectfont\bfseries\BookAuthor\par}
+    \vspace{0.6cm}
+    {\fontsize{14}{18}\selectfont\BookSubtitle\par}
+    \vspace{1cm}
+    {\fontsize{14}{18}\selectfont\BookDescription\par}
+    \vspace{1.5cm}
+    {\fontsize{16}{20}\selectfont\textbf{VERSÃO \BookVersion}\par}
+    {\fontsize{12}{16}\selectfont\BookDate\par}
+  };
+
+\end{tikzpicture}
+\end{titlepage}%
+\clearpage
+}
+\endinput

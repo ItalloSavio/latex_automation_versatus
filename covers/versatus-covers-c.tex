@@ -1,0 +1,79 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{styles/versatus-covers}[2026/05/28 Versatus HPC Covers - Cover C]
+
+\RequirePackage{tikz}
+\usetikzlibrary{calc,positioning}
+
+
+% --- Comando Principal da Capa ---
+\newcommand{\VSBookCover}{%
+\begin{titlepage}
+\thispagestyle{empty}
+\noindent
+\begin{tikzpicture}[remember picture, overlay, shift={(current page.south west)}, x=1cm, y=1cm]
+  
+  % 1. Fundo Base
+  \fill[VSPaperWhite] (-1, -1) rectangle (22, 31);
+  
+  % 2. BLOCO SUPERIOR DE LOSANGOS (Iteração Matemática)
+  \foreach \row in {0, 1, 2, 3, 4} {
+    \foreach \col in {0, 1, 2, 3, 4, 5} {
+      \pgfmathsetmacro{\cx}{-1.25 + \col * 5 + mod(\row,2)*2.5}
+      \pgfmathsetmacro{\cy}{32 - \row * 2.5}
+      
+      % Alterna entre as 3 cores baseadas na posição do grid
+      \pgfmathparse{int(mod(\col+\row, 3))}
+      \ifnum\pgfmathresult=0 \def\dcol{VSTeal} \fi
+      \ifnum\pgfmathresult=1 \def\dcol{VSBlack} \fi
+      \ifnum\pgfmathresult=2 \def\dcol{VSRed} \fi
+      
+      \fill[\dcol] (\cx, \cy+2.5) -- (\cx+2.5, \cy) -- (\cx, \cy-2.5) -- (\cx-2.5, \cy) -- cycle;
+    }
+  }
+
+  % 3. BLOCO INFERIOR DE LOSANGOS
+  \foreach \row in {0, 1, 2, 3, 4} {
+    \foreach \col in {0, 1, 2, 3, 4, 5} {
+      \pgfmathsetmacro{\cx}{-1.25 + \col * 5 + mod(\row,2)*2.5}
+      \pgfmathsetmacro{\cy}{7 - \row * 2.5}
+      
+      % Inverte a ordem das cores para criar movimento
+      \pgfmathparse{int(mod(\col+\row, 3))}
+      \ifnum\pgfmathresult=0 \def\dcol{VSRed} \fi
+      \ifnum\pgfmathresult=1 \def\dcol{VSTeal} \fi
+      \ifnum\pgfmathresult=2 \def\dcol{VSBlack} \fi
+      
+      \fill[\dcol] (\cx, \cy+2.5) -- (\cx+2.5, \cy) -- (\cx, \cy-2.5) -- (\cx-2.5, \cy) -- cycle;
+    }
+  }
+
+  % 4. FAIXA CENTRAL (Área de Respiro para o Texto)
+  \fill[VSPaperWhite] (-1, 10) rectangle (22, 19.5);
+  
+  % 5. Logomarca na faixa central
+  \node[anchor=north west, inner sep=0] at (11.5, 29) {
+    \VSLogoEscolhida[1.5] % O 1.5 é a escala. Pode ajustar para 1.2 ou 1.8 se quiser maior/menor
+};
+  
+  % 6. Título Principal (Estilo Vision)
+  \node[anchor=west, text=VSBlack, inner sep=0, text width=12cm] at (1.5, 14.5) {
+    \linespread{0.8}\selectfont
+    \fontsize{65}{65}\selectfont\bfseries{\BookTitle}\par
+  };
+  
+  % 7. Dados adicionais estruturados à direita
+  \node[anchor=west, text=VSBlack, inner sep=0, text width=6cm] at (14, 14.5) {
+    {\fontsize{10}{12}\selectfont\textbf{\BookAuthor}\par}
+    \vspace{0.1cm}
+    {\fontsize{10}{12}\selectfont\BookDate\par}
+    \vspace{0.8cm}
+    {\fontsize{10}{12}\selectfont\textbf{\BookSubtitle}\par}
+    \vspace{0.1cm}
+    {\fontsize{10}{12}\selectfont\color{VSMutedText}\BookDescription\par}
+  };
+
+\end{tikzpicture}
+\end{titlepage}%
+\clearpage
+}
+\endinput

@@ -1,0 +1,24 @@
+{
+  "elements": [
+    {
+      "type": "background",
+      "color": "#FFFFFF"
+    },
+    {
+      "type": "pattern",
+      "color": "#000000",
+      "shape": "ellipse",
+      "x_step": 100,
+      "y_step": 100,
+      "radius": 50
+    },
+    {
+      "type": "pattern",
+      "color": "#FFA500",
+      "shape": "ellipse",
+      "x_step": 100,
+      "y_step": 100,
+      "radius": 50
+    }
+  ]
+}

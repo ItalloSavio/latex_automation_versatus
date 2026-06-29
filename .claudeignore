@@ -1,0 +1,16 @@
+# LaTeX temporários
+*.aux
+*.log
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.listing
+
+# Outputs
+*.pdf
+build/
+dist/
+node_modules/
+__pycache__/
+.venv/*.aux

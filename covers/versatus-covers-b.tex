@@ -1,0 +1,90 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{styles/versatus-covers}[2026/05/28 Versatus HPC Covers - Cover B Fixed]
+
+\RequirePackage{tikz}
+\usetikzlibrary{calc,positioning}
+
+% --- Macros de Logomarca ---
+\newcommand{\VSCoverLogo}{%
+  \ifVSCoverColor
+    \includegraphics[width=5.0cm,trim=134bp 192bp 135bp 207bp,clip]{assets/logos/vs-horizontal-fundo-preto.png}%
+  \else
+    \includegraphics[width=5.0cm,trim=134bp 192bp 135bp 207bp,clip]{assets/logos/vs-horizontal-preto-1cor.png}%
+  \fi
+}
+\newcommand{\VSCoverLogoPositive}{%
+  \ifVSCoverColor
+    \includegraphics[width=5.0cm,trim=134bp 192bp 135bp 207bp,clip]{assets/logos/vs-horizontal-principal.png}%
+  \else
+    \includegraphics[width=5.0cm,trim=134bp 192bp 135bp 207bp,clip]{assets/logos/vs-horizontal-preto-1cor.png}%
+  \fi
+}
+
+% --- Comando Principal da Capa ---
+\newcommand{\VSBookCover}{%
+\begin{titlepage}
+\thispagestyle{empty}
+\noindent
+\begin{tikzpicture}[remember picture, overlay, shift={(current page.south west)}, x=1cm, y=1cm]
+  
+  % 1. Fundo Papel (Clean Corporate)
+  \fill[VSWarmPaperStrong] (-1, -1) rectangle (22, 31);
+  
+  % 2. CABEÇALHO
+  \node[anchor=north west, inner sep=0] at (11.5, 29) {
+    \VSLogoEscolhida[1.5] 
+    % O 1.5 é a escala. Pode ajustar para 1.2 ou 1.8 se quiser maior/menor
+};
+  \node[anchor=north west, text=VSBlack, inner sep=0] at (7.5, 28) {
+    \fontsize{9}{11}\selectfont\textbf{SÉRIE /}\\[3pt] \BookSeries
+  };
+  \node[anchor=north east, text=VSBlack, inner sep=0] at (19, 28) {
+    \fontsize{9}{11}\selectfont\BookDate
+  };
+  
+  % Linha divisória superior
+  \draw[VSBlack, line width=0.5pt] (2, 26) -- (19, 26);
+  
+  % 3. BLOCO CENTRAL (Grid em Colunas Seguras)
+  \node[anchor=north west, text=VSBlack, inner sep=0] at (2, 24) {
+    \fontsize{14}{16}\selectfont\textbf{01}
+  };
+  
+  % Coluna Central (Títulos)
+  \node[anchor=north west, text=VSBlack, inner sep=0, text width=5cm] at (7.5, 24) {
+    {\fontsize{9}{11}\selectfont\textbf{PROJETO /}\par}
+    \vspace{0.4cm}
+    {\fontsize{18}{22}\selectfont\bfseries\BookTitle\par}
+    \vspace{1.5cm}
+    {\fontsize{9}{11}\selectfont\textbf{TIPO /}\par}
+    \vspace{0.4cm}
+    {\fontsize{12}{14}\selectfont\BookSubtitle\par}
+  };
+  
+  % Coluna da Direita (Descrição)
+  \node[anchor=north west, text=VSBlack, inner sep=0, text width=6cm] at (13.5, 24) {
+    {\fontsize{9}{11}\selectfont\textbf{DESCRIÇÃO /}\par}
+    \vspace{0.4cm}
+    {\fontsize{10}{14}\selectfont\color{VSMutedText}\BookDescription\par}
+  };
+  
+  % Linha divisória inferior
+  \draw[VSBlack, line width=0.5pt] (2, 6) -- (19, 6);
+  
+  % 4. RODAPÉ
+  \node[anchor=north west, text=VSBlack, inner sep=0] at (2, 5) {
+    {\fontsize{12}{14}\selectfont\bfseries\BookAuthor\par}
+    \vspace{0.2cm}
+    {\fontsize{9}{11}\selectfont\color{VSMutedText}\BookConfidentiality\par}
+  };
+  \node[anchor=north east, text=VSBlack, inner sep=0, align=right] at (19, 5) {
+    {\fontsize{9}{11}\selectfont\textbf{VERSATUS HPC}\par}
+    \vspace{0.2cm}
+    {\fontsize{9}{11}\selectfont VERSÃO \BookVersion\par}
+  };
+
+\end{tikzpicture}
+\end{titlepage}%
+\clearpage
+}
+\endinput

@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "canvas_schema.json",
+  "title": "Canvas AST",
+  "description": "Geometric layer extracted from a cover image. Only visual/geometric elements — no text. Elements ordered by Z-index (index 0 = bottommost layer).",
+  "type": "object",
+  "required": ["elements"],
+  "additionalProperties": false,
+  "properties": {
+    "elements": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Ordered list of geometric elements. Index 0 is rendered first (bottom layer).",
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/BackgroundElement" },
+          { "$ref": "#/$defs/RectangleElement" },
+          { "$ref": "#/$defs/TriangleElement" },
+          { "$ref": "#/$defs/CircleElement" },
+          { "$ref": "#/$defs/LineElement" },
+          { "$ref": "#/$defs/PatternElement" }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "Color": {
+      "type": "string",
+      "description": "CSS hex color (#RRGGBB or #RGB) or a standard LaTeX/xcolor name (e.g. black, white).",
+      "pattern": "^(#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})|[a-zA-Z][a-zA-Z0-9!]*( [a-zA-Z0-9!]+)*)$"
+    },
+    "CoordX": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 21.0,
+      "description": "Horizontal coordinate in cm. Top-left origin. X increases rightward (0=left, 21=right)."
+    },
+    "CoordY": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 29.7,
+      "description": "Vertical coordinate in cm. Top-left origin. Y increases downward (0=top, 29.7=bottom)."
+    },
+    "BleedCoordX": {
+      "type": "number",
+      "minimum": -5.0,
+      "maximum": 26.0,
+      "description": "Horizontal coordinate allowing bleed beyond A4 width (-5 to 26 cm). Shapes beyond the page boundary are clipped naturally. Use for shapes that bleed off the left/right edges."
+    },
+    "BleedCoordY": {
+      "type": "number",
+      "minimum": -5.0,
+      "maximum": 34.7,
+      "description": "Vertical coordinate allowing bleed beyond A4 height (-5 to 34.7 cm). Shapes beyond the page boundary are clipped naturally. Use for shapes that bleed off the top/bottom edges."
+    },
+    "BackgroundElement": {
+      "type": "object",
+      "description": "Full-page solid color fill. Must be the first element (index 0).",
+      "required": ["type", "color"],
+      "additionalProperties": false,
+      "properties": {
+        "type":  { "const": "background" },
+        "color": { "$ref": "#/$defs/Color" }
+      }
+    },
+    "RectangleElement": {
+      "type": "object",
+      "description": "Filled rectangle or rotated diamond/rhombus. Coordinates may extend beyond A4 for bleed/clipping effects. Use rotation:45 for diamond shapes. Shapes that bleed off-page are clipped by the page boundary.",
+      "required": ["type", "x1", "y1", "x2", "y2", "color"],
+      "additionalProperties": false,
+      "properties": {
+        "type":     { "const": "rectangle" },
+        "x1":       { "$ref": "#/$defs/BleedCoordX", "description": "Left edge X of bounding box (cm, may be negative for bleed)" },
+        "y1":       { "$ref": "#/$defs/BleedCoordY", "description": "Top edge Y of bounding box (cm) — smaller Y value" },
+        "x2":       { "$ref": "#/$defs/BleedCoordX", "description": "Right edge X of bounding box (cm, may exceed 21 for bleed)" },
+        "y2":       { "$ref": "#/$defs/BleedCoordY", "description": "Bottom edge Y of bounding box (cm) — larger Y value" },
+        "color":    { "$ref": "#/$defs/Color" },
+        "rotation": {
+          "type": "number",
+          "description": "Rotation in degrees around the bounding box center. 0 = axis-aligned, 45 = diamond. A large square rotated 45° and positioned near the page edge creates a triangular clip effect.",
+          "default": 0
+        }
+      }
+    },
+    "TriangleElement": {
+      "type": "object",
+      "description": "Filled triangle defined by 3 vertices. Use for diagonal cuts, Swiss-style compositional splits, and triangular shapes. Vertices may extend beyond A4 for bleed effects.",
+      "required": ["type", "x1", "y1", "x2", "y2", "x3", "y3", "color"],
+      "additionalProperties": false,
+      "properties": {
+        "type":  { "const": "triangle" },
+        "x1":    { "$ref": "#/$defs/BleedCoordX", "description": "Vertex 1 X (cm)" },
+        "y1":    { "$ref": "#/$defs/BleedCoordY", "description": "Vertex 1 Y (cm)" },
+        "x2":    { "$ref": "#/$defs/BleedCoordX", "description": "Vertex 2 X (cm)" },
+        "y2":    { "$ref": "#/$defs/BleedCoordY", "description": "Vertex 2 Y (cm)" },
+        "x3":    { "$ref": "#/$defs/BleedCoordX", "description": "Vertex 3 X (cm)" },
+        "y3":    { "$ref": "#/$defs/BleedCoordY", "description": "Vertex 3 Y (cm)" },
+        "color": { "$ref": "#/$defs/Color" }
+      }
+    },
+    "CircleElement": {
+      "type": "object",
+      "description": "Filled circle defined by center and radius. Center may be near or slightly beyond page edges for partial circles.",
+      "required": ["type", "cx", "cy", "radius", "color"],
+      "additionalProperties": false,
+      "properties": {
+        "type":   { "const": "circle" },
+        "cx":     { "$ref": "#/$defs/BleedCoordX", "description": "Center X (cm)" },
+        "cy":     { "$ref": "#/$defs/BleedCoordY", "description": "Center Y (cm)" },
+        "radius": {
+          "type": "number",
+          "exclusiveMinimum": 0.0,
+          "maximum": 30.0,
+          "description": "Radius in cm"
+        },
+        "color": { "$ref": "#/$defs/Color" }
+      }
+    },
+    "LineElement": {
+      "type": "object",
+      "description": "Straight decorative line or rule.",
+      "required": ["type", "x1", "y1", "x2", "y2", "color", "width"],
+      "additionalProperties": false,
+      "properties": {
+        "type":  { "const": "line" },
+        "x1":    { "$ref": "#/$defs/BleedCoordX", "description": "Start point X (cm)" },
+        "y1":    { "$ref": "#/$defs/BleedCoordY", "description": "Start point Y (cm)" },
+        "x2":    { "$ref": "#/$defs/BleedCoordX", "description": "End point X (cm)" },
+        "y2":    { "$ref": "#/$defs/BleedCoordY", "description": "End point Y (cm)" },
+        "color": { "$ref": "#/$defs/Color" },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0.0,
+          "description": "Stroke width in pt (e.g. 0.4 for hairline, 2.0 for bold)"
+        }
+      }
+    },
+    "PatternElement": {
+      "type": "object",
+      "description": "Repeating geometric tiling rendered via foreach loops. Use instead of enumerating every instance individually.",
+      "required": ["type", "pattern_type", "cols", "rows", "x_start", "y_start", "x_step", "y_step", "colors"],
+      "additionalProperties": false,
+      "properties": {
+        "type":         { "const": "pattern" },
+        "pattern_type": { "enum": ["circle_grid", "rect_grid"] },
+        "cols":  { "type": "integer", "minimum": 1, "maximum": 30 },
+        "rows":  { "type": "integer", "minimum": 1, "maximum": 30 },
+        "x_start": { "$ref": "#/$defs/CoordX", "description": "X of first element: circle center or rect top-left (cm)" },
+        "y_start": { "$ref": "#/$defs/CoordY", "description": "Y of first element: circle center or rect top-left (cm)" },
+        "x_step":  { "type": "number", "exclusiveMinimum": 0, "description": "Horizontal distance between element origins (cm). Set less than 2×radius for overlapping circles." },
+        "y_step":  { "type": "number", "exclusiveMinimum": 0, "description": "Vertical distance between element origins (cm). Set less than 2×radius for overlapping circles." },
+        "colors": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/Color" },
+          "description": "1–4 colors. With 2 colors the default is checkerboard alternation."
+        },
+        "color_rule": {
+          "type": "string",
+          "enum": ["checker", "row", "col"],
+          "default": "checker",
+          "description": "How colors cycle across cells: checker=mod(col+row,N), row=mod(row,N), col=mod(col,N)."
+        },
+        "stagger": {
+          "type": "boolean",
+          "default": false,
+          "description": "Offset odd rows by x_step/2 rightward (fish-scale / hexagonal packing)."
+        },
+        "radius": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Circle radius in cm — required for circle_grid."
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Rectangle width in cm — required for rect_grid."
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Rectangle height in cm — required for rect_grid."
+        },
+        "rotation": {
+          "type": "number",
+          "default": 0,
+          "description": "Rotation of each rect around its center (degrees). 45 = diamond grid."
+        }
+      }
+    }
+  }
+}

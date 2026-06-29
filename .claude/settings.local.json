@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cd \"c:\\\\Users\\\\itall\\\\Downloads\\\\versatus-template-book-v0.2.3\\\\versatus-template-book-v0.2.3\"; Get-ChildItem capas_teste | Select-Object Name, @{N='KB';E={[math]::Round\\($_.Length/1KB,1\\)}})"
+    ]
+  }
+}

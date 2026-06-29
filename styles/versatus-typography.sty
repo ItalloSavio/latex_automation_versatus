@@ -1,0 +1,57 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{styles/versatus-typography}[2026/05/20 Versatus HPC typography]
+
+\RequirePackage{fontspec}
+\RequirePackage{mathtools}
+\RequirePackage{amsthm}
+\RequirePackage{unicode-math}
+\RequirePackage[brazilian]{babel}
+\RequirePackage{microtype}
+\RequirePackage{setspace}
+
+% Brand preference: Source Sans Pro / Source Sans 3.
+% Font files are intentionally not bundled. The template uses installed fonts with robust fallbacks.
+\IfFontExistsTF{Source Sans Pro}{%
+  \setmainfont{Source Sans Pro}
+  \setsansfont{Source Sans Pro}
+}{%
+  \IfFontExistsTF{Source Sans 3}{%
+    \setmainfont{Source Sans 3}
+    \setsansfont{Source Sans 3}
+  }{%
+    \IfFontExistsTF{Noto Sans}{%
+      \setmainfont{Noto Sans}
+      \setsansfont{Noto Sans}
+    }{%
+      \IfFontExistsTF{TeX Gyre Heros}{%
+        \setmainfont{TeX Gyre Heros}
+        \setsansfont{TeX Gyre Heros}
+      }{%
+        \setmainfont{Latin Modern Sans}
+        \setsansfont{Latin Modern Sans}
+      }%
+    }%
+  }%
+}
+
+\IfFontExistsTF{Noto Sans Mono}{%
+  \setmonofont{Noto Sans Mono}
+}{%
+  \IfFontExistsTF{DejaVu Sans Mono}{%
+    \setmonofont{DejaVu Sans Mono}
+  }{%
+    \setmonofont{Latin Modern Mono}
+  }%
+}
+
+\IfFontExistsTF{Latin Modern Math}{%
+  \setmathfont{Latin Modern Math}
+}{%
+  \setmathfont{latinmodern-math.otf}
+}
+
+\renewcommand{\familydefault}{\sfdefault}
+\onehalfspacing
+\defaultfontfeatures{Ligatures=TeX}
+
+\newcommand{\VSAllCaps}[1]{{\addfontfeatures{LetterSpace=8}\MakeUppercase{#1}}}

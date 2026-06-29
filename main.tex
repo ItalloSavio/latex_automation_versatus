@@ -1,0 +1,41 @@
+\documentclass[11pt,oneside,openany]{book}
+
+% ============================================================
+% Versatus HPC Book Template v0.2.3
+% Engine: LuaLaTeX
+% ============================================================
+
+\input{config/metadata}
+\usepackage{styles/versatus-colors}
+\usepackage{styles/versatus-variant}
+\usepackage{styles/versatus-typography}
+\usepackage{styles/versatus-layout}
+\usepackage{styles/versatus-environments}
+\usepackage{styles/versatus-covers}
+
+\hypersetup{
+  pdftitle={\BookTitle},
+  pdfauthor={\BookAuthor},
+  pdfsubject={\BookSubtitle},
+  pdfkeywords={Versatus HPC, technical book, template, LaTeX}
+}
+
+\begin{document}
+
+\input{frontmatter/cover}
+
+\frontmatter
+\input{frontmatter/toc}
+
+\mainmatter
+\input{chapters/01_capitulo_modelo}
+\input{chapters/02_capitulo_modelo}
+\input{chapters/03_capitulo_modelo}
+\input{chapters/04_capitulo_modelo}
+\input{chapters/05_capitulo_modelo}
+
+\backmatter
+\input{backmatter/glossary}
+\input{backmatter/index}
+
+\end{document}

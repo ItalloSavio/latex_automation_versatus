@@ -1,20 +1,73 @@
 \newcommand{\RenderDynamicCover}{%
-\definecolor{c0}{HTML}{1A1A1A}
-\definecolor{c1}{HTML}{50B2B2}
-\definecolor{c2}{HTML}{D64D4D}
-\definecolor{c3}{HTML}{FFFFFF}
-\definecolor{c4}{HTML}{4D4D4D}
+\definecolor{bg_primary}{HTML}{201F1E}
+\definecolor{bg_secondary}{HTML}{2B2928}
+\definecolor{accent_1}{HTML}{4CB6B4}
+\definecolor{accent_2}{HTML}{DD4F51}
+\definecolor{neutral}{HTML}{BCB9B9}
+\definecolor{light}{HTML}{FFFFFF}
+\definecolor{muted}{HTML}{5D5956}
 \begin{tikzpicture}[remember picture, overlay,
   shift={(current page.south west)}, x=1cm, y=1cm]
-  
-  % Background
-  \fill[c0] (-1,-1) rectangle (22, 30.7);
 
-  % Grid unit
-  \pgfmathsetmacro{\u}{2.1}
+  % Define pattern parameters
+  \pgfmathsetmacro{\Wcol}{4.2} % Average width of one column (21cm / 5 half-columns)
+  \pgfmathsetmacro{\Ah}{2.1}   % Horizontal amplitude of the wave
+  \pgfmathsetmacro{\Pv}{3.7125} % Vertical half-period (29.7cm / 8 half-periods)
+  \pgfmathsetmacro{\Rwave}{\Pv} % Radius of the arcs forming the waves
 
-  % Row 1 (y=29.7)
-  \fill[c1] (0,29.7) -- (\u,29.7) -- (0,29.7-\u) -- cycle;
-  \fill[c3] (\u,29.7-\u) -- (\u,29.7) -- (0,29.7-\u) -- cycle;
-  \fill[c2] (\u,29.7) -- (2*\u,29.7) -- (\u,29.7-\u) -- cycle;
-  \fill[c3] (2*\u,29.7-\u)
+  % Background fill
+  \fill[bg_secondary] (-1,-1) rectangle (22,30.7);
+
+  % --- Draw the light blue-grey (neutral) wavy columns ---
+  % There are 2.5 full pattern units horizontally.
+  % A full unit is (dark wavy + light wavy).
+  % So, 5 half-columns across 21cm. Each half-column is 4.2cm average width.
+  % The pattern starts with a light blue-grey column.
+  % The wave oscillates around X_col_start + Wcol.
+
+  % Loop for horizontal columns
+  \foreach \col_idx in {0,1,2} { % 0 for first, 1 for second, 2 for third (partial)
+    \pgfmathsetmacro{\Xcolstart}{\col_idx * 2 * \Wcol} % Starting X for the straight left edge of the neutral column
+    \pgfmathsetmacro{\Xwavecenter}{\Xcolstart + \Wcol} % X-coordinate around which the wave oscillates
+
+    % Construct the path for the right wavy edge of the neutral column
+    \path[name path global=wave_right_\col_idx] (\Xwavecenter, -1) -- (\Xwavecenter, 0);
+    \pgfmathsetmacro{\currenty}{0}
+    \pgfmathsetmacro{\currentx}{\Xwavecenter}
+    \pgfmathsetmacro{\direction}{1} % 1 for arc going right, -1 for arc going left
+
+    \foreach \i in {1,...,8} { % 8 half-periods for 29.7cm
+      \pgfmathsetmacro{\nexty}{\i * \Pv}
+      \ifodd\i % Arc goes right (from X_base to X_base + Ah)
+        \pgfextra{\xdef\tempcurrentx{\currentx}} % Store currentx before modification
+        \pgfextra{\xdef\tempcurrenty{\currenty}} % Store currenty before modification
+        \pgfextra{\xdef\tempnexty{\nexty}} % Store nexty before modification
+        \pgfextra{\xdef\tempdirection{\direction}} % Store direction before modification
+        \pgfextra{\xdef\tempAwave{\Ah}} % Store A_wave before modification
+        \pgfextra{\xdef\tempRwave{\Rwave}} % Store R_wave before modification
+        \pgfextra{\xdef\tempXwavecenter{\Xwavecenter}} % Store X_wave_center before modification
+        \pgfextra{\xdef\tempPv{\Pv}} % Store Pv before modification
+        \pgfextra{\xdef\tempcolidx{\col_idx}} % Store col_idx before modification
+      }
+      -- (\currentx, \currenty) arc (90:\ifnum\direction=1 180\else 0\fi:\Rwave) at (\currentx + \direction * \Ah, \currenty)
+      \pgfmathsetmacro{\currentx}{\Xwavecenter + \direction * \Ah}
+      \pgfmathsetmacro{\currenty}{\nexty}
+      \pgfmathsetmacro{\direction}{-\direction}
+    }
+    -- (\Xwavecenter, 30.7);
+
+    % Fill the neutral column
+    \fill[neutral] (\Xcolstart, -1) rectangle (\Xwavecenter, 30.7); % Fill the average rectangle
+    % Now, adjust the right edge with the wave. This is tricky with simple fill.
+    % A better approach is to draw the full path.
+    \path[neutral, fill] (\Xcolstart, -1) -- (\Xcolstart, 30.7)
+      -- (\Xwavecenter, 30.7); % Start from top-right of the average rectangle
+    \pgfmathsetmacro{\currenty}{29.7}
+    \pgfmathsetmacro{\currentx}{\Xwavecenter}
+    \pgfmathsetmacro{\direction}{-1} % Start with arc going left (from X_base to X_base - Ah)
+    \foreach \i in {8,...,1} { % Iterate downwards
+      \pgfmathsetmacro{\prev_y}{(\i-1) * \Pv}
+      \ifodd\i % Arc goes left (from X_base to X_base - Ah)
+        \pgfmathsetmacro{\targetx}{\Xwavecenter + \direction * \Ah}
+        \pgfmathsetmacro{\centerx}{\currentx - \direction * \Ah}
+        \pgfmath

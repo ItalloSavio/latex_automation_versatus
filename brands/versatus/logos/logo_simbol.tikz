@@ -1,0 +1,9 @@
+% Auto-generated from logo_simbol.svg by svg_to_tikz.py - DO NOT EDIT MANUALLY
+\newcommand{\LogoVersatusAlt}[1]{%
+    \begingroup
+    \definecolor{LogoVersatusAltC0}{HTML}{DD4F51}
+    \begin{scope}[shift={#1}]
+        \fill[LogoVersatusAltC0] (1.228,0.826) -- (1.5,0.209) -- (2.204,1.808) -- (1.667,1.808) -- (1.228,0.826) -- cycle (0.796,1.808) -- (1.067,1.192) -- (1.772,2.791) -- (1.234,2.791) -- (0.796,1.808) -- cycle;
+    \end{scope}
+    \endgroup
+}

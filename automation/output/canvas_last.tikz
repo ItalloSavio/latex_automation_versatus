@@ -1,40 +1,92 @@
 \newcommand{\RenderDynamicCover}{%
-\definecolor{c0}{HTML}{E1E1D7}
-\definecolor{c1}{HTML}{252A71}
-\definecolor{c2}{HTML}{009EDB}
-\definecolor{c3}{HTML}{D5007E}
-\definecolor{c4}{HTML}{FFFFFF}
-\definecolor{c5}{HTML}{008B47}
-\definecolor{c6}{HTML}{D9B611}
-\definecolor{c7}{HTML}{D61F26}
-\definecolor{c8}{HTML}{313131}
+\definecolor{bg_primary}{HTML}{201F1E}
+\definecolor{bg_secondary}{HTML}{2B2928}
+\definecolor{accent_1}{HTML}{4CB6B4}
+\definecolor{accent_2}{HTML}{DD4F51}
+\definecolor{neutral}{HTML}{BCB9B9}
+\definecolor{light}{HTML}{FFFFFF}
+\definecolor{muted}{HTML}{5D5956}
 \begin{tikzpicture}[remember picture, overlay,
   shift={(current page.south west)}, x=1cm, y=1cm]
-  % Background fill
-  \fill[c0] (-1,-1) rectangle (22, 30.7);
-  
-  % Top Left - Dark Blue
-  \fill[c1] (-1, 24.5) rectangle (5.25, 30.7);
-  
-  % Top Middle/Right - Bright Blue
-  \fill[c2] (5.25, 24.5) -- (15.75, 24.5) -- (21, 29.7) -- (22, 29.7) -- (22, 30.7) -- (5.25, 30.7) -- cycle;
-  
-  % Middle Left - Magenta
-  \fill[c3] (-1, 13.5) rectangle (5.25, 24.5);
-  
-  % Center Square - White Triangle
-  \fill[c4] (5.25, 13.5) -- (5.25, 24.5) -- (15.75, 24.5) -- cycle;
-  
-  % Center Square - Yellow Triangle
-  \fill[c6] (5.25, 13.5) -- (15.75, 13.5) -- (15.75, 24.5) -- cycle;
-  
-  % Middle Right - Green
-  \fill[c5] (15.75, 13.5) -- (22, 13.5) -- (22, 30.7) -- (21, 29.7) -- (15.75, 24.5) -- cycle;
-  
-  % Bottom Middle - Red Trapezoid
-  \fill[c7] (0, 8.5) -- (15.75, 8.5) -- (15.75, 13.5) -- (5.25, 13.5) -- cycle;
-  
-  % Bottom Right - Dark Grey
-  \fill[c8] (15.75, 8.5) rectangle (22, 13.5);
+
+  % Dimensions derived from image proportions relative to A4 (21cm x 29.7cm)
+  % W_step is half the horizontal period of the wave, also the width of an oval.
+  % H_step is the vertical period of the wave, also the height of an oval.
+  \pgfmathsetmacro{\W_step}{4.2} % Approx 21cm / 5 segments
+  \pgfmathsetmacro{\H_step}{6.6} % Approx 29.7cm / 4.5 segments
+
+  % Calculate arc parameters for the ovals and waves
+  % An oval is formed by two circular arcs.
+  % Let R be the radius of these arcs.
+  % Let W_oval = W_step and H_oval = H_step.
+  % The center of the circle for the right arc is at (cx + xc_offset, cy).
+  % The center of the circle for the left arc is at (cx - xc_offset, cy).
+  % xc_offset = (W_oval^2 - H_oval^2) / (4 * W_oval)
+  % R = sqrt(xc_offset^2 + (H_oval/2)^2)
+  \pgfmathsetmacro{\xc_offset}{(pow(\W_step,2) - pow(\H_step,2)) / (4 * \W_step)}
+  \pgfmathsetmacro{\R}{sqrt(pow(\xc_offset,2) + pow(\H_step/2,2))}
+
+  % Angles for the arcs (relative to arc center)
+  % For right arc (center at (cx + xc_offset, cy)):
+  %   Top point (cx, cy + H_step/2) is at angle beta = atan2(H_step/2, -xc_offset)
+  %   Bottom point (cx, cy - H_step/2) is at angle -beta
+  \pgfmathsetmacro{\beta_angle}{atan2(\H_step/2, -\xc_offset)}
+
+  % For left arc (center at (cx - xc_offset, cy)):
+  %   Top point (cx, cy + H_step/2) is at angle alpha = atan2(H_step/2, xc_offset)
+  %   Bottom point (cx, cy - H_step/2) is at angle -alpha
+  \pgfmathsetmacro{\alpha_angle}{atan2(\H_step/2, \xc_offset)}
+
+  % 1. Fill the entire page with the primary background color
+  \fill[bg_primary] (-1,-1) rectangle (22,30.7);
+
+  % 2. Draw the neutral (light blue-grey) wavy columns
+  % Each column has a straight left edge and a wavy right edge.
+  % The wavy edge is composed of alternating right-bulging and left-bulging half-ovals.
+  % Loop for columns (x-direction)
+  \foreach \col_idx in {-1,...,2} { % Covers from x=-W_step*2 to x=2*W_step*2 + W_step*2 = 25.2
+    \pgfmathsetmacro{\x_col_start}{\col_idx * 2 * \W_step} % Start x-coordinate for the straight left edge of the column
+    \path[fill=neutral] (\x_col_start -1, -1) -- (\x_col_start -1, 30.7) % Left bleed edge
+    -- (\x_col_start, 30.7) % Top-left corner of the wave
+    % Loop for wave segments (y-direction)
+    \foreach \row_idx in {0,...,6} { % Covers from y=30.7 down to y=-1 (approx 30.7 - 6*6.6 = -8.9)
+      \pgfmathsetmacro{\y_center_right}{30.7 - \row_idx * \H_step - \H_step/2} % Midpoint y for right-bulging arc
+      \pgfmathsetmacro{\y_center_left}{30.7 - (\row_idx+1) * \H_step - \H_step/2} % Midpoint y for left-bulging arc
+      % Right-bulging arc: from (\x_col_start, y_top) to (\x_col_start, y_bottom) passing through (\x_col_start + W_step, y_mid)
+      arc[center={(\x_col_start + \xc_offset, \y_center_right)}, radius=\R, start angle=\beta_angle, end angle=-\beta_angle]
+      % Left-bulging arc: from (\x_col_start, y_bottom) to (\x_col_start, y_next_bottom) passing through (\x_col_start - W_step, y_next_mid)
+      arc[center={(\x_col_start - \xc_offset, \y_center_left)}, radius=\R, start angle=-\alpha_angle, end angle=\alpha_angle]
+    }
+    -- (\x_col_start, -1) % Bottom-left corner of the wave
+    -- cycle; % Close the path back to the starting point
+  }
+
+  % 3. Draw the accent_2 (orange) ovals
+  % Ovals are centered on a staggered grid.
+  % Grid 1: (col*2*W_step + W_step, row*H_step + H_step/2)
+  % Grid 2: (col*2*W_step + 2*W_step, row*H_step + H_step)
+  \foreach \col_idx in {-1,...,3} { % Covers from x=-W_step to x=21+W_step (approx -4.2 to 25.2)
+    \foreach \row_idx in {-1,...,5} { % Covers from y=-H_step/2 to y=29.7+H_step (approx -3.3 to 36.3)
+      % Center for odd-staggered ovals
+      \pgfmathsetmacro{\cx_odd}{\col_idx * 2 * \W_step + \W_step}
+      \pgfmathsetmacro{\cy_odd}{\row_idx * \H_step + \H_step/2}
+      % Center for even-staggered ovals
+      \pgfmathsetmacro{\cx_even}{\col_idx * 2 * \W_step + 2 * \W_step}
+      \pgfmathsetmacro{\cy_even}{\row_idx * \H_step + \H_step}
+
+      % Draw oval at (\cx_odd, \cy_odd)
+      \fill[accent_2] (\cx_odd, \cy_odd - \H_step/2) % Start at bottom point of oval
+        arc[center={(\cx_odd + \xc_offset, \cy_odd)}, radius=\R, start angle=-\beta_angle, end angle=\beta_angle] % Right arc to top point
+        arc[center={(\cx_odd - \xc_offset, \cy_odd)}, radius=\R, start angle=\alpha_angle, end angle=360-\alpha_angle] % Left arc from top point back to bottom point
+        -- cycle;
+
+      % Draw oval at (\cx_even, \cy_even)
+      \fill[accent_2] (\cx_even, \cy_even - \H_step/2) % Start at bottom point of oval
+        arc[center={(\cx_even + \xc_offset, \cy_even)}, radius=\R, start angle=-\beta_angle, end angle=\beta_angle] % Right arc to top point
+        arc[center={(\cx_even - \xc_offset, \cy_even)}, radius=\R, start angle=\alpha_angle, end angle=360-\alpha_angle] % Left arc from top point back to bottom point
+        -- cycle;
+    }
+  }
+
 \end{tikzpicture}%
 }

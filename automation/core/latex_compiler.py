@@ -307,9 +307,10 @@ def compile_with_healing(
         If compilation fails after all retries are exhausted.
     """
     project_root    = Path(project_root).resolve()
+    _canonical_tex  = project_root / "styles" / "versatus-dynamic-cover.tex"
 
     if output_tex_path is None:
-        output_tex_path = project_root / "styles" / "versatus-dynamic-cover.tex"
+        output_tex_path = _canonical_tex
     else:
         output_tex_path = Path(output_tex_path).resolve()
 
@@ -323,6 +324,16 @@ def compile_with_healing(
     if tikz_ready:
         _banner(1, 1)
         print(f"  [1/2] Macro TikZ: {output_tex_path.relative_to(project_root)}")
+        # main-dynamic.tex hardcodes \input{styles/versatus-dynamic-cover}, so
+        # whatever was actually written to output_tex_path must land there too
+        # before latexmk runs — otherwise a custom --tex path is silently
+        # ignored and a stale cover gets compiled instead.
+        if output_tex_path.resolve() != _canonical_tex.resolve():
+            _canonical_tex.parent.mkdir(parents=True, exist_ok=True)
+            _canonical_tex.write_text(
+                output_tex_path.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+            print(f"        -> copiado para {_canonical_tex.relative_to(project_root)} (caminho compilado de fato)")
         print(f"  [2/2] Rodando latexmk -lualatex -f {tex_file}…")
         try:
             exit_code, log_path = _run_latexmk(project_root, tex_file)

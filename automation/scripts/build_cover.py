@@ -58,10 +58,10 @@ def _load_module(name: str, file_path: Path):
 
 # ─── Pipeline steps ───────────────────────────────────────────────────────────
 
-def _step_vision(image_path: Path, tex_path: Path) -> None:
+def _step_vision(image_path: Path, tex_path: Path, brand: "str | None" = None) -> None:
     """Phase 1 — Send image to Gemini Vision, extract TikZ macro directly."""
     extractor = _load_module("vision_extractor", _HERE / "vision_extractor.py")
-    extractor.extract_tikz(image_path=image_path, output_tex=tex_path)
+    extractor.extract_tikz(image_path=image_path, output_tex=tex_path, brand=brand)
 
 
 
@@ -104,6 +104,14 @@ def _parse_args() -> argparse.Namespace:
         action = "store_true",
         help   = "Pula o Gemini Vision e reusa o styles/versatus-dynamic-cover.tex existente",
     )
+    parser.add_argument(
+        "--brand",
+        dest    = "brand",
+        default = None,
+        metavar = "NOME",
+        help    = "Marca a aplicar (ex: versatus, kosen). Le brands/<NOME>/brand.json "
+                   "e forca a paleta de cores exata na capa gerada.",
+    )
     return parser.parse_args()
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -141,8 +149,10 @@ def main() -> int:
         print(f"[Phase 1] Gemini Vision → TikZ")
         print(f"          Imagem : {image_path}")
         print(f"          Macro  : {tex_path}")
+        if args.brand:
+            print(f"          Brand  : {args.brand}")
         try:
-            _step_vision(image_path, tex_path)
+            _step_vision(image_path, tex_path, brand=args.brand)
         except Exception as exc:
             print(f"\n[Phase 1 FALHOU] {type(exc).__name__}: {exc}", file=sys.stderr)
             return 4

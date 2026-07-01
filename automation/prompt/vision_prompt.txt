@@ -44,8 +44,8 @@ Quick reference — Y positions (bottom to top):
  TIKZ RULES
 ═══════════════════════════════════════════════════════════════
 1. COLORS — define every color before the tikzpicture:
-   \definecolor{c0}{HTML}{E63946}
-   Then use by name: \fill[c0] ...
+{{COLOR_INSTRUCTIONS}}
+   Then use by name: \fill[<color-name>] ...
 
 2. FILLS — use \fill for solid shapes:
    \fill[c0] (0,20) rectangle (21,29.7);        % rectangle

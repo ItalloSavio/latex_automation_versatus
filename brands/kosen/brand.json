@@ -19,5 +19,13 @@
     "dark":  "logos/svg/logo_dark.svg",
     "light": "logos/svg/logo_light.svg",
     "alt":   "logos/svg/logo_simbol.svg"
+  },
+  "logo_height_cm": 1.5,
+  "logo_position": [1.5, 27.0],
+  "text_panel": {
+    "color":   "bg_primary",
+    "opacity": 0.85,
+    "x1": -1,  "y1": 4.5,
+    "x2": 22,  "y2": 25.5
   }
 }

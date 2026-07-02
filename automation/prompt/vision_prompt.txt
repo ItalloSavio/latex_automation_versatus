@@ -10,8 +10,10 @@ Reproduce ONLY the visual/geometric background layer.
 ═══════════════════════════════════════════════════════════════
  OUTPUT FORMAT  (mandatory — do not deviate)
 ═══════════════════════════════════════════════════════════════
-Output exactly this structure and nothing else.
-No markdown fences. No explanation. No comments outside the code.
+Output exactly this two-block structure and nothing else.
+No markdown fences. No explanation. No prose.
+
+Block 1 — geometric background:
 
 \newcommand{\RenderDynamicCover}{%
 \definecolor{c0}{HTML}{RRGGBB}
@@ -22,6 +24,19 @@ No markdown fences. No explanation. No comments outside the code.
   % ... your TikZ draw commands here ...
 \end{tikzpicture}%
 }
+
+Block 2 — text layout analysis (output IMMEDIATELY after Block 1, no blank lines between):
+
+% === COVER_LAYOUT ===
+\renewcommand{\VSCoverTopMargin}{5.3cm}
+\renewcommand{\VSCoverLeftIndent}{2.05cm}
+\renewcommand{\VSCoverTextWidth}{0.80}
+\renewcommand{\VSCoverTitlePt}{28}
+\renewcommand{\VSCoverTitleLeadPt}{33}
+\renewcommand{\VSCoverSubtitlePt}{15}
+\renewcommand{\VSCoverSubtitleLeadPt}{20}
+\renewcommand{\VSCoverTitleAlign}{\raggedright}
+% === END_COVER_LAYOUT ===
 
 ═══════════════════════════════════════════════════════════════
  COORDINATE SYSTEM
@@ -91,3 +106,38 @@ Quick reference — Y positions (bottom to top):
   A shape covering the top third occupies y=19.8 to y=29.7.
 - For gradients: use the dominant solid color at the midpoint.
 - Ignore ALL text, logos, icons — geometry only.
+
+═══════════════════════════════════════════════════════════════
+ COVER_LAYOUT ESTIMATION RULES
+═══════════════════════════════════════════════════════════════
+After completing Block 1, output Block 2 using these guidelines:
+
+VSCoverTopMargin — vertical gap from page TOP to where the main title/text
+  block BEGINS, in cm. A4 height = 29.7 cm, top = 29.7.
+  If text starts 18% from top: 0.18 × 29.7 ≈ 5.3 cm.
+  Range: 3.0 cm (text near top) to 12.0 cm (text in lower half).
+  Default: 5.3cm. Use default if no text zone is visible.
+
+VSCoverLeftIndent — distance from the LEFT EDGE of the usable text area to
+  the text block, in cm. Use 0.0cm if text starts at the left margin.
+  For centered text: estimate half of (21 - text_block_width_cm). Range: 0.0–6.0 cm.
+  Default: 2.05cm.
+
+VSCoverTextWidth — fraction of the page text area the text block occupies
+  (decimal 0.50–0.95). If text spans ~80% of the column width: 0.80.
+  Default: 0.80.
+
+VSCoverTitlePt / VSCoverTitleLeadPt — estimated title font size in pt and its
+  leading. Title is usually the LARGEST text on the cover. If it looks very
+  large (>30% of page width per character row): 32–36pt. Medium: 24–28pt.
+  Leading is usually 1.15–1.25× the font size (e.g. TitlePt=28 → LeadPt=34).
+  Defaults: 28 / 33.
+
+VSCoverSubtitlePt / VSCoverSubtitleLeadPt — subtitle/tagline font size.
+  Usually 50–65% of title size. Defaults: 15 / 20.
+
+VSCoverTitleAlign — text alignment WITHIN the text block:
+  \raggedright  (left-aligned, most common for technical books)
+  \centering    (centered, common for artistic or branded covers)
+  \raggedleft   (right-aligned, uncommon)
+  Default: \raggedright.

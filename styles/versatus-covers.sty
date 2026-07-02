@@ -119,25 +119,35 @@
   \ifdefstring{\VSCoverOption}{B}{\VSBookCoverB}{\VSBookCoverA}%
 }
 
-% ── Dynamic cover: VLM-generated geometric background + template text ─────────
-% The geometric layer (\RenderDynamicCover) is produced by the automation
-% pipeline. The text layout is identical to CoverA so the typographic
-% hierarchy is preserved regardless of what the background looks like.
+% ── Dynamic cover layout parameters ──────────────────────────────────────────
+% Defaults match CoverA. The automation pipeline overrides these via
+% \renewcommand in styles/versatus-dynamic-cover.tex (loaded in the preamble)
+% when it extracts layout data from the reference image.
+\providecommand{\VSCoverTopMargin}{5.3cm}
+\providecommand{\VSCoverLeftIndent}{2.05cm}
+\providecommand{\VSCoverTextWidth}{0.80}
+\providecommand{\VSCoverTitlePt}{28}
+\providecommand{\VSCoverTitleLeadPt}{33}
+\providecommand{\VSCoverSubtitlePt}{15}
+\providecommand{\VSCoverSubtitleLeadPt}{20}
+\providecommand{\VSCoverTitleAlign}{\raggedright}
+
+% ── Dynamic cover: VLM-generated geometric background + extracted text layout ─
 \newcommand{\VSBookCoverDynamic}{%
 \begin{titlepage}
 \thispagestyle{empty}
 % Layer 1 — VLM geometry (TikZ overlay, drawn over the full page)
 \RenderDynamicCover
 % Layer 2 — text (normal LaTeX flow on top of the TikZ overlay)
-\vspace*{5.3cm}
+\vspace*{\VSCoverTopMargin}
 \begin{flushleft}
-\hspace*{2.05cm}\begin{minipage}{0.80\textwidth}
-  {\raggedright\hyphenpenalty=10000\exhyphenpenalty=10000%
-   \fontsize{28}{33}\selectfont\bfseries%
+\hspace*{\VSCoverLeftIndent}\begin{minipage}{\VSCoverTextWidth\textwidth}
+  {\VSCoverTitleAlign\hyphenpenalty=10000\exhyphenpenalty=10000%
+   \fontsize{\VSCoverTitlePt}{\VSCoverTitleLeadPt}\selectfont\bfseries%
    \ifVSCoverColor\color{white}\else\color{VSBlack}\fi%
    \BookTitle\par}
   \vspace{0.85cm}
-  {\fontsize{15}{20}\selectfont%
+  {\fontsize{\VSCoverSubtitlePt}{\VSCoverSubtitleLeadPt}\selectfont%
    \ifVSCoverColor\color{white!86}\else\color{VSMutedText}\fi%
    \BookSubtitle\par}
   \vspace{1.25cm}

@@ -46,7 +46,7 @@ def _pascal(name: str) -> str:
     return "".join(w.capitalize() for w in name.replace("-", "_").split("_"))
 
 
-def convert_brand(brand_name: str, height_cm: float, svg2tikz) -> int:
+def convert_brand(brand_name: str, height_cm: "float | None", svg2tikz) -> int:
     brand_dir  = _BRANDS_DIR / brand_name
     brand_json = brand_dir / "brand.json"
 
@@ -55,6 +55,16 @@ def convert_brand(brand_name: str, height_cm: float, svg2tikz) -> int:
         return 0
 
     data = json.loads(brand_json.read_text(encoding="utf-8"))
+
+    # Height priority: CLI --height > brand.json logo_height_cm > 3.0 default
+    brand_height = data.get("logo_height_cm")
+    if height_cm is not None:
+        effective_height = height_cm
+    elif brand_height is not None:
+        effective_height = float(brand_height)
+    else:
+        effective_height = 3.0
+
     logo_svg_map = data.get("logo_svg", {})
     logo_out_map = data.get("logos", {})
 
@@ -79,9 +89,9 @@ def convert_brand(brand_name: str, height_cm: float, svg2tikz) -> int:
             print(f"  [SKIP] {key}: {svg_path.relative_to(brand_dir)} nao encontrado")
             continue
 
-        print(f"  Convertendo {svg_path.name} -> {out_path.name}  (\\{macro_name})...")
+        print(f"  Convertendo {svg_path.name} -> {out_path.name}  (\\{macro_name}, h={effective_height}cm)...")
         try:
-            macro_code = svg2tikz.convert(svg_path, macro_name, height_cm)
+            macro_code = svg2tikz.convert(svg_path, macro_name, effective_height)
         except Exception as exc:
             print(f"    [ERRO] {exc}")
             continue
@@ -102,7 +112,7 @@ def main() -> int:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--brand", metavar="NOME", help="Nome da brand (ex: versatus)")
     group.add_argument("--all",   action="store_true", help="Converte todas as brands")
-    parser.add_argument("--height", type=float, default=3.0, help="Altura alvo em cm (default: 3.0)")
+    parser.add_argument("--height", type=float, default=None, help="Altura alvo em cm (default: brand.json logo_height_cm ou 3.0)")
     args = parser.parse_args()
 
     if not _BRANDS_DIR.exists():

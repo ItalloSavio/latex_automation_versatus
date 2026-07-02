@@ -204,12 +204,21 @@ def _build_brand_preamble(
         )
 
     # Color aliases: redefine VS* names to brand hex values
+    bg_primary_hex = brand_colors.get("bg_primary", "")
     color_lines: "list[str]" = []
     for vs_name, role in _BRAND_ROLE_TO_VS.items():
         hexval = brand_colors.get(role, "")
-        if hexval:
-            clean = str(hexval).lstrip("#").upper()
-            color_lines.append(f"\\definecolor{{{vs_name}}}{{HTML}}{{{clean}}}")
+        if not hexval:
+            continue
+        # VSRed is used as the separator rule in the text overlay. If accent_2
+        # has low contrast against bg_primary the separator becomes invisible,
+        # so fall back to the brand's light color.
+        if vs_name == "VSRed" and bg_primary_hex:
+            cr = _contrast_ratio(hexval, bg_primary_hex)
+            if cr < 2.5:
+                hexval = brand_colors.get("light", "#FFFFFF")
+        clean = str(hexval).lstrip("#").upper()
+        color_lines.append(f"\\definecolor{{{vs_name}}}{{HTML}}{{{clean}}}")
 
     parts = [
         f"% === Brand preamble: {company} ===",
@@ -243,6 +252,14 @@ def _luminance(hex_color: str) -> float:
         + 0.7152 * _srgb_linearize(g)
         + 0.0722 * _srgb_linearize(b)
     )
+
+
+def _contrast_ratio(hex1: str, hex2: str) -> float:
+    """WCAG 2.1 contrast ratio between two hex colors (1.0–21.0)."""
+    l1 = _luminance(hex1)
+    l2 = _luminance(hex2)
+    lighter, darker = max(l1, l2), min(l1, l2)
+    return (lighter + 0.05) / (darker + 0.05)
 
 
 def _pascal(s: str) -> str:
@@ -469,6 +486,78 @@ def _validate_tikz(block: str) -> list[str]:
     return warnings
 
 
+# ─── Cover layout extraction ─────────────────────────────────────────────────
+#
+# The Vision prompt asks the VLM to emit a COVER_LAYOUT block after the TikZ
+# geometry. We extract it here, validate each \renewcommand line against a
+# strict allowlist, and pass it through to versatus-dynamic-cover.tex where it
+# overrides the \providecommand defaults in versatus-covers.sty.
+
+_LAYOUT_START = "% === COVER_LAYOUT ==="
+_LAYOUT_END   = "% === END_COVER_LAYOUT ==="
+
+# Strict allowlist: (matched_command_name, arg_value_regex)
+# Keys are the ACTUAL LaTeX command strings (single backslash), matching what
+# re.group(1) will capture. re.escape() is used when building the line regex.
+_LAYOUT_ALLOWLIST: "list[tuple[str, str]]" = [
+    (r"\VSCoverTopMargin",       r"[0-9]+\.?[0-9]*cm"),
+    (r"\VSCoverLeftIndent",      r"[0-9]+\.?[0-9]*cm"),
+    (r"\VSCoverTextWidth",       r"0?\.[0-9]+"),
+    (r"\VSCoverTitlePt",         r"[0-9]+\.?[0-9]*"),
+    (r"\VSCoverTitleLeadPt",     r"[0-9]+\.?[0-9]*"),
+    (r"\VSCoverSubtitlePt",      r"[0-9]+\.?[0-9]*"),
+    (r"\VSCoverSubtitleLeadPt",  r"[0-9]+\.?[0-9]*"),
+    (r"\VSCoverTitleAlign",      r"\\(?:raggedright|centering|raggedleft)"),
+]
+_LAYOUT_LINE_RE = re.compile(
+    r"^\\renewcommand\{(" + "|".join(re.escape(n) for n, _ in _LAYOUT_ALLOWLIST) + r")\}"
+    r"\{([^}]+)\}$"
+)
+_LAYOUT_ARG_RE  = {name: re.compile(r"^" + pat + r"$")
+                   for name, pat in _LAYOUT_ALLOWLIST}
+
+
+def _extract_layout_block(text: str) -> "tuple[str, bool]":
+    """
+    Extract and validate the COVER_LAYOUT block from the VLM response.
+
+    Returns (validated_latex_snippet, found) where:
+    - validated_latex_snippet is a string of safe \\renewcommand lines (may be
+      shorter than what the VLM emitted if some lines failed validation)
+    - found is True iff the delimiters were present in text
+    """
+    start = text.find(_LAYOUT_START)
+    end   = text.find(_LAYOUT_END)
+    if start == -1 or end == -1 or end <= start:
+        return "", False
+
+    raw_lines = text[start + len(_LAYOUT_START): end].splitlines()
+    safe_lines: "list[str]" = []
+
+    for raw in raw_lines:
+        line = raw.strip()
+        if not line or line.startswith("%"):
+            continue
+        m = _LAYOUT_LINE_RE.match(line)
+        if not m:
+            continue  # unknown command or format — skip silently
+        cmd_name = m.group(1)
+        arg_val  = m.group(2)
+        pat      = _LAYOUT_ARG_RE.get(cmd_name)
+        if pat and pat.match(arg_val):
+            safe_lines.append(line)
+
+    if not safe_lines:
+        return "", True  # found delimiters but nothing valid
+
+    block = (
+        "% === Cover layout extracted from reference image ===\n"
+        + "\n".join(safe_lines)
+        + "\n% === end cover layout ===\n"
+    )
+    return block, True
+
+
 # ─── Public API ───────────────────────────────────────────────────────────────
 
 def extract_tikz(
@@ -619,7 +708,21 @@ def extract_tikz(
             f"Primeiros 400 chars: {last_raw[:400]!r}"
         )
 
-    # ── 3. Brand color enforcement (deterministic, no LLM involved) ──────────
+    # ── 3. Cover layout extraction ────────────────────────────────────────────
+    layout_block = ""
+    layout_found, layout_valid = False, False
+    if last_raw:
+        layout_block, layout_found = _extract_layout_block(last_raw)
+        layout_valid = bool(layout_block)
+        if layout_found and layout_valid:
+            n_cmds = layout_block.count("\\renewcommand")
+            print(f"    [layout] {n_cmds} parâmetro(s) de layout extraídos da imagem.")
+        elif layout_found:
+            print("    [!] [layout] bloco COVER_LAYOUT presente mas sem linhas válidas — usando defaults.")
+        else:
+            print("    [!] [layout] bloco COVER_LAYOUT ausente na resposta — usando defaults do .sty.")
+
+    # ── 4. Brand color enforcement (deterministic, no LLM involved) ──────────
     if brand_colors:
         block, off_palette = _enforce_brand_colors(block, brand_colors)
         if off_palette:
@@ -630,7 +733,27 @@ def extract_tikz(
         else:
             print(f"    [OK] Todas as cores forcadas para a paleta de '{brand}'.")
 
-    # ── 3b. Logo intelligence — pick variant by bg_primary luminance ──────────
+    # ── 3b. Text panel — inject a solid (semi-transparent) rect before logo ─────
+    # Drawn after the geometry and before the logo so it sits between them.
+    # Activated only when brand.json defines a "text_panel" key.
+    if brand and brand_data:
+        tp = brand_data.get("text_panel")
+        if tp:
+            color   = tp.get("color", "bg_primary")
+            opacity = tp.get("opacity", 1.0)
+            x1, y1  = tp.get("x1", -1), tp.get("y1", 0)
+            x2, y2  = tp.get("x2", 22), tp.get("y2", 20)
+            op_str  = f", fill opacity={opacity}" if opacity < 1.0 else ""
+            panel_line = f"  \\fill[{color}{op_str}] ({x1}, {y1}) rectangle ({x2}, {y2});"
+            end_marker = "\\end{tikzpicture}%"
+            if end_marker in block:
+                block = block.replace(end_marker, panel_line + "\n" + end_marker, 1)
+                print(
+                    f"    [panel] painel de texto injetado: {color} "
+                    f"[({x1},{y1})→({x2},{y2})], opacity={opacity}"
+                )
+
+    # ── 3c. Logo intelligence — pick variant by bg_primary luminance ──────────
     logo_inline     = ""
     logo_macro_name = ""
     if brand and brand_colors:
@@ -660,7 +783,7 @@ def extract_tikz(
         else:
             print(f"    [!] [logo] {logo_inline.strip()}")
 
-    # ── 3c. Brand preamble — font + VS color aliases ──────────────────────────
+    # ── 3d. Brand preamble — font + VS color aliases ──────────────────────────
     brand_preamble = ""
     if brand and brand_colors:
         brand_preamble = _build_brand_preamble(brand, brand_data, brand_colors)
@@ -678,7 +801,8 @@ def extract_tikz(
     header     = f"% Auto-generated by vision_extractor.py{brand_note} - DO NOT EDIT MANUALLY\n"
     tex_path.parent.mkdir(parents=True, exist_ok=True)
     tex_path.write_text(
-        header + brand_preamble + logo_inline + block + "\n", encoding="utf-8"
+        header + brand_preamble + layout_block + logo_inline + block + "\n",
+        encoding="utf-8",
     )
     print(f"    Macro TikZ escrita → {tex_path}")
 

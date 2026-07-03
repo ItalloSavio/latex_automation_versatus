@@ -171,9 +171,10 @@ _BRAND_ROLE_TO_VS: "dict[str, str]" = {
 
 
 def _build_brand_preamble(
-    brand_name:   str,
-    brand_data:   dict,
-    brand_colors: "dict[str, str]",
+    brand_name:      str,
+    brand_data:      dict,
+    brand_colors:    "dict[str, str]",
+    bg_hex_override: "str | None" = None,
 ) -> str:
     """
     Returns a LaTeX snippet to prepend to versatus-dynamic-cover.tex that:
@@ -220,10 +221,37 @@ def _build_brand_preamble(
         clean = str(hexval).lstrip("#").upper()
         color_lines.append(f"\\definecolor{{{vs_name}}}{{HTML}}{{{clean}}}")
 
+    # Dynamic foreground colors — use the ACTUAL generated background when available
+    # (the VLM may use `light` or another role rather than `bg_primary`).
+    # bg_hex_override is detected by scanning the first fill in the TikZ block.
+    # Threshold 0.35 mirrors the logo variant selection (L < 0.35 = dark bg).
+    effective_bg_hex = (bg_hex_override or bg_primary_hex or "").strip("#")
+    bg_lum      = _luminance(effective_bg_hex) if effective_bg_hex else 0.1
+    light_hex   = str(brand_colors.get("light", "#FFFFFF")).lstrip("#").upper()
+    muted_hex   = str(brand_colors.get("muted", "#757576")).lstrip("#").upper()
+
+    if bg_lum < 0.35:   # dark / vivid background → light text
+        cover_fg       = light_hex
+        cover_sub_fg   = _blend_hex(light_hex, "000000", 0.14)  # 86% light
+        cover_muted_fg = _blend_hex(light_hex, "000000", 0.28)  # 72% light
+        cover_faint_fg = _blend_hex(light_hex, "000000", 0.45)  # 55% light
+    else:               # light background → dark text
+        cover_fg       = "1A1A1A"
+        cover_sub_fg   = muted_hex
+        cover_muted_fg = muted_hex
+        cover_faint_fg = muted_hex
+
+    fg_lines = [
+        f"\\definecolor{{VSCoverFg}}{{HTML}}{{{cover_fg}}}",
+        f"\\definecolor{{VSCoverSubFg}}{{HTML}}{{{cover_sub_fg}}}",
+        f"\\definecolor{{VSCoverMutedFg}}{{HTML}}{{{cover_muted_fg}}}",
+        f"\\definecolor{{VSCoverFaintFg}}{{HTML}}{{{cover_faint_fg}}}",
+    ]
+
     parts = [
         f"% === Brand preamble: {company} ===",
         font_block,
-    ] + color_lines + [
+    ] + color_lines + fg_lines + [
         "% === end brand preamble ===",
     ]
     return "\n".join(parts) + "\n"
@@ -260,6 +288,16 @@ def _contrast_ratio(hex1: str, hex2: str) -> float:
     l2 = _luminance(hex2)
     lighter, darker = max(l1, l2), min(l1, l2)
     return (lighter + 0.05) / (darker + 0.05)
+
+
+def _blend_hex(base: str, toward: str, toward_factor: float) -> str:
+    """Blend base hex color toward another hex color by a factor (0=pure base, 1=pure toward)."""
+    b = str(base).lstrip("#")
+    t = str(toward).lstrip("#")
+    r = round(int(b[0:2], 16) * (1 - toward_factor) + int(t[0:2], 16) * toward_factor)
+    g = round(int(b[2:4], 16) * (1 - toward_factor) + int(t[2:4], 16) * toward_factor)
+    v = round(int(b[4:6], 16) * (1 - toward_factor) + int(t[4:6], 16) * toward_factor)
+    return f"{r:02X}{g:02X}{v:02X}"
 
 
 def _pascal(s: str) -> str:
@@ -464,13 +502,6 @@ def _validate_tikz(block: str) -> list[str]:
     if r"\end{tikzpicture}" not in block:
         warnings.append("AVISO: \\end{tikzpicture} ausente.")
 
-    # Text macros in geometry layer → likely causes compile errors
-    if re.search(r"\\Book\w+", block):
-        warnings.append(
-            "AVISO: macros \\Book* detectadas — modelo incluiu texto na camada "
-            "geometrica. Pode causar erro de compilacao."
-        )
-
     # Pixel-range numbers (anything over 150 is suspicious for an A4 cover in cm)
     # Exclude: hex color codes in \definecolor, arc degree angles (multiples of 90)
     _clean = re.sub(r"\\definecolor\{[^}]+\}\{HTML\}\{[0-9A-Fa-f]+\}", "", block)
@@ -486,76 +517,46 @@ def _validate_tikz(block: str) -> list[str]:
     return warnings
 
 
-# ─── Cover layout extraction ─────────────────────────────────────────────────
-#
-# The Vision prompt asks the VLM to emit a COVER_LAYOUT block after the TikZ
-# geometry. We extract it here, validate each \renewcommand line against a
-# strict allowlist, and pass it through to versatus-dynamic-cover.tex where it
-# overrides the \providecommand defaults in versatus-covers.sty.
+# ─── Post-extraction helpers ─────────────────────────────────────────────────
 
-_LAYOUT_START = "% === COVER_LAYOUT ==="
-_LAYOUT_END   = "% === END_COVER_LAYOUT ==="
-
-# Strict allowlist: (matched_command_name, arg_value_regex)
-# Keys are the ACTUAL LaTeX command strings (single backslash), matching what
-# re.group(1) will capture. re.escape() is used when building the line regex.
-_LAYOUT_ALLOWLIST: "list[tuple[str, str]]" = [
-    (r"\VSCoverTopMargin",       r"[0-9]+\.?[0-9]*cm"),
-    (r"\VSCoverLeftIndent",      r"[0-9]+\.?[0-9]*cm"),
-    (r"\VSCoverTextWidth",       r"0?\.[0-9]+"),
-    (r"\VSCoverTitlePt",         r"[0-9]+\.?[0-9]*"),
-    (r"\VSCoverTitleLeadPt",     r"[0-9]+\.?[0-9]*"),
-    (r"\VSCoverSubtitlePt",      r"[0-9]+\.?[0-9]*"),
-    (r"\VSCoverSubtitleLeadPt",  r"[0-9]+\.?[0-9]*"),
-    (r"\VSCoverTitleAlign",      r"\\(?:raggedright|centering|raggedleft)"),
-]
-_LAYOUT_LINE_RE = re.compile(
-    r"^\\renewcommand\{(" + "|".join(re.escape(n) for n, _ in _LAYOUT_ALLOWLIST) + r")\}"
-    r"\{([^}]+)\}$"
-)
-_LAYOUT_ARG_RE  = {name: re.compile(r"^" + pat + r"$")
-                   for name, pat in _LAYOUT_ALLOWLIST}
-
-
-def _extract_layout_block(text: str) -> "tuple[str, bool]":
+def _detect_bg_from_tikz(block: str, brand_colors: "dict[str, str]") -> str:
     """
-    Extract and validate the COVER_LAYOUT block from the VLM response.
-
-    Returns (validated_latex_snippet, found) where:
-    - validated_latex_snippet is a string of safe \\renewcommand lines (may be
-      shorter than what the VLM emitted if some lines failed validation)
-    - found is True iff the delimiters were present in text
+    Scan the TikZ block for the first \fill[ROLE] rectangle command and
+    return the brand hex for that role. This detects the ACTUAL background
+    color used by the VLM (which may differ from brand.json's bg_primary).
+    Returns hex string without '#', or "" if nothing found.
     """
-    start = text.find(_LAYOUT_START)
-    end   = text.find(_LAYOUT_END)
-    if start == -1 or end == -1 or end <= start:
-        return "", False
-
-    raw_lines = text[start + len(_LAYOUT_START): end].splitlines()
-    safe_lines: "list[str]" = []
-
-    for raw in raw_lines:
-        line = raw.strip()
-        if not line or line.startswith("%"):
-            continue
-        m = _LAYOUT_LINE_RE.match(line)
-        if not m:
-            continue  # unknown command or format — skip silently
-        cmd_name = m.group(1)
-        arg_val  = m.group(2)
-        pat      = _LAYOUT_ARG_RE.get(cmd_name)
-        if pat and pat.match(arg_val):
-            safe_lines.append(line)
-
-    if not safe_lines:
-        return "", True  # found delimiters but nothing valid
-
-    block = (
-        "% === Cover layout extracted from reference image ===\n"
-        + "\n".join(safe_lines)
-        + "\n% === end cover layout ===\n"
+    pat = re.compile(
+        r"\\fill\[([A-Za-z0-9_]+)\]\s*\([^)]+\)\s*rectangle\s*\([^)]+\)"
     )
-    return block, True
+    for m in pat.finditer(block):
+        role = m.group(1)
+        if role in brand_colors:
+            return str(brand_colors[role]).lstrip("#")
+    return ""
+
+
+def _parse_logo_placement(block: str) -> "dict | None":
+    """
+    Extract % LOGO_PLACEMENT x=X y=Y height=H bg=ROLE from TikZ block.
+    Returns dict with keys x, y (float), height (float), bg (str), or None.
+    """
+    m = re.search(
+        r"%\s*LOGO_PLACEMENT\s+"
+        r"x=([0-9]+\.?[0-9]*)\s+"
+        r"y=([0-9]+\.?[0-9]*)\s+"
+        r"height=([0-9]+\.?[0-9]*)\s+"
+        r"bg=([A-Za-z0-9_]+)",
+        block,
+    )
+    if not m:
+        return None
+    return {
+        "x":      float(m.group(1)),
+        "y":      float(m.group(2)),
+        "height": float(m.group(3)),
+        "bg":     m.group(4),
+    }
 
 
 # ─── Public API ───────────────────────────────────────────────────────────────
@@ -708,21 +709,7 @@ def extract_tikz(
             f"Primeiros 400 chars: {last_raw[:400]!r}"
         )
 
-    # ── 3. Cover layout extraction ────────────────────────────────────────────
-    layout_block = ""
-    layout_found, layout_valid = False, False
-    if last_raw:
-        layout_block, layout_found = _extract_layout_block(last_raw)
-        layout_valid = bool(layout_block)
-        if layout_found and layout_valid:
-            n_cmds = layout_block.count("\\renewcommand")
-            print(f"    [layout] {n_cmds} parâmetro(s) de layout extraídos da imagem.")
-        elif layout_found:
-            print("    [!] [layout] bloco COVER_LAYOUT presente mas sem linhas válidas — usando defaults.")
-        else:
-            print("    [!] [layout] bloco COVER_LAYOUT ausente na resposta — usando defaults do .sty.")
-
-    # ── 4. Brand color enforcement (deterministic, no LLM involved) ──────────
+    # ── 3. Brand color enforcement (deterministic, no LLM involved) ──────────
     if brand_colors:
         block, off_palette = _enforce_brand_colors(block, brand_colors)
         if off_palette:
@@ -733,64 +720,83 @@ def extract_tikz(
         else:
             print(f"    [OK] Todas as cores forcadas para a paleta de '{brand}'.")
 
-    # ── 3b. Text panel — inject a solid (semi-transparent) rect before logo ─────
-    # Drawn after the geometry and before the logo so it sits between them.
-    # Activated only when brand.json defines a "text_panel" key.
-    if brand and brand_data:
-        tp = brand_data.get("text_panel")
-        if tp:
-            color   = tp.get("color", "bg_primary")
-            opacity = tp.get("opacity", 1.0)
-            x1, y1  = tp.get("x1", -1), tp.get("y1", 0)
-            x2, y2  = tp.get("x2", 22), tp.get("y2", 20)
-            op_str  = f", fill opacity={opacity}" if opacity < 1.0 else ""
-            panel_line = f"  \\fill[{color}{op_str}] ({x1}, {y1}) rectangle ({x2}, {y2});"
-            end_marker = "\\end{tikzpicture}%"
-            if end_marker in block:
-                block = block.replace(end_marker, panel_line + "\n" + end_marker, 1)
-                print(
-                    f"    [panel] painel de texto injetado: {color} "
-                    f"[({x1},{y1})→({x2},{y2})], opacity={opacity}"
-                )
-
-    # ── 3c. Logo intelligence — pick variant by bg_primary luminance ──────────
+    # ── 3b. Logo — dynamic variant, position, and scale ──────────────────────
     logo_inline     = ""
     logo_macro_name = ""
     if brand and brand_colors:
-        bg_hex    = str(brand_colors.get("bg_primary", "#808080")).lstrip("#")
-        lum       = _luminance(bg_hex)
-        available = set(brand_data.get("logos", {}).keys())
-        variant   = _choose_logo_variant(bg_hex, available)
+        brand_dir_path = _BRANDS_DIR / brand
+        available      = set(brand_data.get("logos", {}).keys())
 
-        brand_dir_path          = _BRANDS_DIR / brand
+        # Parse LOGO_PLACEMENT comment emitted by VLM (position + height + bg zone)
+        placement = _parse_logo_placement(block)
+        if placement:
+            pos          = [placement["x"], placement["y"]]
+            logo_bg_hex  = str(
+                brand_colors.get(placement["bg"],
+                                 brand_colors.get("bg_primary", "#808080"))
+            ).lstrip("#")
+            desired_height = placement["height"]
+            print(
+                f"    [logo] LOGO_PLACEMENT: pos=({pos[0]}, {pos[1]}), "
+                f"height={desired_height}cm, bg={placement['bg']}"
+            )
+        else:
+            pos            = brand_data.get("logo_position", [1.5, 26.5])
+            logo_bg_hex    = str(brand_colors.get("bg_primary", "#808080")).lstrip("#")
+            desired_height = None
+            print("    [!] [logo] LOGO_PLACEMENT ausente — usando logo_position do brand.json")
+
+        variant = _choose_logo_variant(logo_bg_hex, available)
         logo_inline, logo_macro_name = _inline_logo(
             brand_dir_path, brand_data, variant, brand
         )
 
         if logo_macro_name:
-            # Position: read from brand.json["logo_position"] or use default top-left
-            pos = brand_data.get("logo_position", [1.5, 26.5])
-            logo_call  = f"  \\{logo_macro_name}{{({pos[0]}, {pos[1]})}}"
-            end_marker = "\\end{tikzpicture}%"
+            native_height = float(brand_data.get("logo_height_cm", 3.0))
+            scale         = (desired_height / native_height) if desired_height else 1.0
+            lum           = _luminance(logo_bg_hex)
+            end_marker    = "\\end{tikzpicture}%"
+
             if end_marker in block:
+                if abs(scale - 1.0) > 0.005:
+                    logo_call = (
+                        f"  \\begin{{scope}}[shift={{({pos[0]}, {pos[1]})}}, "
+                        f"xscale={scale:.4f}, yscale={scale:.4f}]\n"
+                        f"    \\{logo_macro_name}{{(0,0)}}\n"
+                        f"  \\end{{scope}}"
+                    )
+                else:
+                    logo_call = f"  \\{logo_macro_name}{{({pos[0]}, {pos[1]})}}"
+
                 block = block.replace(end_marker, logo_call + "\n" + end_marker, 1)
                 print(
-                    f"    [logo] variante '{variant}' selecionada "
-                    f"(luminancia bg_primary: {lum:.3f}) -> \\{logo_macro_name}"
+                    f"    [logo] variante='{variant}' (lum={lum:.3f}), "
+                    f"scale={scale:.3f} -> \\{logo_macro_name}"
                 )
             else:
                 print(f"    [!] [logo] \\end{{tikzpicture}}% nao encontrado no bloco.")
         else:
             print(f"    [!] [logo] {logo_inline.strip()}")
 
-    # ── 3d. Brand preamble — font + VS color aliases ──────────────────────────
+    # ── 3c. Brand preamble — font + VS color aliases + dynamic fg colors ─────
     brand_preamble = ""
     if brand and brand_colors:
-        brand_preamble = _build_brand_preamble(brand, brand_data, brand_colors)
+        # Detect ACTUAL background from the generated TikZ (first large fill)
+        # so VSCoverFg contrast is computed vs what the VLM actually rendered,
+        # not always vs brand.json's bg_primary (which may not be the bg used).
+        bg_hex_actual = _detect_bg_from_tikz(block, brand_colors)
+        brand_preamble = _build_brand_preamble(
+            brand, brand_data, brand_colors,
+            bg_hex_override=bg_hex_actual or None,
+        )
         print(
             f"    [font] {brand_data.get('font', 'N/A')} "
             f"(com fallback Noto Sans / Latin Modern Sans)"
         )
+        if bg_hex_actual:
+            bg_lum = _luminance(bg_hex_actual)
+            mode   = "escuro→texto claro" if bg_lum < 0.35 else "claro→texto escuro"
+            print(f"    [fg-color] bg detectado: #{bg_hex_actual} (L={bg_lum:.3f}, {mode})")
 
     # ── 4. Validate + write ───────────────────────────────────────────────────
     print("[3/3] Validando e escrevendo macro TikZ…")
@@ -801,7 +807,7 @@ def extract_tikz(
     header     = f"% Auto-generated by vision_extractor.py{brand_note} - DO NOT EDIT MANUALLY\n"
     tex_path.parent.mkdir(parents=True, exist_ok=True)
     tex_path.write_text(
-        header + brand_preamble + layout_block + logo_inline + block + "\n",
+        header + brand_preamble + logo_inline + block + "\n",
         encoding="utf-8",
     )
     print(f"    Macro TikZ escrita → {tex_path}")

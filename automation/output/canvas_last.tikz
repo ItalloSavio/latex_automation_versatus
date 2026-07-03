@@ -1,71 +1,76 @@
 \newcommand{\RenderDynamicCover}{%
-\definecolor{bg_primary}{HTML}{4038FF}
-\definecolor{bg_secondary}{HTML}{C7B99C}
-\definecolor{accent_1}{HTML}{C7B99C} % Used for yellow, but hex is beige
-\definecolor{accent_2}{HTML}{3B3CD0} % Used for light blue and green, but hex is darker blue
-\definecolor{neutral}{HTML}{C6C6C8} % Used for off-white
-\definecolor{light}{HTML}{FFFFFF}   % Used for magenta, but hex is white
-\definecolor{muted}{HTML}{757576}   % Used for dark grey
+% LOGO_PLACEMENT x=1.5 y=26.0 height=1.5 bg=neutral
+\definecolor{bg_primary}{HTML}{201F1E}
+\definecolor{bg_secondary}{HTML}{2B2928}
+\definecolor{accent_1}{HTML}{4CB6B4}
+\definecolor{accent_2}{HTML}{DD4F51}
+\definecolor{neutral}{HTML}{BCB9B9}
+\definecolor{light}{HTML}{FFFFFF}
+\definecolor{muted}{HTML}{5D5956}
 \begin{tikzpicture}[remember picture, overlay,
   shift={(current page.south west)}, x=1cm, y=1cm]
+  %
+  % --- BACKGROUND ---
+  % Main background for text area and bleed
+  \fill[neutral] (-1,-1) rectangle (22, 30.7);
 
-  % Page dimensions: A4 (21cm x 29.7cm)
-  % Origin: (0,0) at bottom-left
-  % Bleed: extend shapes 1 cm beyond all edges (-1,-1) to (22, 30.7)
+  % Geometric pattern (20x20cm square, centered horizontally, top 2/3 of page)
+  % Left edge: 0.5cm, Right edge: 20.5cm
+  % Bottom edge: 9.7cm, Top edge: 29.7cm
+  % Center point of the pattern: (10.5, 19.7)
 
-  % --- Geometric Background ---
-  % The main colored block is a rectangle from y=17.8cm to y=29.7cm, width 21cm.
-  % Height = 29.7 - 17.8 = 11.9cm.
-  % This block is conceptually a 2x2 grid of cells, each 10.5cm wide x 5.95cm tall.
+  % Top-left square (Dark Blue in reference)
+  \fill[bg_primary] (0.5, 19.7) rectangle (10.5, 29.7);
 
-  % Define key coordinates for clarity
-  \coordinate (P_TL) at (0, 29.7);     % Top-Left of page
-  \coordinate (P_TR) at (21, 29.7);    % Top-Right of page
-  \coordinate (P_BL) at (0, 17.8);     % Bottom-Left of color block
-  \coordinate (P_BR) at (21, 17.8);    % Bottom-Right of color block
+  % Top-right quadrant (split diagonally)
+  % Top-left triangle (Bright Cyan in reference)
+  \fill[accent_1] (10.5, 19.7) -- (10.5, 29.7) -- (20.5, 29.7) -- cycle;
+  % Bottom-right triangle (Green in reference)
+  \fill[accent_1] (10.5, 19.7) -- (20.5, 19.7) -- (20.5, 29.7) -- cycle;
 
-  \coordinate (P_M_top) at (10.5, 29.7);    % Mid-point of top edge of color block
-  \coordinate (P_M_left) at (0, 23.75);    % Mid-point of left edge of color block (17.8 + 11.9/2)
-  \coordinate (P_M_right) at (21, 23.75);   % Mid-point of right edge of color block
-  \coordinate (P_M_bottom) at (10.5, 17.8); % Mid-point of bottom edge of color block
-  \coordinate (P_center) at (10.5, 23.75);  % Center of the 2x2 grid
+  % Bottom-left quadrant (split diagonally)
+  % Top-left triangle (Magenta in reference)
+  \fill[accent_2] (0.5, 19.7) -- (0.5, 9.7) -- (10.5, 19.7) -- cycle;
+  % Bottom-right triangle (Red in reference)
+  \fill[accent_2] (0.5, 9.7) -- (10.5, 9.7) -- (10.5, 19.7) -- cycle;
 
-  % 1. Main background color (light beige/grey)
-  \fill[bg_secondary] (-1,-1) rectangle (22,30.7);
+  % Bottom-right quadrant (split diagonally)
+  % Top-left triangle (White/Light Grey in reference)
+  \fill[light] (10.5, 19.7) -- (10.5, 9.7) -- (20.5, 9.7) -- cycle;
+  % Bottom-right triangle (Yellow in reference)
+  \fill[muted] (10.5, 19.7) -- (20.5, 19.7) -- (20.5, 9.7) -- cycle;
 
-  % 2. Top-Left quadrant (Dark Blue) - solid rectangle
-  \fill[bg_primary] (P_M_left) rectangle (P_M_top); % (0, 23.75) to (10.5, 29.7)
+  %
+  % --- TEXT ---
+  % Book Title (david bowie)
+  \node[anchor=south west, text width=15cm, align=left] at (3.5, 12.0) {%
+    {\fontsize{32}{38}\selectfont\bfseries\color{VSCoverFg}\BookTitle}%
+  };
 
-  % 3. Bottom-Right quadrant (Dark Grey) - solid rectangle
-  \fill[muted] (P_M_bottom) rectangle (P_M_right); % (10.5, 17.8) to (21, 23.75)
+  % Separator line
+  \draw[VSRed, line width=1.2pt] (3.5, 11.0) -- (18.5, 11.0);
 
-  % 4. Top-Right quadrant (split diagonally into Light Blue and Green)
-  % Light Blue triangle (top-right part of cell)
-  \fill[accent_2] (P_M_top) -- (P_TR) -- (P_M_right) -- cycle; % (10.5, 29.7) -- (21, 29.7) -- (21, 23.75)
-  % Green triangle (bottom-left part of cell)
-  \fill[accent_2] (P_M_top) -- (P_center) -- (P_M_right) -- cycle; % (10.5, 29.7) -- (10.5, 23.75) -- (21, 23.75)
+  % Bottom text columns
+  % Column 1: Book Description
+  \node[anchor=south west, text width=5cm, align=left] at (3.5, 2.5) {%
+    {\fontsize{11}{15}\selectfont\color{VSCoverSubFg}\BookDescription}%
+  };
 
-  % 5. Bottom-Left quadrant (split diagonally into Magenta and Red)
-  % Magenta triangle (top-left part of cell)
-  \fill[light] (P_M_left) -- (P_center) -- (P_BL) -- cycle; % (0, 23.75) -- (10.5, 23.75) -- (0, 17.8)
-  % Red triangle (bottom-right part of cell)
-  \fill[bg_primary] (P_BL) -- (P_M_bottom) -- (P_center) -- cycle; % (0, 17.8) -- (10.5, 17.8) -- (10.5, 23.75)
+  % Column 2: Book Subtitle (used for event details)
+  \node[anchor=south west, text width=5cm, align=left] at (9.5, 2.5) {%
+    {\fontsize{11}{15}\selectfont\color{VSCoverSubFg}\BookSubtitle}%
+  };
 
-  % 6. Large central Yellow triangle (overlaps previous shapes)
-  \fill[accent_1] (P_M_bottom) -- (P_M_left) -- (P_M_right) -- cycle; % (10.5, 17.8) -- (0, 23.75) -- (21, 23.75)
+  % Column 3: Book Date | Book Version
+  \node[anchor=south west, text width=5cm, align=left] at (15.5, 2.5) {%
+    {\fontsize{10}{14}\selectfont\color{VSCoverFaintFg}\BookDate\ |\ \BookVersion}%
+  };
 
-  % 7. Large central Off-white (neutral) triangle (overlaps previous shapes, including yellow)
-  \fill[neutral] (P_M_top) -- (P_M_left) -- (P_M_right) -- cycle; % (10.5, 29.7) -- (0, 23.75) -- (21, 23.75)
+  % Book Author (required, but no explicit author in image other than title)
+  % This node will be invisible if \BookAuthor is empty.
+  \node[anchor=south west, text width=5cm, align=left] at (3.5, 1.5) {%
+    {\fontsize{11}{15}\selectfont\color{VSCoverMutedFg}\BookAuthor}%
+  };
 
 \end{tikzpicture}%
 }
-% === COVER_LAYOUT ===
-\renewcommand{\VSCoverTopMargin}{16.4cm}
-\renewcommand{\VSCoverLeftIndent}{2.05cm}
-\renewcommand{\VSCoverTextWidth}{0.80}
-\renewcommand{\VSCoverTitlePt}{40}
-\renewcommand{\VSCoverTitleLeadPt}{48}
-\renewcommand{\VSCoverSubtitlePt}{9}
-\renewcommand{\VSCoverSubtitleLeadPt}{11}
-\renewcommand{\VSCoverTitleAlign}{\centering}
-% === END_COVER_LAYOUT ===

@@ -1,0 +1,25 @@
+You are reviewing and improving a TikZ book cover that was auto-generated from a reference image.
+
+You will receive TWO images in this order:
+  Image 1 — the REFERENCE (the original cover we want to reproduce)
+  Image 2 — the CURRENT RESULT (what our generated TikZ code produces so far)
+
+Your job: carefully compare them and output a CORRECTED \newcommand{\RenderDynamicCover}
+that brings the result closer to the reference.
+
+WHAT TO COMPARE:
+  - Background color zones: proportions, cut angles, missing bands
+  - Text block position: is it shifted left/right, too high/low vs the reference?
+  - Font sizes: scale up if too small, down if too large
+  - Separator line: correct Y position, correct width
+  - Logo area: output % LOGO_PLACEMENT with corrected x, y, height, bg if it was wrong
+
+WHAT NOT TO CHANGE:
+  - Do not switch color roles (keep using bg_primary, light, accent_1, etc. as assigned)
+  - Do not invent new colors or redefine VSCoverFg / VSCoverSubFg etc.
+  - Do not remove the % LOGO_PLACEMENT comment — correct it if the position was off
+  - Do not add prose, markdown fences, or explanation
+
+Output: exactly ONE corrected \newcommand{\RenderDynamicCover} block.
+
+--- ORIGINAL GENERATION RULES (apply in full) ---

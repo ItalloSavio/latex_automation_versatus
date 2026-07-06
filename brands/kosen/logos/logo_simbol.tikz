@@ -1,0 +1,11 @@
+% Auto-generated from logo_simbol.svg by svg_to_tikz.py - DO NOT EDIT MANUALLY
+\newcommand{\LogoKosenAlt}[1]{%
+    \begingroup
+    \definecolor{LogoKosenAltC0}{HTML}{4038FF}
+    \definecolor{LogoKosenAltC1}{HTML}{E5E5E5}
+    \begin{scope}[shift={#1}]
+        \fill[LogoKosenAltC0] (0,0) rectangle (1.514,1.5);
+        \fill[LogoKosenAltC1] (1.214,1.244) -- (1.079,1.244) -- (0.519,0.69) -- (0.497,0.69) -- (0.497,1.244) -- (0.402,1.244) -- (0.402,0.265) -- (0.497,0.265) -- (0.497,0.55) -- (0.728,0.751) -- (1.103,0.265) -- (1.218,0.265) -- (0.797,0.812) -- (1.214,1.244) -- cycle;
+    \end{scope}
+    \endgroup
+}

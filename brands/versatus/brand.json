@@ -1,0 +1,23 @@
+{
+  "company": "Versatus HPC",
+  "font": "Source Sans Pro",
+  "colors": {
+    "bg_primary":   "#201F1E",
+    "bg_secondary": "#2B2928",
+    "accent_1":     "#4CB6B4",
+    "accent_2":     "#DD4F51",
+    "neutral":      "#BCB9B9",
+    "light":        "#FFFFFF",
+    "muted":        "#5D5956"
+  },
+  "logos": {
+    "dark":  "logos/logo_dark.tikz",
+    "light": "logos/logo_light.tikz",
+    "alt":   "logos/logo_simbol.tikz"
+  },
+  "logo_svg": {
+    "dark":  "logos/svg/logo_dark.svg",
+    "light": "logos/svg/logo_light.svg",
+    "alt":   "logos/svg/logo_simbol.svg"
+  }
+}

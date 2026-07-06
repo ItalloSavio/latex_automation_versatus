@@ -7,16 +7,16 @@ Documentação do sistema de automação de capas para o template LaTeX `versatu
 
 ## Visão Geral
 
-O sistema recebe uma **imagem de referência** e o nome de uma **marca** e produz um **PDF completo** com:
+O sistema recebe uma **imagem de referência** e o nome de uma **marca** e produz:
 
-- Fundo geométrico extraído da imagem de referência, com cores exatas da marca
+- Fundo geométrico extraído da imagem, com cores exatas da marca
 - Logo da marca selecionado automaticamente pelo tom do fundo
-- Tipografia e cores do documento alinhadas à identidade visual da marca
+- Tipografia, cores e identidade visual da marca aplicadas a todo o documento (sumário, títulos, rodapé, marca d'água)
+- PDF da capa standalone + PDF do livro completo, em um único comando
 
-Tudo em um único comando, sem dependências de sistema além do Python e do LaTeX.
-
-```
-python automation/scripts/build_cover.py <imagem.png> --brand <marca>
+```bash
+# Capa + livro completo em um comando
+python automation/scripts/build_cover.py <imagem.png> --brand <marca> --full-build
 ```
 
 ---
@@ -28,43 +28,104 @@ imagem.png  +  brands/<marca>/brand.json
        │
        ▼
 [Fase 1 — Gemini Vision API]
-  Prompt com instrução de cores da marca
+  Prompt com regras de marca e formato TikZ
        │
-       ▼  resposta em TikZ
+       ▼  resposta bruta em TikZ → salva em canvas_last.tikz
 [Enforcement determinístico de cores]
   Python substitui todo hex pelo valor exato do brand.json
        │
        ▼
-[Seleção de logo por luminância]
-  bg_primary → WCAG luminance → dark / light / alt
-  Logo .tikz pré-convertido é embutido inline
+[Seleção de logo por luminância WCAG]
+  bg_primary → L < 0.35: dark / L > 0.60: light / meio: alt
+  Logo .tikz pré-convertido embutido inline no .tex
        │
        ▼
 [Geração do preâmbulo de marca]
-  \setmainfont{<fonte>} + \definecolor{VS*}{...}
+  \setmainfont{<fonte>}
+  \definecolor{VS*}{...}            ← cores do documento inteiro
+  \renewcommand{\VSBrandFooterLogo} ← logo no rodapé de todas as páginas
+  \renewcommand{\VSBrandWatermark}  ← marca d'água de todas as páginas
        │
        ▼  styles/versatus-dynamic-cover.tex  (gerado)
-[Fase 2 — LuaLaTeX + latexmk]
+[Fase 2 — LuaLaTeX]
+  main-dynamic.tex (capa standalone)
        │
        ▼
-  build/pdf/main-dynamic.pdf
+[Fase 3 — Preview PNG]
+  Renderiza página 1 do PDF → cover_preview.png
+  Abre automaticamente no visualizador padrão
+       │
+       ▼  (opcional: --refine)
+[Fase 4 — Refinamento VLM]
+  Envia imagem original + PNG gerado ao Gemini
+  Gemini compara e corrige o TikZ
+  Recompila + atualiza preview
+       │
+       ▼  (opcional: --full-build)
+[Fase 5 — Livro Completo]
+  Compila main.tex com capa + conteúdo + identidade visual da marca
 ```
 
 ---
 
 ## Comandos
 
-### Pipeline principal
+### Pipeline completo
 
 ```bash
-# Fluxo completo: imagem + marca → PDF
-python automation/scripts/build_cover.py <imagem.png> --brand versatus
+# Fluxo básico: imagem + marca → PDF da capa
+python automation/scripts/build_cover.py capa.png --brand versatus
 
-# Reusar TikZ existente (sem chamar o Gemini novamente)
-python automation/scripts/build_cover.py <imagem.png> --brand versatus --skip-vision
+# Gerar capa E livro completo de uma vez
+python automation/scripts/build_cover.py capa.png --brand versatus --full-build
 
-# Sem marca (cores livres geradas pelo VLM)
-python automation/scripts/build_cover.py <imagem.png>
+# Com refinamento automático (1 passagem de correção)
+python automation/scripts/build_cover.py capa.png --brand kosen --refine
+
+# Com refinamento + livro completo
+python automation/scripts/build_cover.py capa.png --brand kosen --refine --full-build
+```
+
+### Reusar TikZ existente (sem chamar a API)
+
+```bash
+# Reaplicar marca sobre o último TikZ gerado (canvas_last.tikz)
+# Útil para testar a mesma capa com marcas diferentes
+python automation/scripts/build_cover.py --reuse --brand versatus
+python automation/scripts/build_cover.py --reuse --brand kosen
+
+# Reusar + compilar livro completo
+python automation/scripts/build_cover.py --reuse --brand kosen --full-build
+
+# Reusar o .tex já gerado sem reaplicar brand (modo legado/debug)
+python automation/scripts/build_cover.py --skip-vision
+```
+
+### Opções de refinamento
+
+```bash
+# Uma passagem de refinamento (padrão quando --refine é usado)
+python automation/scripts/build_cover.py capa.png --brand versatus --refine
+
+# Duas passagens de refinamento (máximo recomendado: 3)
+python automation/scripts/build_cover.py capa.png --brand versatus --refine --refine-passes 2
+```
+
+O `--refine` funciona assim:
+1. Compila a capa normalmente e gera o preview PNG
+2. Envia ao Gemini: imagem original + PNG do resultado atual
+3. O Gemini compara visualmente e retorna um `\RenderDynamicCover` corrigido
+4. Recompila e atualiza o preview
+5. Com `--refine-passes 2`, repete os passos 2–4
+
+### Preview
+
+```bash
+# Gerar preview em alta resolução (padrão: 150 dpi)
+python automation/scripts/build_cover.py --reuse --brand versatus --dpi 300
+
+# Gerar preview sem abrir automaticamente
+python automation/scripts/build_cover.py capa.png --brand versatus --no-preview
 ```
 
 ### Logos
@@ -77,7 +138,7 @@ python automation/scripts/convert_logos.py --brand kosen
 # Converter todas as marcas de uma vez
 python automation/scripts/convert_logos.py --all
 
-# Converter logo único com altura customizada (default: 3 cm)
+# Altura customizada (default: valor de logo_height_cm no brand.json, ou 3 cm)
 python automation/scripts/convert_logos.py --brand versatus --height 2.5
 
 # Converter SVG individual (uso avulso)
@@ -86,14 +147,14 @@ python automation/scripts/svg_to_tikz.py brands/versatus/logos/svg/logo_dark.svg
 
 ### Variáveis de ambiente
 
-| Variável        | Obrigatória | Descrição                                                   |
-|-----------------|-------------|-------------------------------------------------------------|
-| `GEMINI_API_KEY` | Sim         | Chave da API Google AI Studio                               |
-| `GEMINI_MODEL`   | Não         | Forçar modelo específico (ex: `gemini-2.0-flash`). Se omitido, o sistema usa cadeia automática de fallback. |
+| Variável         | Obrigatória | Descrição                                                                                     |
+|------------------|-------------|-----------------------------------------------------------------------------------------------|
+| `GEMINI_API_KEY` | Sim         | Chave da API Google AI Studio                                                                 |
+| `GEMINI_MODEL`   | Não         | Forçar modelo específico (ex: `gemini-2.0-flash`). Se omitido, usa cadeia automática de fallback. |
 
 ```bash
-# Windows
-set GEMINI_API_KEY=sua_chave_aqui
+# Windows (PowerShell)
+$env:GEMINI_API_KEY = "sua_chave_aqui"
 python automation/scripts/build_cover.py capa.png --brand versatus
 ```
 
@@ -108,17 +169,17 @@ versatus-template-book-v0.2.3/
 │
 ├── automation/
 │   ├── core/
-│   │   ├── latex_compiler.py       # Compilador LuaLaTeX com auto-repair
-│   │   └── json_to_tikz.py         # (legado) Conversor JSON→TikZ
+│   │   └── latex_compiler.py       # Compilador LuaLaTeX com auto-repair
 │   ├── prompt/
-│   │   ├── vision_prompt.txt       # Prompt do Gemini Vision (com {{COLOR_INSTRUCTIONS}})
-│   │   └── repair_prompt.txt       # Prompt de reparo automático (modo legado)
+│   │   ├── vision_prompt.txt       # Prompt principal do Gemini Vision
+│   │   └── refine_header.txt       # Prefixo do prompt de refinamento
 │   ├── output/
-│   │   ├── canvas_last.tikz        # Última resposta bruta do Gemini (debug)
-│   │   └── canvas_last.json        # Último JSON de canvas (modo legado)
+│   │   ├── canvas_last.tikz        # Última resposta bruta do Gemini (debug/reuse)
+│   │   └── cover_preview.png       # Preview PNG da última compilação
 │   └── scripts/
 │       ├── build_cover.py          # PONTO DE ENTRADA principal
 │       ├── vision_extractor.py     # Gemini Vision → TikZ (com brand support)
+│       ├── preview_cover.py        # PDF → PNG (usa pymupdf)
 │       ├── convert_logos.py        # Batch conversion SVG→TikZ por marca
 │       └── svg_to_tikz.py          # Conversor SVG→TikZ puro Python
 │
@@ -140,21 +201,28 @@ versatus-template-book-v0.2.3/
 │   ├── versatus-dynamic-cover.tex  # GERADO AUTOMATICAMENTE — não editar
 │   ├── versatus-covers.sty         # Layouts de capa (estático)
 │   ├── versatus-colors.sty         # Paleta Versatus base (sobrescrita pelo brand preamble)
+│   ├── versatus-layout.sty         # Layout de páginas, cabeçalho/rodapé, títulos
 │   ├── versatus-typography.sty     # Tipografia base (sobrescrita pelo brand preamble)
 │   └── versatus-variant.sty        # Flags de variante (color/print/longread)
 │
-├── main-dynamic.tex                # Entry-point LaTeX que inclui tudo
-├── config/metadata.tex             # Título, autor, data, versão do documento
+├── frontmatter/
+│   ├── cover.tex                   # Usa capa dinâmica se disponível, fallback para estática
+│   └── toc.tex
+│
+├── main.tex                        # Livro completo (capas + conteúdo + layout da marca)
+├── main-dynamic.tex                # Capa standalone (preview rápido durante iteração)
+├── config/metadata.tex             # Título, autor, data, versão
 └── build/
-    ├── pdf/main-dynamic.pdf        # PDF final gerado
-    └── aux/main-dynamic.log        # Log de compilação LaTeX
+    ├── pdf/main-dynamic.pdf        # PDF da capa (gerado pelo pipeline)
+    ├── pdf/main.pdf                # PDF do livro completo (gerado com --full-build)
+    └── aux/                        # Arquivos auxiliares LaTeX (.log, .aux, .toc...)
 ```
 
 ---
 
 ## Arquivo `brand.json`
 
-Cada marca tem um `brand.json` em `brands/<nome>/brand.json` com a seguinte estrutura:
+Cada marca tem um `brand.json` em `brands/<nome>/brand.json`:
 
 ```json
 {
@@ -180,54 +248,38 @@ Cada marca tem um `brand.json` em `brands/<nome>/brand.json` com a seguinte estr
     "alt":   "logos/svg/logo_simbol.svg"
   },
   "logo_height_cm": 1.5,
-  "logo_position": [1.5, 26.5],
-  "text_panel": {
-    "color":   "bg_primary",
-    "opacity": 0.85,
-    "x1": -1,  "y1": 4.5,
-    "x2": 22,  "y2": 25.5
-  }
+  "logo_position": [1.5, 26.5]
 }
 ```
 
 ### Papéis das cores
 
-| Papel          | Uso no documento                                              |
-|----------------|---------------------------------------------------------------|
-| `bg_primary`   | Cor dominante/escura do fundo; define tom para seleção do logo |
-| `bg_secondary` | Segunda cor de fundo (zonas secundárias)                      |
-| `accent_1`     | Acento principal (ex: teal da Versatus)                       |
-| `accent_2`     | Acento secundário (ex: vermelho da Versatus); usado na linha separadora do texto |
-| `neutral`      | Zona neutra/cinza                                             |
-| `light`        | Branco ou claro (base e fundos claros)                        |
-| `muted`        | Cinza muted (texto secundário, rodapés)                       |
+| Papel          | Uso no documento                                                                 |
+|----------------|----------------------------------------------------------------------------------|
+| `bg_primary`   | Cor dominante/escura do fundo; define o tom para seleção do logo e títulos (`VSBlack`) |
+| `bg_secondary` | Segunda cor de fundo (zonas secundárias)                                         |
+| `accent_1`     | Acento principal (ex: teal da Versatus); usado em links externos (`VSTeal`)      |
+| `accent_2`     | Acento secundário (ex: vermelho da Versatus); linha separadora, links de capítulo |
+| `neutral`      | Zona neutra/cinza                                                                |
+| `light`        | Branco ou claro (base e fundos claros)                                           |
+| `muted`        | Cinza muted (texto secundário, rodapés)                                          |
 
 ### Variantes de logo
 
-| Chave   | Convenção                                                  |
-|---------|------------------------------------------------------------|
+| Chave   | Convenção                                                   |
+|---------|-------------------------------------------------------------|
 | `dark`  | Logo para **fundos escuros** — cores claras/brancas no logo |
 | `light` | Logo para **fundos claros** — cores escuras no logo         |
 | `alt`   | Símbolo/ícone isolado — para fundos médios ou uso compacto  |
 
+A capa usa a variante escolhida pela luminância do fundo. O rodapé sempre usa `alt` (símbolo). A marca d'água usa `dark`.
+
 ### Campos opcionais de layout
 
-| Campo             | Tipo           | Default       | Descrição                                                  |
-|-------------------|----------------|---------------|------------------------------------------------------------|
-| `logo_position`   | `[x, y]` (cm) | `[1.5, 26.5]` | Canto inferior esquerdo do logo. Origem = canto inf. esq. da página (A4: 21×29,7 cm). |
-| `logo_height_cm`  | número         | `3.0`         | Altura alvo na conversão SVG→TikZ. Controla o tamanho do logo na capa. |
-| `text_panel`      | objeto         | —             | Retângulo de fundo para a zona de texto. Ver tabela abaixo. |
-
-#### Campos de `text_panel`
-
-| Campo     | Tipo   | Descrição                                                    |
-|-----------|--------|--------------------------------------------------------------|
-| `color`   | string | Nome de cor (papel do brand.json, ex: `"bg_primary"`)        |
-| `opacity` | float  | Opacidade do preenchimento, 0.0–1.0 (ex: `0.85`)            |
-| `x1`,`y1` | números| Canto inferior esquerdo do retângulo, em cm                  |
-| `x2`,`y2` | números| Canto superior direito do retângulo, em cm                   |
-
-> **Quando usar `text_panel`:** quando o background geométrico gerado pelo VLM é muito denso na área de texto (ex: padrões full-bleed), um painel semi-transparente cria zona de leitura clara sem perder a textura visual do fundo.
+| Campo            | Tipo          | Default       | Descrição                                              |
+|------------------|---------------|---------------|--------------------------------------------------------|
+| `logo_position`  | `[x, y]` (cm) | `[1.5, 26.5]` | Fallback de posição (sobrescrito pelo LOGO_PLACEMENT do VLM) |
+| `logo_height_cm` | número        | `3.0`         | Altura alvo na conversão SVG→TikZ                      |
 
 ---
 
@@ -237,7 +289,6 @@ Cada marca tem um `brand.json` em `brands/<nome>/brand.json` com a seguinte estr
    ```
    brands/nova-marca/brand.json
    ```
-   Seguindo a estrutura acima com todos os hexadecimais válidos (`#RRGGBB`).
 
 2. **Colocar os SVGs:**
    ```
@@ -251,9 +302,9 @@ Cada marca tem um `brand.json` em `brands/<nome>/brand.json` com a seguinte estr
    python automation/scripts/convert_logos.py --brand nova-marca
    ```
 
-4. **Usar na automação:**
+4. **Gerar capa e livro:**
    ```bash
-   python automation/scripts/build_cover.py capa.png --brand nova-marca
+   python automation/scripts/build_cover.py capa.png --brand nova-marca --full-build
    ```
 
 ---
@@ -262,69 +313,89 @@ Cada marca tem um `brand.json` em `brands/<nome>/brand.json` com a seguinte estr
 
 ### Por que não usamos svg2tikz ou Inkscape?
 
-`svg2tikz` depende de `pygobject` (GTK), que exige toolchain nativo para compilar no Windows — instalação instável e diferente máquina a máquina. Inkscape também não estava disponível.
+`svg2tikz` depende de `pygobject` (GTK), que exige toolchain nativo para compilar no Windows. Inkscape também não estava disponível como dependência confiável.
 
-A solução foi escrever `svg_to_tikz.py` usando apenas `svgelements` (`pip install svgelements` — puro Python, sem compilação nativa), tornando o sistema funcional em qualquer máquina com Python + pip.
+A solução foi escrever `svg_to_tikz.py` usando apenas `svgelements` (`pip install svgelements` — puro Python, sem compilação nativa), funcionando em qualquer máquina com Python + pip.
 
 ### Enforcement determinístico de cores
 
-O Gemini não consegue garantir que vai gerar um hexadecimal exato — ele pode "alucinar" valores próximos mas errados. A solução: o VLM recebe instruções para usar **nomes de papéis semânticos** (`bg_primary`, `accent_1`, etc.) e escolher qual papel vai em cada zona visual. Depois, o Python substitui deterministicamente **cada `\definecolor` pelo hex exato** do `brand.json`, via regex, sem nenhuma chamada de rede adicional. O VLM faz a escolha de composição; o Python garante os valores exatos.
+O Gemini não consegue garantir um hexadecimal exato — pode "alucinar" valores próximos mas errados. A solução: o VLM recebe instruções para usar **nomes de papéis semânticos** (`bg_primary`, `accent_1`, etc.) e o Python substitui deterministicamente **cada `\definecolor` pelo hex exato** do `brand.json`, via regex. O VLM decide a composição; o Python garante os valores exatos.
 
 ### Seleção de logo por luminância (WCAG)
 
-O algoritmo usa a fórmula de luminância relativa do WCAG 2.1 sobre `bg_primary`:
+Algoritmo sobre o hex do fundo onde o logo será colocado (detectado do comentário `LOGO_PLACEMENT` do VLM):
 
-- `L < 0.35` → fundo **escuro** → variante `dark` (logo com cores claras)
-- `L > 0.60` → fundo **claro** → variante `light` (logo com cores escuras)
-- `0.35 ≤ L ≤ 0.60` → fundo **médio** → variante `alt` (símbolo/ícone)
+- `L < 0.35` → fundo **escuro** → variante `dark`
+- `L > 0.60` → fundo **claro** → variante `light`
+- `0.35 ≤ L ≤ 0.60` → fundo **médio** → variante `alt`
 
-A variante escolhida é **embutida inline** no `versatus-dynamic-cover.tex` (não via `\input`) para evitar problemas de caminho relativo quando o LaTeX processa o arquivo.
+A variante escolhida é **embutida inline** no `versatus-dynamic-cover.tex` para evitar problemas de caminho relativo.
 
-### Preâmbulo de marca no LaTeX
+### Integração com o documento completo
 
-`versatus-dynamic-cover.tex` é carregado no **preâmbulo** do `main-dynamic.tex` (antes do `\begin{document}`), o que permite:
+`versatus-dynamic-cover.tex` é carregado no **preâmbulo** de `main.tex` (via `\IfFileExists`), o que propaga a identidade visual da marca para todo o documento:
 
-1. `\setmainfont{<fonte>}` com cadeia de fallback — fonte da marca sem travar se não instalada
-2. `\definecolor{VSBlack}{HTML}{...}` etc. — sobrescreve as cores `VS*` definidas em `versatus-colors.sty` com os valores exatos da marca ativa
+| O que muda                    | Como                                                                      |
+|-------------------------------|---------------------------------------------------------------------------|
+| Fonte do documento            | `\setmainfont{<fonte>}` no preâmbulo                                      |
+| Cores de títulos/links/regras | `\definecolor{VSBlack/VSRed/VSTeal...}` sobrescreve `versatus-colors.sty` |
+| Logo no rodapé                | `\renewcommand{\VSBrandFooterLogo}` — logo alt 0,5 cm de altura           |
+| Marca d'água                  | `\renewcommand{\VSBrandWatermark}` — logo dark 12 cm, 3% opacidade        |
+| Capa dinâmica                 | `\VSBookCoverDynamic` renderiza `\RenderDynamicCover`                     |
 
-Isso significa que `versatus-covers.sty` (que usa `VSBlack`, `VSRed`, `VSMutedText` etc. no overlay de texto) herda automaticamente as cores da marca — **sem nenhuma modificação nos `.sty` existentes**.
+Quando o pipeline **não foi rodado** (primeiro compile), `\IfFileExists` não encontra o arquivo e o documento compila normalmente com a identidade visual padrão da Versatus.
 
-### Fallback automático de contraste (separador VSRed)
+### Fallback automático de contraste (VSRed / links)
 
-O separador horizontal no overlay de texto usa a cor `VSRed` (= `accent_2`). Em marcas onde `accent_2` tem contraste insuficiente com `bg_primary` (ratio WCAG < 2,5), o sistema substitui automaticamente `VSRed` pela cor `light` da marca (geralmente branco), garantindo visibilidade sem intervenção manual.
+`VSRed` é usado como `linkcolor` em todo o documento. Em marcas onde `accent_2` tem contraste insuficiente com `bg_primary` (ratio WCAG < 2,5), o sistema substitui por `muted` (cinza médio, ~4,7:1 de contraste no papel branco) em vez de `light` (que seria branco sobre branco).
 
-Exemplo Kosen: `accent_2 = #3B3CD0` vs `bg_primary = #4038FF` → ratio ≈ 1,19 → troca automática por `light = #FFFFFF`.
+Exemplo Kosen: `accent_2 = #3B3CD0` vs `bg_primary = #4038FF` → ratio ≈ 1,19 → substituição por `muted = #757576`.
 
 ### Mapeamento brand.json → cores LaTeX
 
-| Cor LaTeX (`versatus-covers.sty`) | Papel no `brand.json` |
-|-----------------------------------|-----------------------|
-| `VSBlack`                         | `bg_primary`          |
-| `VSGraphite`                      | `bg_secondary`        |
-| `VSTeal`                          | `accent_1`            |
-| `VSRed`                           | `accent_2`            |
-| `VSSilver`                        | `neutral`             |
-| `VSPaperWhite`                    | `light`               |
-| `VSMutedText`                     | `muted`               |
+| Cor LaTeX        | Papel no `brand.json` | Uso no documento                          |
+|------------------|-----------------------|-------------------------------------------|
+| `VSBlack`        | `bg_primary`          | Títulos de capítulo/seção, texto primário |
+| `VSGraphite`     | `bg_secondary`        | Subtítulos, elementos secundários         |
+| `VSTeal`         | `accent_1`            | Links externos, destaques                 |
+| `VSRed`          | `accent_2`            | Links de capítulo, separadores na capa    |
+| `VSSilver`       | `neutral`             | Decorações neutras                        |
+| `VSPaperWhite`   | `light`               | Fundo do papel, zonas claras              |
+| `VSMutedText`    | `muted`               | Texto de rodapé, anotações                |
 
 ### Estrutura do arquivo gerado (`versatus-dynamic-cover.tex`)
 
 ```
-% cabeçalho (gerado automaticamente)
-% === Brand preamble ===
-\IfFontExistsTF{<fonte>}{ \setmainfont{...} }{ fallback... }
+% Cabeçalho com metadados (gerado automaticamente — não editar)
+% === Brand preamble: <Empresa> ===
+\IfFontExistsTF{<fonte>}{ \setmainfont{...} }{ fallback Noto Sans / LM Sans }
 \definecolor{VSBlack}{HTML}{...}
 ... (demais cores VS*)
+\definecolor{VSCoverFg}{HTML}{...}     ← cor de texto na capa (adapta ao fundo)
 % === end brand preamble ===
 
-\newcommand{\Logo<Marca><Variante>}[1]{ ... }   ← logo inlinado
+\newcommand{\Logo<Marca><VarianteCapa>}[1]{ ... }    ← logo da capa (inline)
+\newcommand{\Logo<Marca><VarianteRodapé>}[1]{ ... }  ← logo alt para rodapé (inline, se diferente)
+\newcommand{\Logo<Marca><VarianteMarca>}[1]{ ... }   ← logo dark para marca d'água (inline, se diferente)
+
+\renewcommand{\VSBrandFooterLogo}{%
+  \resizebox{!}{0.50cm}{\begin{tikzpicture}...\Logo<Marca>Alt{(0,0)}...\end{tikzpicture}}
+}
+\renewcommand{\VSBrandWatermark}{%
+  \ifVSWatermark
+  \begin{tikzpicture}[remember picture, overlay]
+    \node[opacity=0.030, ...] {\resizebox{12cm}{!}{...\Logo<Marca>Dark{(0,0)}...}};
+  \end{tikzpicture}%
+  \fi
+}
 
 \newcommand{\RenderDynamicCover}{%
   \definecolor{bg_primary}{HTML}{...}
   ... (cores dos papéis semânticos)
   \begin{tikzpicture}[...]
     ... (geometria extraída da imagem de referência)
-    \Logo<Marca><Variante>{(x, y)}               ← chamada do logo
+    % LOGO_PLACEMENT x=X y=Y height=H bg=ROLE
+    \Logo<Marca><Variante>{(x, y)}   ← logo posicionado pelo VLM
   \end{tikzpicture}%
 }
 ```
@@ -335,60 +406,67 @@ Exemplo Kosen: `accent_2 = #3B3CD0` vs `bg_primary = #4038FF` → ratio ≈ 1,19
 
 ### Versatus HPC
 
-| Campo          | Valor                  |
-|----------------|------------------------|
-| Fonte          | Source Sans Pro        |
-| `bg_primary`   | `#201F1E` (charcoal)   |
-| `bg_secondary` | `#2B2928` (grafite)    |
-| `accent_1`     | `#4CB6B4` (teal)       |
-| `accent_2`     | `#DD4F51` (vermelho)   |
-| `neutral`      | `#BCB9B9` (prata)      |
-| `light`        | `#FFFFFF` (branco)     |
-| `muted`        | `#5D5956` (cinza muted)|
+| Campo          | Valor                   |
+|----------------|-------------------------|
+| Fonte          | Source Sans Pro         |
+| `bg_primary`   | `#201F1E` (charcoal)    |
+| `bg_secondary` | `#2B2928` (grafite)     |
+| `accent_1`     | `#4CB6B4` (teal)        |
+| `accent_2`     | `#DD4F51` (vermelho)    |
+| `neutral`      | `#BCB9B9` (prata)       |
+| `light`        | `#FFFFFF` (branco)      |
+| `muted`        | `#5D5956` (cinza muted) |
 
 ### Kosen Energy
 
-| Campo             | Valor                                         |
-|-------------------|-----------------------------------------------|
-| Fonte             | Work Sans                                     |
-| `bg_primary`      | `#4038FF` (azul)                              |
-| `bg_secondary`    | `#C7B99C` (bege)                              |
-| `accent_1`        | `#C7B99C` (bege)                              |
-| `accent_2`        | `#3B3CD0` (azul escuro)                       |
-| `neutral`         | `#C6C6C8` (cinza claro)                       |
-| `light`           | `#FFFFFF` (branco)                            |
-| `muted`           | `#757576` (cinza)                             |
-| `logo_height_cm`  | `1.5` (logos convertidos a 1,5 cm de altura)  |
-| `logo_position`   | `[1.5, 27.0]`                                 |
-| `text_panel`      | `bg_primary, 85% opacity, y: 4,5→25,5`       |
+| Campo            | Valor                                        |
+|------------------|----------------------------------------------|
+| Fonte            | Work Sans                                    |
+| `bg_primary`     | `#4038FF` (azul)                             |
+| `bg_secondary`   | `#C7B99C` (bege)                             |
+| `accent_1`       | `#C7B99C` (bege)                             |
+| `accent_2`       | `#3B3CD0` (azul escuro)                      |
+| `neutral`        | `#C6C6C8` (cinza claro)                      |
+| `light`          | `#FFFFFF` (branco)                           |
+| `muted`          | `#757576` (cinza)                            |
+| `logo_height_cm` | `1.5`                                        |
+| `logo_position`  | `[1.5, 27.0]`                                |
 
-> `VSRed` → fallback automático para `#FFFFFF` (branco): `accent_2 #3B3CD0` tem ratio 1,19 com `bg_primary #4038FF`.
+> `VSRed` usa fallback para `muted = #757576` (cinza): `accent_2 #3B3CD0` tem ratio 1,19 com `bg_primary #4038FF` — ambos azuis similares.
 
 ---
 
 ## Outputs Gerados
 
-| Arquivo                                  | Quando é gerado                  | Pode deletar? |
-|------------------------------------------|----------------------------------|---------------|
-| `styles/versatus-dynamic-cover.tex`      | A cada execução do pipeline      | Sim — regenerado automaticamente |
-| `build/pdf/main-dynamic.pdf`             | A cada compilação LuaLaTeX       | Sim           |
-| `build/aux/main-dynamic.log`             | A cada compilação                | Sim           |
-| `automation/output/canvas_last.tikz`     | A cada chamada ao Gemini         | Sim (debug)   |
-| `brands/<marca>/logos/*.tikz`            | Por `convert_logos.py`           | Não — necessários para o pipeline |
+| Arquivo                              | Quando é gerado                      | Pode deletar? |
+|--------------------------------------|--------------------------------------|---------------|
+| `styles/versatus-dynamic-cover.tex`  | A cada execução do pipeline          | Sim — regenerado automaticamente |
+| `build/pdf/main-dynamic.pdf`         | A cada compilação da capa            | Sim           |
+| `build/pdf/main.pdf`                 | Quando `--full-build` é usado        | Sim           |
+| `build/aux/`                         | A cada compilação                    | Sim           |
+| `automation/output/canvas_last.tikz` | A cada chamada ao Gemini             | Sim (usado por `--reuse`) |
+| `automation/output/cover_preview.png`| A cada compilação (Fase 3)           | Sim           |
+| `brands/<marca>/logos/*.tikz`        | Por `convert_logos.py`               | Não — necessários para o pipeline |
 
 ---
 
 ## Requisitos
 
 ### Python
+```bash
+pip install google-genai svgelements pymupdf
 ```
-pip install google-genai svgelements
-```
+
+| Pacote       | Uso                                           |
+|--------------|-----------------------------------------------|
+| `google-genai` | Chamadas ao Gemini Vision (Fase 1 e 4)      |
+| `svgelements`  | Conversão SVG→TikZ (puro Python, sem GTK)   |
+| `pymupdf`      | Renderização PDF→PNG para preview (Fase 3)  |
 
 ### LaTeX
 - LuaLaTeX (via MiKTeX ou TeX Live)
 - `latexmk`
-- Pacotes: `fontspec`, `tikz`, `xcolor`, `etoolbox`, `microtype`, `babel`
+- Pacotes: `fontspec`, `tikz`, `xcolor`, `etoolbox`, `microtype`, `babel`, `tocloft`, `titlesec`, `eso-pic`, `zref`
 
 ### Fontes
-As fontes das marcas precisam estar instaladas no sistema operacional para serem usadas. Se não estiverem, o sistema faz fallback automático: `Noto Sans` → `Latin Modern Sans`. O PDF compila normalmente em qualquer caso.
+As fontes das marcas precisam estar instaladas no sistema operacional. Se não estiverem, o sistema faz fallback automático: `Noto Sans` → `Latin Modern Sans`. O PDF compila normalmente em qualquer caso.

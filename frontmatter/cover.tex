@@ -1,1 +1,5 @@
-\VSBookCover
+\IfFileExists{styles/versatus-dynamic-cover.tex}{%
+  \VSBookCoverDynamic%
+}{%
+  \VSBookCover%
+}

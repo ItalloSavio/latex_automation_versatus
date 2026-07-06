@@ -1,5 +1,5 @@
 \newcommand{\RenderDynamicCover}{%
-% LOGO_PLACEMENT x=1.5 y=26.0 height=1.5 bg=neutral
+% LOGO_PLACEMENT x=1.5 y=27.0 height=1.5 bg=light
 \definecolor{bg_primary}{HTML}{201F1E}
 \definecolor{bg_secondary}{HTML}{2B2928}
 \definecolor{accent_1}{HTML}{4CB6B4}
@@ -11,65 +11,50 @@
   shift={(current page.south west)}, x=1cm, y=1cm]
   %
   % --- BACKGROUND ---
-  % Main background for text area and bleed
-  \fill[neutral] (-1,-1) rectangle (22, 30.7);
-
-  % Geometric pattern (20x20cm square, centered horizontally, top 2/3 of page)
-  % Left edge: 0.5cm, Right edge: 20.5cm
-  % Bottom edge: 9.7cm, Top edge: 29.7cm
-  % Center point of the pattern: (10.5, 19.7)
-
-  % Top-left square (Dark Blue in reference)
-  \fill[bg_primary] (0.5, 19.7) rectangle (10.5, 29.7);
-
-  % Top-right quadrant (split diagonally)
-  % Top-left triangle (Bright Cyan in reference)
-  \fill[accent_1] (10.5, 19.7) -- (10.5, 29.7) -- (20.5, 29.7) -- cycle;
-  % Bottom-right triangle (Green in reference)
-  \fill[accent_1] (10.5, 19.7) -- (20.5, 19.7) -- (20.5, 29.7) -- cycle;
-
-  % Bottom-left quadrant (split diagonally)
-  % Top-left triangle (Magenta in reference)
-  \fill[accent_2] (0.5, 19.7) -- (0.5, 9.7) -- (10.5, 19.7) -- cycle;
-  % Bottom-right triangle (Red in reference)
-  \fill[accent_2] (0.5, 9.7) -- (10.5, 9.7) -- (10.5, 19.7) -- cycle;
-
-  % Bottom-right quadrant (split diagonally)
-  % Top-left triangle (White/Light Grey in reference)
-  \fill[light] (10.5, 19.7) -- (10.5, 9.7) -- (20.5, 9.7) -- cycle;
-  % Bottom-right triangle (Yellow in reference)
-  \fill[muted] (10.5, 19.7) -- (20.5, 19.7) -- (20.5, 9.7) -- cycle;
-
   %
+  % Base background (covers light zones: Top-Left, Middle-Right, Bottom-Left)
+  \fill[light] (-1,-1) rectangle (22, 30.7);
+
+  % Top-Right Block (y: 19.8 to 29.7)
+  \fill[accent_2] (10.5, 19.8) -- (10.5, 30.7) -- (22, 19.8) -- cycle;
+  \fill[bg_primary] (10.5, 30.7) -- (22, 30.7) -- (22, 19.8) -- cycle;
+
+  % Middle-Left Block (y: 9.9 to 19.8)
+  \fill[bg_primary] (-1, 19.8) -- (10.5, 19.8) -- (-1, 9.9) -- cycle;
+  \fill[accent_2] (-1, 9.9) -- (10.5, 19.8) -- (10.5, 9.9) -- cycle;
+
+  % Bottom-Right Block (y: 0 to 9.9)
+  \fill[accent_2] (10.5, 9.9) -- (10.5, -1) -- (22, 9.9) -- cycle;
+  \fill[bg_primary] (10.5, -1) -- (22, -1) -- (22, 9.9) -- cycle;
+
   % --- TEXT ---
-  % Book Title (david bowie)
-  \node[anchor=south west, text width=15cm, align=left] at (3.5, 12.0) {%
-    {\fontsize{32}{38}\selectfont\bfseries\color{VSCoverFg}\BookTitle}%
+  %
+  % Author / Info (Top-Right Orange Zone)
+  \node[anchor=north west, text width=9cm, align=flush left] at (11.0, 25.0) {%
+    {\fontsize{12}{16}\selectfont\bfseries\color{VSCoverFg}\BookAuthor}%
   };
 
-  % Separator line
-  \draw[VSRed, line width=1.2pt] (3.5, 11.0) -- (18.5, 11.0);
-
-  % Bottom text columns
-  % Column 1: Book Description
-  \node[anchor=south west, text width=5cm, align=left] at (3.5, 2.5) {%
-    {\fontsize{11}{15}\selectfont\color{VSCoverSubFg}\BookDescription}%
+  % Subtitle (Middle-Right Light Zone, Top)
+  \node[anchor=north west, text width=9cm, align=flush left] at (11.0, 18.5) {%
+    {\fontsize{14}{18}\selectfont\bfseries\color{VSCoverSubFg}\BookSubtitle}%
   };
 
-  % Column 2: Book Subtitle (used for event details)
-  \node[anchor=south west, text width=5cm, align=left] at (9.5, 2.5) {%
-    {\fontsize{11}{15}\selectfont\color{VSCoverSubFg}\BookSubtitle}%
+  % Separator Line
+  \draw[VSRed, line width=1.2pt] (11.0, 14.85) -- (20.0, 14.85);
+
+  % Title (Middle-Right Light Zone, Bottom)
+  \node[anchor=south west, text width=9cm, align=flush left] at (11.0, 10.5) {%
+    {\fontsize{50}{55}\selectfont\bfseries\color{VSCoverFg}\BookTitle}%
   };
 
-  % Column 3: Book Date | Book Version
-  \node[anchor=south west, text width=5cm, align=left] at (15.5, 2.5) {%
-    {\fontsize{10}{14}\selectfont\color{VSCoverFaintFg}\BookDate\ |\ \BookVersion}%
+  % Description (Bottom-Right Orange Zone)
+  \node[anchor=north west, text width=9cm, align=flush left] at (11.0, 8.5) {%
+    {\fontsize{12}{16}\selectfont\bfseries\color{VSCoverSubFg}\BookDescription}%
   };
 
-  % Book Author (required, but no explicit author in image other than title)
-  % This node will be invisible if \BookAuthor is empty.
-  \node[anchor=south west, text width=5cm, align=left] at (3.5, 1.5) {%
-    {\fontsize{11}{15}\selectfont\color{VSCoverMutedFg}\BookAuthor}%
+  % Date / Version (Bottom-Left Light Zone)
+  \node[anchor=south west, text width=9cm, align=flush left] at (1.5, 1.5) {%
+    {\fontsize{10}{14}\selectfont\color{VSCoverFaintFg}\BookDate\ | \ \BookVersion}%
   };
 
 \end{tikzpicture}%

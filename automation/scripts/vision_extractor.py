@@ -30,11 +30,12 @@ from pathlib import Path
 _HERE        = Path(__file__).resolve().parent   # automation/scripts/
 _AUTOMATION  = _HERE.parent                       # automation/
 _PROJECT_ROOT = _AUTOMATION.parent                # project root
-_PROMPT_PATH = _AUTOMATION / "prompt" / "vision_prompt.txt"
-_OUTPUT_DIR  = _AUTOMATION / "output"
-_BRANDS_DIR  = _PROJECT_ROOT / "brands"
-_DEFAULT_TEX = _AUTOMATION.parent / "styles" / "versatus-dynamic-cover.tex"
-_DEFAULT_RAW = _OUTPUT_DIR / "canvas_last.tikz"
+_PROMPT_PATH        = _AUTOMATION / "prompt" / "vision_prompt.txt"
+_REFINE_HEADER_PATH = _AUTOMATION / "prompt" / "refine_header.txt"
+_OUTPUT_DIR         = _AUTOMATION / "output"
+_BRANDS_DIR         = _PROJECT_ROOT / "brands"
+_DEFAULT_TEX        = _AUTOMATION.parent / "styles" / "versatus-dynamic-cover.tex"
+_DEFAULT_RAW        = _OUTPUT_DIR / "canvas_last.tikz"
 
 # ─── MIME map ─────────────────────────────────────────────────────────────────
 
@@ -211,13 +212,14 @@ def _build_brand_preamble(
         hexval = brand_colors.get(role, "")
         if not hexval:
             continue
-        # VSRed is used as the separator rule in the text overlay. If accent_2
-        # has low contrast against bg_primary the separator becomes invisible,
-        # so fall back to the brand's light color.
+        # VSRed is also used as linkcolor in the document body (white paper).
+        # If accent_2 has low contrast against bg_primary (same-hue brands),
+        # fall back to `muted` (mid-gray, ~4.7:1 on white) — never to `light`
+        # (white), which would make hyperlinks invisible on white paper.
         if vs_name == "VSRed" and bg_primary_hex:
             cr = _contrast_ratio(hexval, bg_primary_hex)
             if cr < 2.5:
-                hexval = brand_colors.get("light", "#FFFFFF")
+                hexval = brand_colors.get("muted", "#5D5956")
         clean = str(hexval).lstrip("#").upper()
         color_lines.append(f"\\definecolor{{{vs_name}}}{{HTML}}{{{clean}}}")
 
@@ -517,6 +519,75 @@ def _validate_tikz(block: str) -> list[str]:
     return warnings
 
 
+# ─── Refinement API call ─────────────────────────────────────────────────────
+
+def _call_gemini_refine(
+    ref_bytes:     bytes,
+    ref_mime:      str,
+    result_bytes:  bytes,
+    system_prompt: str,
+    model:         str,
+    client,
+) -> str:
+    """
+    Send two images (reference + current result) to Gemini and return the raw text.
+    Structure mirrors _call_gemini_single but takes two image blobs.
+    """
+    from google.genai import types  # noqa: PLC0415
+
+    _BACKOFF = [10, 20]
+
+    for _try in range(len(_BACKOFF) + 1):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part(inline_data=types.Blob(data=ref_bytes,    mime_type=ref_mime)),
+                            types.Part(inline_data=types.Blob(data=result_bytes, mime_type="image/png")),
+                            types.Part(text=(
+                                "Image 1 is the REFERENCE cover. "
+                                "Image 2 is the CURRENT RESULT. "
+                                "Output the corrected \\RenderDynamicCover as instructed."
+                            )),
+                        ],
+                    )
+                ],
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=0.1,
+                    max_output_tokens=32768,
+                ),
+            )
+            try:
+                return response.text
+            except (AttributeError, ValueError) as exc:
+                candidates = getattr(response, "candidates", [])
+                if candidates:
+                    parts = getattr(candidates[0].content, "parts", [])
+                    if parts:
+                        return parts[0].text
+                finish = (
+                    getattr(candidates[0], "finish_reason", "DESCONHECIDO")
+                    if candidates else "SEM_CANDIDATOS"
+                )
+                raise RuntimeError(f"Modelo sem texto (finish_reason={finish}).") from exc
+
+        except Exception as _exc:
+            _s       = str(_exc)
+            _is_busy = "503" in _s or "UNAVAILABLE" in _s or "overloaded" in _s.lower()
+            if _is_busy and _try < len(_BACKOFF):
+                _w = _BACKOFF[_try]
+                print(f"    [!] {model}: sobrecarregado — aguardando {_w}s…")
+                time.sleep(_w)
+            else:
+                raise
+
+    raise RuntimeError(f"{model}: falhou apos {len(_BACKOFF)+1} tentativas.")
+
+
 # ─── Post-extraction helpers ─────────────────────────────────────────────────
 
 def _detect_bg_from_tikz(block: str, brand_colors: "dict[str, str]") -> str:
@@ -557,6 +628,166 @@ def _parse_logo_placement(block: str) -> "dict | None":
         "height": float(m.group(3)),
         "bg":     m.group(4),
     }
+
+
+# ─── Shared finalization (used by extract_tikz + refine_tikz) ───────────────
+
+def _finalize_block(
+    block:        str,
+    brand:        "str | None",
+    brand_data:   dict,
+    brand_colors: "dict[str, str] | None",
+) -> "tuple[str, str, str]":
+    """
+    Apply all post-extraction steps to a raw TikZ block:
+      1. Enforce brand color hex values deterministically
+      2. Inject logo (dynamic variant, position, and scale from LOGO_PLACEMENT)
+      3. Build brand preamble (font + VSCover* fg colors from actual background)
+
+    Returns
+    -------
+    (brand_preamble, logo_inline, modified_block)
+        Caller is responsible for writing to disk.
+    """
+    # ── 1. Brand color enforcement ────────────────────────────────────────────
+    if brand_colors:
+        block, off_palette = _enforce_brand_colors(block, brand_colors)
+        if off_palette:
+            print(f"    [!] Cores fora da paleta (mantidas): {sorted(set(off_palette))}")
+        else:
+            print(f"    [OK] Todas as cores forcadas para a paleta de '{brand}'.")
+
+    # ── 2. Logo — dynamic variant, position, and scale ────────────────────────
+    logo_inline = ""
+    if brand and brand_colors:
+        brand_dir_path = _BRANDS_DIR / brand
+        available      = set(brand_data.get("logos", {}).keys())
+
+        placement = _parse_logo_placement(block)
+        if placement:
+            pos            = [placement["x"], placement["y"]]
+            logo_bg_hex    = str(
+                brand_colors.get(placement["bg"],
+                                 brand_colors.get("bg_primary", "#808080"))
+            ).lstrip("#")
+            desired_height = placement["height"]
+            print(
+                f"    [logo] LOGO_PLACEMENT: pos=({pos[0]}, {pos[1]}), "
+                f"height={desired_height}cm, bg={placement['bg']}"
+            )
+        else:
+            pos            = brand_data.get("logo_position", [1.5, 26.5])
+            logo_bg_hex    = str(brand_colors.get("bg_primary", "#808080")).lstrip("#")
+            desired_height = None
+            print("    [!] [logo] LOGO_PLACEMENT ausente — usando logo_position do brand.json")
+
+        variant            = _choose_logo_variant(logo_bg_hex, available)
+        logo_inline, macro = _inline_logo(brand_dir_path, brand_data, variant, brand)
+
+        if macro:
+            native_height = float(brand_data.get("logo_height_cm", 3.0))
+            scale         = (desired_height / native_height) if desired_height else 1.0
+            lum           = _luminance(logo_bg_hex)
+            end_marker    = "\\end{tikzpicture}%"
+
+            if end_marker in block:
+                if abs(scale - 1.0) > 0.005:
+                    logo_call = (
+                        f"  \\begin{{scope}}[shift={{({pos[0]}, {pos[1]})}}, "
+                        f"xscale={scale:.4f}, yscale={scale:.4f}]\n"
+                        f"    \\{macro}{{(0,0)}}\n"
+                        f"  \\end{{scope}}"
+                    )
+                else:
+                    logo_call = f"  \\{macro}{{({pos[0]}, {pos[1]})}}"
+                block = block.replace(end_marker, logo_call + "\n" + end_marker, 1)
+                print(
+                    f"    [logo] variante='{variant}' (lum={lum:.3f}), "
+                    f"scale={scale:.3f} -> \\{macro}"
+                )
+            else:
+                print("    [!] [logo] \\end{tikzpicture}% nao encontrado no bloco.")
+        else:
+            print(f"    [!] [logo] {logo_inline.strip()}")
+
+        # ── 2b. Footer logo + watermark macro definitions ─────────────────────
+        # Prefer 'alt' (symbol) for footer, 'dark' for watermark; fall back to
+        # the cover variant when the preferred one is absent.
+        footer_variant = "alt"  if "alt"  in available else variant
+        wm_variant     = "dark" if "dark" in available else variant
+        extra_logos    = ""
+        # Only generate macros for variants whose .tikz file was actually found
+        actually_have  = {variant} if macro else set()
+
+        for vname in dict.fromkeys([footer_variant, wm_variant]):
+            if vname not in actually_have and vname in available:
+                extra_c, extra_m = _inline_logo(brand_dir_path, brand_data, vname, brand)
+                if extra_m:
+                    extra_logos += extra_c
+                    actually_have.add(vname)
+
+        fmacro = (
+            f"Logo{_pascal(brand)}{_pascal(footer_variant)}"
+            if footer_variant in actually_have else ""
+        )
+        wmacro = (
+            f"Logo{_pascal(brand)}{_pascal(wm_variant)}"
+            if wm_variant in actually_have else ""
+        )
+
+        if fmacro:
+            extra_logos += (
+                "\\renewcommand{\\VSBrandFooterLogo}{%\n"
+                "  \\resizebox{!}{0.50cm}{%\n"
+                "    \\begin{tikzpicture}[baseline=(current bounding box.south)]%\n"
+                f"      \\{fmacro}{{(0,0)}}%\n"
+                "    \\end{tikzpicture}%\n"
+                "  }%\n"
+                "}\n"
+            )
+
+        if wmacro:
+            extra_logos += (
+                "\\renewcommand{\\VSBrandWatermark}{%\n"
+                "  \\ifVSWatermark\n"
+                "  \\begin{tikzpicture}[remember picture, overlay]%\n"
+                "    \\node[opacity=0.030, anchor=center, inner sep=0pt]\n"
+                "      at (current page.center)\n"
+                "      {\\resizebox{12cm}{!}{%\n"
+                "        \\begin{tikzpicture}%\n"
+                f"          \\{wmacro}{{(0,0)}}%\n"
+                "        \\end{tikzpicture}%\n"
+                "      }};\n"
+                "  \\end{tikzpicture}%\n"
+                "  \\fi\n"
+                "}\n"
+            )
+
+        if extra_logos:
+            logo_inline = logo_inline + extra_logos
+            print(
+                f"    [layout] \\VSBrandFooterLogo -> \\{fmacro or '(none)'}  |  "
+                f"\\VSBrandWatermark -> \\{wmacro or '(none)'}"
+            )
+
+    # ── 3. Brand preamble — font + fg colors from actual bg ──────────────────
+    brand_preamble = ""
+    if brand and brand_colors:
+        bg_hex_actual  = _detect_bg_from_tikz(block, brand_colors)
+        brand_preamble = _build_brand_preamble(
+            brand, brand_data, brand_colors,
+            bg_hex_override=bg_hex_actual or None,
+        )
+        print(
+            f"    [font] {brand_data.get('font', 'N/A')} "
+            f"(com fallback Noto Sans / Latin Modern Sans)"
+        )
+        if bg_hex_actual:
+            bg_lum = _luminance(bg_hex_actual)
+            mode   = "escuro→texto claro" if bg_lum < 0.35 else "claro→texto escuro"
+            print(f"    [fg-color] bg detectado: #{bg_hex_actual} (L={bg_lum:.3f}, {mode})")
+
+    return brand_preamble, logo_inline, block
 
 
 # ─── Public API ───────────────────────────────────────────────────────────────
@@ -709,94 +940,10 @@ def extract_tikz(
             f"Primeiros 400 chars: {last_raw[:400]!r}"
         )
 
-    # ── 3. Brand color enforcement (deterministic, no LLM involved) ──────────
-    if brand_colors:
-        block, off_palette = _enforce_brand_colors(block, brand_colors)
-        if off_palette:
-            print(
-                f"    [!] Cores fora da paleta da marca (mantidas como geradas): "
-                f"{sorted(set(off_palette))}"
-            )
-        else:
-            print(f"    [OK] Todas as cores forcadas para a paleta de '{brand}'.")
-
-    # ── 3b. Logo — dynamic variant, position, and scale ──────────────────────
-    logo_inline     = ""
-    logo_macro_name = ""
-    if brand and brand_colors:
-        brand_dir_path = _BRANDS_DIR / brand
-        available      = set(brand_data.get("logos", {}).keys())
-
-        # Parse LOGO_PLACEMENT comment emitted by VLM (position + height + bg zone)
-        placement = _parse_logo_placement(block)
-        if placement:
-            pos          = [placement["x"], placement["y"]]
-            logo_bg_hex  = str(
-                brand_colors.get(placement["bg"],
-                                 brand_colors.get("bg_primary", "#808080"))
-            ).lstrip("#")
-            desired_height = placement["height"]
-            print(
-                f"    [logo] LOGO_PLACEMENT: pos=({pos[0]}, {pos[1]}), "
-                f"height={desired_height}cm, bg={placement['bg']}"
-            )
-        else:
-            pos            = brand_data.get("logo_position", [1.5, 26.5])
-            logo_bg_hex    = str(brand_colors.get("bg_primary", "#808080")).lstrip("#")
-            desired_height = None
-            print("    [!] [logo] LOGO_PLACEMENT ausente — usando logo_position do brand.json")
-
-        variant = _choose_logo_variant(logo_bg_hex, available)
-        logo_inline, logo_macro_name = _inline_logo(
-            brand_dir_path, brand_data, variant, brand
-        )
-
-        if logo_macro_name:
-            native_height = float(brand_data.get("logo_height_cm", 3.0))
-            scale         = (desired_height / native_height) if desired_height else 1.0
-            lum           = _luminance(logo_bg_hex)
-            end_marker    = "\\end{tikzpicture}%"
-
-            if end_marker in block:
-                if abs(scale - 1.0) > 0.005:
-                    logo_call = (
-                        f"  \\begin{{scope}}[shift={{({pos[0]}, {pos[1]})}}, "
-                        f"xscale={scale:.4f}, yscale={scale:.4f}]\n"
-                        f"    \\{logo_macro_name}{{(0,0)}}\n"
-                        f"  \\end{{scope}}"
-                    )
-                else:
-                    logo_call = f"  \\{logo_macro_name}{{({pos[0]}, {pos[1]})}}"
-
-                block = block.replace(end_marker, logo_call + "\n" + end_marker, 1)
-                print(
-                    f"    [logo] variante='{variant}' (lum={lum:.3f}), "
-                    f"scale={scale:.3f} -> \\{logo_macro_name}"
-                )
-            else:
-                print(f"    [!] [logo] \\end{{tikzpicture}}% nao encontrado no bloco.")
-        else:
-            print(f"    [!] [logo] {logo_inline.strip()}")
-
-    # ── 3c. Brand preamble — font + VS color aliases + dynamic fg colors ─────
-    brand_preamble = ""
-    if brand and brand_colors:
-        # Detect ACTUAL background from the generated TikZ (first large fill)
-        # so VSCoverFg contrast is computed vs what the VLM actually rendered,
-        # not always vs brand.json's bg_primary (which may not be the bg used).
-        bg_hex_actual = _detect_bg_from_tikz(block, brand_colors)
-        brand_preamble = _build_brand_preamble(
-            brand, brand_data, brand_colors,
-            bg_hex_override=bg_hex_actual or None,
-        )
-        print(
-            f"    [font] {brand_data.get('font', 'N/A')} "
-            f"(com fallback Noto Sans / Latin Modern Sans)"
-        )
-        if bg_hex_actual:
-            bg_lum = _luminance(bg_hex_actual)
-            mode   = "escuro→texto claro" if bg_lum < 0.35 else "claro→texto escuro"
-            print(f"    [fg-color] bg detectado: #{bg_hex_actual} (L={bg_lum:.3f}, {mode})")
+    # ── 3. Finalize: enforce colors, inject logo, build preamble ─────────────
+    brand_preamble, logo_inline, block = _finalize_block(
+        block, brand, brand_data, brand_colors or {}
+    )
 
     # ── 4. Validate + write ───────────────────────────────────────────────────
     print("[3/3] Validando e escrevendo macro TikZ…")
@@ -812,6 +959,213 @@ def extract_tikz(
     )
     print(f"    Macro TikZ escrita → {tex_path}")
 
+    return tex_path
+
+
+def reuse_tikz(
+    output_tex: "str | Path | None" = None,
+    brand:      "str | None"        = None,
+) -> Path:
+    """
+    Rebuild versatus-dynamic-cover.tex from the cached canvas_last.tikz
+    WITHOUT calling the Gemini API.
+
+    Re-applies brand enforcement, logo injection, and brand preamble from
+    scratch — useful when brand.json changed (logo size, position, color)
+    and you want to recompile without paying an API call.
+
+    Raises
+    ------
+    FileNotFoundError  if canvas_last.tikz does not exist yet
+    ValueError         if the cached file has no valid \\RenderDynamicCover block
+    """
+    if not _DEFAULT_RAW.exists():
+        raise FileNotFoundError(
+            f"Cache nao encontrado: {_DEFAULT_RAW}\n"
+            f"Execute o pipeline completo ao menos uma vez antes de usar --reuse."
+        )
+
+    tex_path = Path(output_tex).resolve() if output_tex else _DEFAULT_TEX
+
+    print(f"[REUSE] Carregando TikZ em cache: {_DEFAULT_RAW.name}")
+    raw = _DEFAULT_RAW.read_text(encoding="utf-8")
+
+    block, status = _extract_tikz_block(raw)
+    if status != "ok":
+        detail = (
+            "bloco truncado no cache" if status == "truncated"
+            else "\\newcommand{\\RenderDynamicCover} ausente no cache"
+        )
+        raise ValueError(
+            f"Cache invalido: {detail}.\n"
+            f"Delete {_DEFAULT_RAW} e rode o pipeline completo novamente."
+        )
+
+    print(f"[REUSE] Bloco extraido ({len(block)} chars). Reaplicando brand…")
+
+    brand_colors: "dict[str, str] | None" = None
+    brand_data:   dict                    = {}
+    if brand:
+        brand_data   = _load_brand(brand)
+        brand_colors = brand_data.get("colors", {})
+        print(f"    Brand: {brand_data.get('company', brand)}")
+
+    brand_preamble, logo_inline, block = _finalize_block(
+        block, brand, brand_data, brand_colors or {}
+    )
+
+    header = f"% Rebuilt from cache by vision_extractor.reuse_tikz (brand: {brand}) - DO NOT EDIT MANUALLY\n"
+    tex_path.parent.mkdir(parents=True, exist_ok=True)
+    tex_path.write_text(
+        header + brand_preamble + logo_inline + block + "\n",
+        encoding="utf-8",
+    )
+    print(f"[REUSE] Macro TikZ escrita → {tex_path}")
+    return tex_path
+
+
+def refine_tikz(
+    reference_image: "str | Path",
+    result_png:      "str | Path",
+    output_tex:      "str | Path | None" = None,
+    brand:           "str | None"        = None,
+) -> Path:
+    """
+    Second-pass refinement: compare reference image + compiled result PNG,
+    ask Gemini to produce a corrected \\RenderDynamicCover, then finalize
+    (brand enforcement + logo + preamble) and overwrite the .tex file.
+
+    Parameters
+    ----------
+    reference_image : original reference cover image sent to the first pass
+    result_png      : PNG of the compiled cover (from preview_cover.render_pdf_page)
+    output_tex      : destination .tex (default: styles/versatus-dynamic-cover.tex)
+    brand           : brand name under brands/<brand>/brand.json
+
+    Returns
+    -------
+    Path  — path of the written .tex file
+    """
+    try:
+        from google import genai
+    except ImportError as exc:
+        raise ImportError("pip install google-genai") from exc
+
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise EnvironmentError(
+            "GEMINI_API_KEY nao esta definida.\n"
+            "Execute:  set GEMINI_API_KEY=sua_chave  (Windows)"
+        )
+
+    ref_path    = Path(reference_image).resolve()
+    result_path = Path(result_png).resolve()
+    tex_path    = Path(output_tex).resolve() if output_tex else _DEFAULT_TEX
+
+    if not ref_path.exists():
+        raise FileNotFoundError(f"Imagem de referencia nao encontrada: {ref_path}")
+    if not result_path.exists():
+        raise FileNotFoundError(f"PNG do resultado nao encontrado: {result_path}")
+
+    # ── 1. Build system prompt: refine_header + vision rules ─────────────────
+    print("[1/3] Carregando prompt de refinamento…")
+    if not _REFINE_HEADER_PATH.exists():
+        raise FileNotFoundError(f"refine_header.txt nao encontrado: {_REFINE_HEADER_PATH}")
+
+    vision_rules   = _load_prompt()
+    refine_header  = _REFINE_HEADER_PATH.read_text(encoding="utf-8")
+    system_prompt  = refine_header + "\n\n" + vision_rules
+
+    brand_colors: "dict[str, str] | None" = None
+    brand_data:   dict                    = {}
+    if brand:
+        brand_data   = _load_brand(brand)
+        brand_colors = brand_data.get("colors", {})
+        color_block  = _build_color_instructions(brand_colors)
+        system_prompt = system_prompt.replace("{{COLOR_INSTRUCTIONS}}", color_block)
+        print(f"    Brand: {brand_data.get('company', brand)}")
+    else:
+        system_prompt = system_prompt.replace("{{COLOR_INSTRUCTIONS}}", "")
+
+    print(f"    Prompt: {len(system_prompt)} chars")
+
+    # ── 2. Vision API — two images (reference + result) ───────────────────────
+    print("[2/3] Chamando Gemini Vision (refinamento com 2 imagens)…")
+    _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    _env_model = os.environ.get("GEMINI_MODEL", "").strip()
+    if _env_model.startswith("models/"):
+        _env_model = _env_model[len("models/"):]
+    model_chain = [_env_model] if _env_model else _GEMINI_CHAIN
+
+    ref_bytes    = ref_path.read_bytes()
+    result_bytes = result_path.read_bytes()
+    ref_mime     = _detect_mime(ref_path)
+    print(f"    Ref   : {ref_path.name} ({len(ref_bytes)/1024:.1f} KB)")
+    print(f"    Result: {result_path.name} ({len(result_bytes)/1024:.1f} KB)")
+
+    client      = genai.Client(http_options={"api_version": "v1beta"})
+    block       = None
+    last_raw    = ""
+    last_status = "not_found"
+
+    for _model in model_chain:
+        print(f"    Modelo: {_model}")
+        try:
+            raw_text = _call_gemini_refine(
+                ref_bytes, ref_mime, result_bytes, system_prompt, _model, client
+            )
+        except Exception as exc:
+            _s = str(exc)
+            if "401" in _s or "authentication" in _s.lower():
+                raise
+            print(f"    [!] {_model}: {_s[:80]} — tentando proximo…")
+            continue
+
+        if not raw_text:
+            print(f"    [!] {_model}: resposta vazia — tentando proximo…")
+            continue
+
+        print(f"    Resposta: {len(raw_text)} chars")
+        last_raw = raw_text
+        _DEFAULT_RAW.write_text(raw_text, encoding="utf-8")
+
+        block, last_status = _extract_tikz_block(raw_text)
+
+        if last_status == "ok":
+            print(f"    [OK] Bloco TikZ refinado ({len(block)} chars).")
+            break
+        elif last_status == "truncated":
+            print(f"    [!] {_model}: resposta truncada — tentando proximo…")
+            block = None
+        else:
+            print(f"    [!] {_model}: \\RenderDynamicCover ausente — tentando proximo…")
+            block = None
+
+    if block is None:
+        err_path = _DEFAULT_RAW.with_suffix(".refine_error.txt")
+        err_path.write_text(last_raw, encoding="utf-8")
+        raise ValueError(
+            f"Refinamento falhou: bloco TikZ nao encontrado.\n"
+            f"Ultima resposta salva em: {err_path}"
+        )
+
+    # ── 3. Finalize + write ───────────────────────────────────────────────────
+    print("[3/3] Finalizando bloco refinado…")
+    for warning in _validate_tikz(block):
+        print(f"    {warning}")
+
+    brand_preamble, logo_inline, block = _finalize_block(
+        block, brand, brand_data, brand_colors or {}
+    )
+
+    header = f"% Refined by vision_extractor.refine_tikz (brand: {brand}) - DO NOT EDIT MANUALLY\n"
+    tex_path.parent.mkdir(parents=True, exist_ok=True)
+    tex_path.write_text(
+        header + brand_preamble + logo_inline + block + "\n",
+        encoding="utf-8",
+    )
+    print(f"    Macro TikZ refinada → {tex_path}")
     return tex_path
 
 

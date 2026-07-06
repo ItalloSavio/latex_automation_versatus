@@ -13,6 +13,14 @@
 \usepackage{styles/versatus-environments}
 \usepackage{styles/versatus-covers}
 
+% ── Brand injection (gerado pelo pipeline: build_cover.py --brand <nome>) ─────
+% Redefine fonte, cores VS* e \RenderDynamicCover para a marca selecionada.
+% Quando o arquivo nao existe (primeira vez, sem pipeline), o documento compila
+% normalmente com a identidade visual padrao da Versatus.
+\IfFileExists{styles/versatus-dynamic-cover.tex}{%
+  \input{styles/versatus-dynamic-cover}%
+}{}
+
 \hypersetup{
   pdftitle={\BookTitle},
   pdfauthor={\BookAuthor},

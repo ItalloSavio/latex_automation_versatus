@@ -30,11 +30,18 @@ Optional env var:  GEMINI_MODEL  (default: gemini-2.5-flash)
 
 import argparse
 import importlib.util
-import io
-import json
 import sys
 import time
+import traceback
 from pathlib import Path
+
+try:
+    import tomllib  # stdlib Python 3.11+
+except ImportError:
+    try:
+        import tomli as tomllib  # pip install tomli
+    except ImportError:
+        tomllib = None  # config file disabled; use CLI defaults
 
 # Force UTF-8 stdout/stderr so box-drawing and emoji characters work on Windows
 # (Windows PowerShell defaults to cp1252 which doesn't support these code points)
@@ -49,13 +56,50 @@ _HERE         = Path(__file__).resolve().parent          # automation/scripts/
 _AUTOMATION   = _HERE.parent                             # automation/
 _PROJECT_ROOT = _AUTOMATION.parent                       # project root
 
-_DEFAULT_TEX = _PROJECT_ROOT / "styles" / "versatus-dynamic-cover.tex"
+_DEFAULT_TEX    = _PROJECT_ROOT / "styles" / "versatus-dynamic-cover.tex"
+_PIPELINE_TOML  = _PROJECT_ROOT / "automation" / "pipeline.toml"
+
+# ─── Config file ──────────────────────────────────────────────────────────────
+
+def _load_config() -> dict:
+    """
+    Load automation/pipeline.toml if it exists.
+    Returns a flat dict of argparse-compatible keys, e.g. {"brand": "versatus", "dpi": 150}.
+    Silently returns {} when the file is absent or tomllib is unavailable.
+    """
+    if tomllib is None or not _PIPELINE_TOML.exists():
+        return {}
+    try:
+        with open(_PIPELINE_TOML, "rb") as f:
+            raw = tomllib.load(f)
+    except Exception as exc:
+        print(f"[!] Aviso: nao foi possivel ler {_PIPELINE_TOML.name}: {exc}", file=sys.stderr)
+        return {}
+
+    cfg: dict = {}
+    p = raw.get("pipeline", {})
+    c = raw.get("compile",  {})
+    r = raw.get("refine",   {})
+
+    if "brand"      in p: cfg["brand"]         = p["brand"]
+    if "main"       in p: cfg["main_tex"]       = p["main"]
+    if "dpi"        in c: cfg["dpi"]            = int(c["dpi"])
+    if "full_build" in c: cfg["full_build"]     = bool(c["full_build"])
+    if "no_preview" in c: cfg["no_preview"]     = bool(c["no_preview"])
+    if "enabled"    in r: cfg["refine"]         = bool(r["enabled"])
+    if "passes"     in r: cfg["refine_passes"]  = int(r["passes"])
+
+    return cfg
+
 
 # ─── Module loader ────────────────────────────────────────────────────────────
 
 def _load_module(name: str, file_path: Path):
+    if name in sys.modules:
+        return sys.modules[name]
     spec = importlib.util.spec_from_file_location(name, file_path)
     mod  = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod  # cache before exec to handle re-entrant imports
     spec.loader.exec_module(mod)
     return mod
 
@@ -100,7 +144,6 @@ def _step_refine(
     result_png: Path,
     tex_path:   Path,
     brand:      "str | None",
-    pass_num:   int,
 ) -> None:
     """Phase 4 — Ask Gemini to compare reference vs result and output corrected TikZ."""
     extractor = _load_module("vision_extractor", _HERE / "vision_extractor.py")
@@ -196,6 +239,11 @@ def _parse_args() -> argparse.Namespace:
         metavar = "N",
         help    = "Resolucao do preview PNG (default: 150)",
     )
+    # Apply pipeline.toml defaults — CLI flags still override
+    cfg = _load_config()
+    if cfg:
+        parser.set_defaults(**cfg)
+
     return parser.parse_args()
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -255,20 +303,20 @@ def main() -> int:
 
     compiler = _load_module("latex_compiler", _AUTOMATION / "core" / "latex_compiler.py")
 
-    def _compile() -> "Path | int":
-        """Run LuaLaTeX; return pdf_path on success, error code int on failure."""
-        print(f"\n[Phase 2] Compilando com LuaLaTeX…")
-        print(f"          Entry : {args.main_tex}")
+    def _compile(tex_file: str, label: str = "Phase 2") -> "Path | int":
+        """Run LuaLaTeX on tex_file; return pdf_path on success, int error code on failure."""
+        print(f"\n[{label}] Compilando com LuaLaTeX…")
+        print(f"          Entry : {tex_file}")
         print(f"          Macro : {tex_path.relative_to(_PROJECT_ROOT)}")
         try:
             return compiler.compile_with_healing(
                 project_root    = _PROJECT_ROOT,
                 output_tex_path = tex_path,
-                tex_file        = args.main_tex,
+                tex_file        = tex_file,
                 tikz_ready      = True,
             )
         except compiler.CompilationError as exc:
-            print(f"\n[Phase 2 FALHOU] Compilacao falhou.", file=sys.stderr)
+            print(f"\n[{label} FALHOU] Compilacao falhou.", file=sys.stderr)
             print(f"  Log  : {exc.log_path}", file=sys.stderr)
             print(
                 f"  Erro : {exc.errors[0].splitlines()[0][:120] if exc.errors else '(nenhum)'}",
@@ -276,13 +324,12 @@ def main() -> int:
             )
             return 5
         except Exception as exc:
-            import traceback
-            print(f"\n[Phase 2 FALHOU] {type(exc).__name__}: {exc}", file=sys.stderr)
+            print(f"\n[{label} FALHOU] {type(exc).__name__}: {exc}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
             return 6
 
     # ── Phase 2: Compilacao LuaLaTeX ─────────────────────────────────────────
-    result = _compile()
+    result = _compile(args.main_tex)
     if isinstance(result, int):
         return result
     pdf_path = result
@@ -310,7 +357,7 @@ def main() -> int:
             for i in range(1, passes + 1):
                 print(f"\n[Phase 4] Refinamento — passagem {i}/{passes}…")
                 try:
-                    _step_refine(image_path, preview_png, tex_path, args.brand, i)
+                    _step_refine(image_path, preview_png, tex_path, args.brand)
                 except Exception as exc:
                     print(
                         f"\n[Phase 4 FALHOU] {type(exc).__name__}: {exc}",
@@ -319,7 +366,7 @@ def main() -> int:
                     break
 
                 # Recompilar com TikZ refinado
-                result = _compile()
+                result = _compile(args.main_tex)
                 if isinstance(result, int):
                     return result
                 pdf_path = result
@@ -333,27 +380,10 @@ def main() -> int:
     # ── Phase 5: Full book (optional) ────────────────────────────────────────
     full_pdf_path = None
     if args.full_build:
-        main_tex = "main.tex"
-        print(f"\n[Phase 5] Compilando livro completo: {main_tex}")
-        try:
-            full_pdf_path = compiler.compile_with_healing(
-                project_root    = _PROJECT_ROOT,
-                output_tex_path = tex_path,
-                tex_file        = main_tex,
-                tikz_ready      = True,
-            )
+        result5 = _compile("main.tex", label="Phase 5")
+        if isinstance(result5, Path):
+            full_pdf_path = result5
             print(f"          Livro  : {full_pdf_path}")
-        except compiler.CompilationError as exc:
-            print(f"\n[Phase 5 FALHOU] Compilacao do livro falhou.", file=sys.stderr)
-            print(f"  Log  : {exc.log_path}", file=sys.stderr)
-            print(
-                f"  Erro : {exc.errors[0].splitlines()[0][:120] if exc.errors else '(nenhum)'}",
-                file=sys.stderr,
-            )
-        except Exception as exc:
-            import traceback
-            print(f"\n[Phase 5 FALHOU] {type(exc).__name__}: {exc}", file=sys.stderr)
-            traceback.print_exc(file=sys.stderr)
 
     # ── Done ──────────────────────────────────────────────────────────────────
     elapsed = time.monotonic() - t_start

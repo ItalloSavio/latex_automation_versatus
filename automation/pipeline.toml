@@ -1,0 +1,17 @@
+# Versatus Cover Pipeline — project defaults
+# CLI flags always override these values.
+# Run:  python automation/scripts/build_cover.py cover.png
+# Docs: docs/fluxo-automacao.md
+
+[pipeline]
+brand = "versatus"           # Brand from brands/<name>/brand.json
+main  = "main-dynamic.tex"  # LaTeX entry-point for the cover document
+
+[compile]
+dpi        = 150    # Preview PNG resolution in DPI
+full_build = false  # Also compile main.tex after cover (full book)
+no_preview = false  # Skip opening the preview PNG after compilation
+
+[refine]
+enabled = false  # Run a Gemini second-pass comparing reference vs result
+passes  = 1      # Number of refinement passes (1–3)

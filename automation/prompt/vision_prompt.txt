@@ -42,9 +42,11 @@ No markdown fences. No explanation. No prose.
               use (-1,-1) to (22, 30.7) for full-bleed fills
 
 Quick reference — Y positions (bottom to top):
-  Bottom edge : y = 0.0
-  1/4 up      : y ≈ 7.4
+  Bottom edge : y =  0.0
+  1/4 up      : y ≈  7.4
+  1/3 up      : y ≈  9.9
   Middle      : y ≈ 14.85
+  2/3 up      : y ≈ 19.8
   3/4 up      : y ≈ 22.3
   Top edge    : y = 29.7
 
@@ -77,10 +79,17 @@ Quick reference — Y positions (bottom to top):
    \fill[c0, rotate around={45:(\cx,\cy)}]
      (\cx-s,\cy-s) rectangle (\cx+s,\cy+s);
 
-6. Available TikZ libraries: calc, positioning
+6. DIAGONAL CUTS — angled color boundaries, use polygon fills:
+   \fill[c0] (-1,-1) -- (22,-1) -- (22,16.0) -- (14.0,10.0) -- (-1,10.0) -- cycle;
+   Always bleed vertices to -1 / 22 at page edges (never 0 or 21).
+
+7. ROUNDED RECTANGLES — no extra library required:
+   \fill[c0, rounded corners=5mm] (x,y) rectangle (x2,y2);
+
+8. Available TikZ libraries: calc, positioning
    Do NOT use libraries not in this list.
 
-7. PAINTER'S ALGORITHM — paint shapes bottom to top.
+9. PAINTER'S ALGORITHM — paint shapes bottom to top.
 
 ═══════════════════════════════════════════════════════════════
  BACKGROUND EXTRACTION RULES
@@ -92,6 +101,9 @@ Quick reference — Y positions (bottom to top):
 - For arcs: use the TikZ arc syntax.
 - Paint shapes in correct order (background first, details last).
 - Measure proportions carefully against the 21×29.7 cm page.
+- FULL BLEED (critical): background fills MUST extend beyond page edges.
+  WRONG  : \fill[c0] (0,0) rectangle (21,29.7);    ← white edge artifacts
+  CORRECT: \fill[c0] (-1,-1) rectangle (22,30.7);  ← bleed 1 cm on all sides
 - For gradients: use the dominant solid color at the midpoint.
 - Ignore ALL text, logos, icons in the background — geometry only.
 
@@ -191,14 +203,72 @@ Fields:
               logo occupies ~5% of page height  → height=1.5
               logo occupies ~7% of page height  → height=2.1
               logo occupies ~10% of page height → height=3.0
-  bg     — the brand color ROLE that fills the logo's background zone
-           (e.g. bg_primary, bg_secondary, light, accent_1)
-           This selects the correct contrast variant (dark logo on light bg,
-           light logo on dark bg). Pick the role you assigned to the zone
-           where the logo sits.
+  bg     — the brand color ROLE that fills the logo's background zone.
+           Must be EXACTLY one of the \definecolor role names you declared
+           (e.g. bg_primary, bg_secondary, light, accent_1).
+           Do NOT use descriptive words ("dark", "background", "header").
+           This selects the logo contrast variant — wrong value = wrong logo.
 
 Example — logo at top-left on a dark background, 1.5cm tall:
   % LOGO_PLACEMENT x=1.5 y=26.0 height=1.5 bg=bg_primary
 
 Example — logo at top-right on a white zone, 2.0cm tall:
   % LOGO_PLACEMENT x=14.5 y=26.5 height=2.0 bg=light
+
+═══════════════════════════════════════════════════════════════
+ FEW-SHOT EXAMPLES
+═══════════════════════════════════════════════════════════════
+
+▼ BAD OUTPUT — do NOT produce this:
+
+\newcommand{\RenderDynamicCover}{%
+% LOGO_PLACEMENT x=1.5 y=26.0 height=2.0 bg=dark
+%                                              ^^^^ WRONG: "dark" is not a \definecolor role
+\definecolor{bg_primary}{HTML}{201F1E}
+\begin{tikzpicture}[remember picture, overlay,
+  shift={(current page.south west)}, x=1cm, y=1cm]
+  % --- BACKGROUND ---
+  \fill[bg_primary] (0,0) rectangle (21,29.7);
+  %                 ^^^ WRONG: no bleed — causes white edges at all four sides
+  % --- TEXT ---
+  \node[anchor=north west] at (2,22) {\BookTitle};
+  %    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^           WRONG: no text width, no \fontsize, no \color
+  \node[anchor=south west] at (2,2) {\BookAuthor};
+  % WRONG: subtitle, separator line, description are missing (all 6 nodes required)
+\end{tikzpicture}%
+}
+
+▼ GOOD OUTPUT — produce this structure:
+
+\newcommand{\RenderDynamicCover}{%
+% LOGO_PLACEMENT x=1.5 y=26.5 height=2.0 bg=bg_primary
+\definecolor{bg_primary}{HTML}{201F1E}
+\definecolor{accent_1}{HTML}{4CB6B4}
+\definecolor{light}{HTML}{FFFFFF}
+\begin{tikzpicture}[remember picture, overlay,
+  shift={(current page.south west)}, x=1cm, y=1cm]
+  % --- BACKGROUND ---
+  \fill[bg_primary] (-1,-1) rectangle (22,30.7);
+  % ← CORRECT: full bleed on all sides
+  \fill[accent_1] (-1,-1) -- (22,-1) -- (22,8.5)
+    -- (13.0,5.5) -- (-1,5.5) -- cycle;
+  % ← CORRECT: diagonal cut with bleed vertices at -1 and 22
+  % --- TEXT ---
+  \node[anchor=north west, text width=15cm, align=flush left] at (1.5,24.0) {%
+    {\fontsize{32}{38}\selectfont\bfseries\color{VSCoverFg}\BookTitle}%
+  };
+  \node[anchor=north west, text width=15cm, align=flush left] at (1.5,19.5) {%
+    {\fontsize{15}{20}\selectfont\color{VSCoverSubFg}\BookSubtitle}%
+  };
+  \draw[VSRed, line width=1.2pt] (1.5,18.2) -- (16.5,18.2);
+  \node[anchor=north west, text width=15cm, align=flush left] at (1.5,17.8) {%
+    {\fontsize{12}{16}\selectfont\color{VSCoverSubFg}\BookDescription}%
+  };
+  \node[anchor=south west, text width=15cm, align=flush left] at (1.5,3.5) {%
+    {\fontsize{11}{15}\selectfont\color{VSCoverMutedFg}\BookAuthor}%
+  };
+  \node[anchor=south west, text width=15cm, align=flush left] at (1.5,2.0) {%
+    {\fontsize{10}{14}\selectfont\color{VSCoverFaintFg}\BookDate\ |\ \BookVersion}%
+  };
+\end{tikzpicture}%
+}

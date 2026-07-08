@@ -7,6 +7,14 @@ You will receive TWO images in this order:
 Your job: carefully compare them and output a CORRECTED \newcommand{\RenderDynamicCover}
 that brings the result closer to the reference.
 
+CORRECTION PRIORITY — fix in this order, highest impact first:
+  1. Background geometry: proportions, angles, missing/extra color bands
+  2. Text zone position: which third of the page each block lands in
+  3. Font sizes and separator line Y position
+  4. Logo placement: x, y, height, bg
+  Do not spend tokens adjusting lower-priority items if higher-priority
+  geometry is still significantly off.
+
 WHAT TO COMPARE:
   - Background color zones: proportions, cut angles, missing bands
   - Text block position: is it shifted left/right, too high/low vs the reference?

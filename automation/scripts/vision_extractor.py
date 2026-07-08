@@ -2,13 +2,10 @@
 """
 vision_extractor.py — Cover image → Gemini Vision → TikZ macro.
 
-Steps:
-  1. Load system prompt from automation/prompt/vision_prompt.txt
-  2. Send the image to Gemini Vision API
-  3. Extract \\newcommand{\\RenderDynamicCover}{...} from the response
-  4. Run lightweight validation (structure + sanity checks)
-  5. Save raw response to automation/output/canvas_last.tikz  (for debugging)
-  6. Write the TikZ macro to styles/versatus-dynamic-cover.tex
+Converts a reference image to a LuaLaTeX-ready TikZ cover macro via the
+Gemini Vision API, then applies brand color enforcement, logo injection,
+footer/watermark macros, and a brand preamble before writing the result to
+styles/versatus-dynamic-cover.tex.
 
 CLI usage:
     python vision_extractor.py <image.(png|jpg|jpeg|webp)> [output.tex]
@@ -159,8 +156,8 @@ def _enforce_brand_colors(
 # We redefine the VS* color names that versatus-covers.sty uses, mapping
 # them to the brand's exact hex values — no changes to any .sty file needed.
 
-# Brand color roles (brand.json keys) → VS color names (versatus-covers.sty)
-_BRAND_ROLE_TO_VS: "dict[str, str]" = {
+# VS color names (versatus-covers.sty) → brand.json role keys
+_VS_TO_BRAND_ROLE: "dict[str, str]" = {
     "VSBlack":      "bg_primary",
     "VSGraphite":   "bg_secondary",
     "VSTeal":       "accent_1",
@@ -207,21 +204,25 @@ def _build_brand_preamble(
 
     # Color aliases: redefine VS* names to brand hex values
     bg_primary_hex = brand_colors.get("bg_primary", "")
-    color_lines: "list[str]" = []
-    for vs_name, role in _BRAND_ROLE_TO_VS.items():
-        hexval = brand_colors.get(role, "")
-        if not hexval:
-            continue
-        # VSRed is also used as linkcolor in the document body (white paper).
-        # If accent_2 has low contrast against bg_primary (same-hue brands),
-        # fall back to `muted` (mid-gray, ~4.7:1 on white) — never to `light`
-        # (white), which would make hyperlinks invisible on white paper.
-        if vs_name == "VSRed" and bg_primary_hex:
-            cr = _contrast_ratio(hexval, bg_primary_hex)
-            if cr < 2.5:
-                hexval = brand_colors.get("muted", "#5D5956")
-        clean = str(hexval).lstrip("#").upper()
-        color_lines.append(f"\\definecolor{{{vs_name}}}{{HTML}}{{{clean}}}")
+    resolved: "dict[str, str]" = {
+        vs_name: str(brand_colors.get(role, "")).lstrip("#").upper()
+        for vs_name, role in _VS_TO_BRAND_ROLE.items()
+        if brand_colors.get(role, "")
+    }
+
+    # VSRed (= accent_2) is also used as linkcolor on white paper.
+    # Same-hue brands (accent_2 ≈ bg_primary) fall back to muted
+    # (mid-gray, ~4.7:1 on white) rather than light (invisible on paper).
+    if "VSRed" in resolved and bg_primary_hex:
+        if _contrast_ratio(resolved["VSRed"], bg_primary_hex) < 2.5:
+            resolved["VSRed"] = str(
+                brand_colors.get("muted", "#5D5956")
+            ).lstrip("#").upper()
+
+    color_lines = [
+        f"\\definecolor{{{vs_name}}}{{HTML}}{{{hexval}}}"
+        for vs_name, hexval in resolved.items()
+    ]
 
     # Dynamic foreground colors — use the ACTUAL generated background when available
     # (the VLM may use `light` or another role rather than `bg_primary`).
@@ -250,10 +251,14 @@ def _build_brand_preamble(
         f"\\definecolor{{VSCoverFaintFg}}{{HTML}}{{{cover_faint_fg}}}",
     ]
 
+    # Series name — brand-specific, overrides the generic default in metadata.tex
+    series       = brand_data.get("series", "")
+    series_lines = [f"\\renewcommand{{\\BookSeries}}{{{series}}}"] if series else []
+
     parts = [
         f"% === Brand preamble: {company} ===",
         font_block,
-    ] + color_lines + fg_lines + [
+    ] + color_lines + fg_lines + series_lines + [
         "% === end brand preamble ===",
     ]
     return "\n".join(parts) + "\n"
@@ -374,17 +379,19 @@ _GEMINI_CHAIN = [
 ]
 
 
-def _call_gemini_single(
-    image_path: Path,
-    system_prompt: str,
-    model: str,
-    image_bytes: bytes,
-    mime: str,
-    client,
-) -> str:
+def _resolve_model_chain() -> "list[str]":
+    """Return the model list to try, from GEMINI_MODEL env var or the default chain."""
+    env = os.environ.get("GEMINI_MODEL", "").strip()
+    if env.startswith("models/"):
+        env = env[len("models/"):]
+    return [env] if env else _GEMINI_CHAIN
+
+
+def _call_gemini(parts, system_prompt: str, model: str, client) -> str:
     """
-    Call ONE Gemini model. Retries up to 2x on 503 overload.
-    Raises RuntimeError/EnvironmentError on unrecoverable failures.
+    Core Gemini call with 503-overload retry (shared by all callers).
+    `parts` is a list of types.Part objects constructed by the caller.
+    Raises RuntimeError on unrecoverable failures.
     """
     from google.genai import types  # noqa: PLC0415
 
@@ -394,39 +401,21 @@ def _call_gemini_single(
         try:
             response = client.models.generate_content(
                 model=model,
-                contents=[
-                    types.Content(
-                        role="user",
-                        parts=[
-                            types.Part(
-                                inline_data=types.Blob(
-                                    data=image_bytes, mime_type=mime
-                                )
-                            ),
-                            types.Part(
-                                text=(
-                                    "Analyze this cover image and output "
-                                    "the TikZ code as instructed."
-                                )
-                            ),
-                        ],
-                    )
-                ],
+                contents=[types.Content(role="user", parts=parts)],
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
                     temperature=0.1,
                     max_output_tokens=32768,
                 ),
             )
-            # Extract text safely (handles safety-filter blocks)
             try:
                 return response.text
             except (AttributeError, ValueError) as exc:
                 candidates = getattr(response, "candidates", [])
                 if candidates:
-                    parts = getattr(candidates[0].content, "parts", [])
-                    if parts:
-                        return parts[0].text
+                    _parts = getattr(candidates[0].content, "parts", [])
+                    if _parts:
+                        return _parts[0].text
                 finish = (
                     getattr(candidates[0], "finish_reason", "DESCONHECIDO")
                     if candidates else "SEM_CANDIDATOS"
@@ -443,9 +432,20 @@ def _call_gemini_single(
                 print(f"    [!] {model}: sobrecarregado — aguardando {_w}s…")
                 time.sleep(_w)
             else:
-                raise  # caller decides whether to try next model
+                raise
 
     raise RuntimeError(f"{model}: falhou apos {len(_BACKOFF)+1} tentativas.")
+
+
+def _call_gemini_single(image_bytes: bytes, mime: str,
+                        system_prompt: str, model: str, client) -> str:
+    """Single-image Gemini call (initial cover generation)."""
+    from google.genai import types  # noqa: PLC0415
+    parts = [
+        types.Part(inline_data=types.Blob(data=image_bytes, mime_type=mime)),
+        types.Part(text="Analyze this cover image and output the TikZ code as instructed."),
+    ]
+    return _call_gemini(parts, system_prompt, model, client)
 
 
 # ─── TikZ extraction ──────────────────────────────────────────────────────────
@@ -492,6 +492,17 @@ def _extract_tikz_block(text: str) -> tuple[str | None, str]:
     return text[start:end], "ok"
 
 
+# Mandatory \Book* content macros — all must appear in every generated cover.
+_REQUIRED_MACROS = (
+    r"\BookTitle",
+    r"\BookSubtitle",
+    r"\BookDescription",
+    r"\BookAuthor",
+    r"\BookDate",
+    r"\BookVersion",
+)
+
+
 def _validate_tikz(block: str) -> list[str]:
     """
     Lightweight sanity checks on the extracted TikZ block.
@@ -504,10 +515,35 @@ def _validate_tikz(block: str) -> list[str]:
     if r"\end{tikzpicture}" not in block:
         warnings.append("AVISO: \\end{tikzpicture} ausente.")
 
+    # Check % LOGO_PLACEMENT comment
+    if "% LOGO_PLACEMENT" not in block:
+        warnings.append(
+            "AVISO: % LOGO_PLACEMENT ausente — logo sera posicionado pelo "
+            "brand.json, ignorando a imagem de referencia."
+        )
+    else:
+        # Check that bg=ROLE matches one of the declared \definecolor names
+        m = re.search(r"% LOGO_PLACEMENT.*?bg=([A-Za-z0-9_]+)", block)
+        if m:
+            bg_role  = m.group(1)
+            declared = set(re.findall(r"\\definecolor\{([A-Za-z0-9_]+)\}", block))
+            if declared and bg_role not in declared:
+                warnings.append(
+                    f"AVISO: LOGO_PLACEMENT bg={bg_role!r} nao corresponde a nenhum "
+                    f"\\definecolor declarado. Roles disponiveis: {sorted(declared)}"
+                )
+
+    # Check all mandatory content macros
+    missing = [m for m in _REQUIRED_MACROS if m not in block]
+    if missing:
+        warnings.append(
+            f"AVISO: macros de conteudo ausentes: {', '.join(missing)}"
+        )
+
     # Pixel-range numbers (anything over 150 is suspicious for an A4 cover in cm)
     # Exclude: hex color codes in \definecolor, arc degree angles (multiples of 90)
     _clean = re.sub(r"\\definecolor\{[^}]+\}\{HTML\}\{[0-9A-Fa-f]+\}", "", block)
-    _clean = re.sub(r"arc\s*\([^)]*\)", "", _clean)   # strip arc() angle args
+    _clean = re.sub(r"arc\s*\([^)]*\)", "", _clean)
     numbers = re.findall(r"(?<![a-zA-Z{])(\d{3,}\.?\d*)", _clean)
     suspect = [n for n in numbers if float(n) > 150]
     if suspect:
@@ -521,71 +557,20 @@ def _validate_tikz(block: str) -> list[str]:
 
 # ─── Refinement API call ─────────────────────────────────────────────────────
 
-def _call_gemini_refine(
-    ref_bytes:     bytes,
-    ref_mime:      str,
-    result_bytes:  bytes,
-    system_prompt: str,
-    model:         str,
-    client,
-) -> str:
-    """
-    Send two images (reference + current result) to Gemini and return the raw text.
-    Structure mirrors _call_gemini_single but takes two image blobs.
-    """
+def _call_gemini_refine(ref_bytes: bytes, ref_mime: str, result_bytes: bytes,
+                        system_prompt: str, model: str, client) -> str:
+    """Two-image Gemini call (refinement pass: reference + current result)."""
     from google.genai import types  # noqa: PLC0415
-
-    _BACKOFF = [10, 20]
-
-    for _try in range(len(_BACKOFF) + 1):
-        try:
-            response = client.models.generate_content(
-                model=model,
-                contents=[
-                    types.Content(
-                        role="user",
-                        parts=[
-                            types.Part(inline_data=types.Blob(data=ref_bytes,    mime_type=ref_mime)),
-                            types.Part(inline_data=types.Blob(data=result_bytes, mime_type="image/png")),
-                            types.Part(text=(
-                                "Image 1 is the REFERENCE cover. "
-                                "Image 2 is the CURRENT RESULT. "
-                                "Output the corrected \\RenderDynamicCover as instructed."
-                            )),
-                        ],
-                    )
-                ],
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    temperature=0.1,
-                    max_output_tokens=32768,
-                ),
-            )
-            try:
-                return response.text
-            except (AttributeError, ValueError) as exc:
-                candidates = getattr(response, "candidates", [])
-                if candidates:
-                    parts = getattr(candidates[0].content, "parts", [])
-                    if parts:
-                        return parts[0].text
-                finish = (
-                    getattr(candidates[0], "finish_reason", "DESCONHECIDO")
-                    if candidates else "SEM_CANDIDATOS"
-                )
-                raise RuntimeError(f"Modelo sem texto (finish_reason={finish}).") from exc
-
-        except Exception as _exc:
-            _s       = str(_exc)
-            _is_busy = "503" in _s or "UNAVAILABLE" in _s or "overloaded" in _s.lower()
-            if _is_busy and _try < len(_BACKOFF):
-                _w = _BACKOFF[_try]
-                print(f"    [!] {model}: sobrecarregado — aguardando {_w}s…")
-                time.sleep(_w)
-            else:
-                raise
-
-    raise RuntimeError(f"{model}: falhou apos {len(_BACKOFF)+1} tentativas.")
+    parts = [
+        types.Part(inline_data=types.Blob(data=ref_bytes,    mime_type=ref_mime)),
+        types.Part(inline_data=types.Blob(data=result_bytes, mime_type="image/png")),
+        types.Part(text=(
+            "Image 1 is the REFERENCE cover. "
+            "Image 2 is the CURRENT RESULT. "
+            "Output the corrected \\RenderDynamicCover as instructed."
+        )),
+    ]
+    return _call_gemini(parts, system_prompt, model, client)
 
 
 # ─── Post-extraction helpers ─────────────────────────────────────────────────
@@ -632,6 +617,30 @@ def _parse_logo_placement(block: str) -> "dict | None":
 
 # ─── Shared finalization (used by extract_tikz + refine_tikz) ───────────────
 
+def _resolve_brand(brand: "str | None") -> "tuple[dict, dict[str, str] | None]":
+    """Load brand data and color map; returns ({}, None) when brand is None."""
+    if not brand:
+        return {}, None
+    data = _load_brand(brand)
+    return data, data.get("colors", {})
+
+
+def _write_tex(
+    tex_path:      "Path",
+    comment:       str,
+    brand_preamble: str,
+    logo_inline:   str,
+    block:         str,
+) -> None:
+    """Write the composed cover .tex to disk."""
+    header = f"% {comment} - DO NOT EDIT MANUALLY\n"
+    tex_path.parent.mkdir(parents=True, exist_ok=True)
+    tex_path.write_text(
+        header + brand_preamble + logo_inline + block + "\n",
+        encoding="utf-8",
+    )
+
+
 def _finalize_block(
     block:        str,
     brand:        "str | None",
@@ -641,13 +650,13 @@ def _finalize_block(
     """
     Apply all post-extraction steps to a raw TikZ block:
       1. Enforce brand color hex values deterministically
-      2. Inject logo (dynamic variant, position, and scale from LOGO_PLACEMENT)
+      2. Inject logo + footer/watermark macros (dynamic variant + LOGO_PLACEMENT)
       3. Build brand preamble (font + VSCover* fg colors from actual background)
 
     Returns
     -------
     (brand_preamble, logo_inline, modified_block)
-        Caller is responsible for writing to disk.
+        Caller is responsible for writing to disk via _write_tex().
     """
     # ── 1. Brand color enforcement ────────────────────────────────────────────
     if brand_colors:
@@ -849,11 +858,8 @@ def extract_tikz(
     print("[1/3] Carregando prompt de visao…")
     system_prompt = _load_prompt()
 
-    brand_colors: "dict[str, str] | None" = None
-    brand_data:   dict                   = {}
+    brand_data, brand_colors = _resolve_brand(brand)
     if brand:
-        brand_data   = _load_brand(brand)
-        brand_colors = brand_data.get("colors", {})
         print(f"    Brand  : {brand_data.get('company', brand)} ({len(brand_colors)} cores)")
 
     color_block   = _build_color_instructions(brand_colors)
@@ -864,11 +870,7 @@ def extract_tikz(
     print("[2/3] Chamando Gemini Vision…")
     _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    _env_model = os.environ.get("GEMINI_MODEL", "").strip()
-    if _env_model.startswith("models/"):
-        _env_model = _env_model[len("models/"):]
-    model_chain = [_env_model] if _env_model else _GEMINI_CHAIN
-
+    model_chain = _resolve_model_chain()
     mime        = _detect_mime(image_path)
     image_bytes = image_path.read_bytes()
     print(f"    Imagem : {image_path.name} ({len(image_bytes) / 1024:.1f} KB)")
@@ -881,9 +883,7 @@ def extract_tikz(
     for _model in model_chain:
         print(f"    Modelo : {_model}")
         try:
-            raw_text = _call_gemini_single(
-                image_path, system_prompt, _model, image_bytes, mime, client
-            )
+            raw_text = _call_gemini_single(image_bytes, mime, system_prompt, _model, client)
         except Exception as exc:
             _s       = str(exc)
             _is_busy = "503" in _s or "UNAVAILABLE" in _s or "overloaded" in _s.lower()
@@ -942,7 +942,7 @@ def extract_tikz(
 
     # ── 3. Finalize: enforce colors, inject logo, build preamble ─────────────
     brand_preamble, logo_inline, block = _finalize_block(
-        block, brand, brand_data, brand_colors or {}
+        block, brand, brand_data, brand_colors
     )
 
     # ── 4. Validate + write ───────────────────────────────────────────────────
@@ -951,12 +951,8 @@ def extract_tikz(
         print(f"    {warning}")
 
     brand_note = f" (brand: {brand})" if brand else ""
-    header     = f"% Auto-generated by vision_extractor.py{brand_note} - DO NOT EDIT MANUALLY\n"
-    tex_path.parent.mkdir(parents=True, exist_ok=True)
-    tex_path.write_text(
-        header + brand_preamble + logo_inline + block + "\n",
-        encoding="utf-8",
-    )
+    _write_tex(tex_path, f"Auto-generated by vision_extractor.py{brand_note}",
+               brand_preamble, logo_inline, block)
     print(f"    Macro TikZ escrita → {tex_path}")
 
     return tex_path
@@ -1003,23 +999,16 @@ def reuse_tikz(
 
     print(f"[REUSE] Bloco extraido ({len(block)} chars). Reaplicando brand…")
 
-    brand_colors: "dict[str, str] | None" = None
-    brand_data:   dict                    = {}
+    brand_data, brand_colors = _resolve_brand(brand)
     if brand:
-        brand_data   = _load_brand(brand)
-        brand_colors = brand_data.get("colors", {})
         print(f"    Brand: {brand_data.get('company', brand)}")
 
     brand_preamble, logo_inline, block = _finalize_block(
-        block, brand, brand_data, brand_colors or {}
+        block, brand, brand_data, brand_colors
     )
 
-    header = f"% Rebuilt from cache by vision_extractor.reuse_tikz (brand: {brand}) - DO NOT EDIT MANUALLY\n"
-    tex_path.parent.mkdir(parents=True, exist_ok=True)
-    tex_path.write_text(
-        header + brand_preamble + logo_inline + block + "\n",
-        encoding="utf-8",
-    )
+    _write_tex(tex_path, f"Rebuilt from cache by vision_extractor.reuse_tikz (brand: {brand})",
+               brand_preamble, logo_inline, block)
     print(f"[REUSE] Macro TikZ escrita → {tex_path}")
     return tex_path
 
@@ -1076,27 +1065,18 @@ def refine_tikz(
     refine_header  = _REFINE_HEADER_PATH.read_text(encoding="utf-8")
     system_prompt  = refine_header + "\n\n" + vision_rules
 
-    brand_colors: "dict[str, str] | None" = None
-    brand_data:   dict                    = {}
+    brand_data, brand_colors = _resolve_brand(brand)
     if brand:
-        brand_data   = _load_brand(brand)
-        brand_colors = brand_data.get("colors", {})
-        color_block  = _build_color_instructions(brand_colors)
-        system_prompt = system_prompt.replace("{{COLOR_INSTRUCTIONS}}", color_block)
         print(f"    Brand: {brand_data.get('company', brand)}")
-    else:
-        system_prompt = system_prompt.replace("{{COLOR_INSTRUCTIONS}}", "")
-
+    color_block   = _build_color_instructions(brand_colors)
+    system_prompt = system_prompt.replace("{{COLOR_INSTRUCTIONS}}", color_block)
     print(f"    Prompt: {len(system_prompt)} chars")
 
     # ── 2. Vision API — two images (reference + result) ───────────────────────
     print("[2/3] Chamando Gemini Vision (refinamento com 2 imagens)…")
     _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    _env_model = os.environ.get("GEMINI_MODEL", "").strip()
-    if _env_model.startswith("models/"):
-        _env_model = _env_model[len("models/"):]
-    model_chain = [_env_model] if _env_model else _GEMINI_CHAIN
+    model_chain = _resolve_model_chain()
 
     ref_bytes    = ref_path.read_bytes()
     result_bytes = result_path.read_bytes()
@@ -1156,15 +1136,11 @@ def refine_tikz(
         print(f"    {warning}")
 
     brand_preamble, logo_inline, block = _finalize_block(
-        block, brand, brand_data, brand_colors or {}
+        block, brand, brand_data, brand_colors
     )
 
-    header = f"% Refined by vision_extractor.refine_tikz (brand: {brand}) - DO NOT EDIT MANUALLY\n"
-    tex_path.parent.mkdir(parents=True, exist_ok=True)
-    tex_path.write_text(
-        header + brand_preamble + logo_inline + block + "\n",
-        encoding="utf-8",
-    )
+    _write_tex(tex_path, f"Refined by vision_extractor.refine_tikz (brand: {brand})",
+               brand_preamble, logo_inline, block)
     print(f"    Macro TikZ refinada → {tex_path}")
     return tex_path
 

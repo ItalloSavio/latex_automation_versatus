@@ -145,6 +145,36 @@ python automation/scripts/convert_logos.py --brand versatus --height 2.5
 python automation/scripts/svg_to_tikz.py brands/versatus/logos/svg/logo_dark.svg LogoVersatusDark --height 3
 ```
 
+### Configuração via `pipeline.toml`
+
+Em vez de passar as flags em todo comando, edite `automation/pipeline.toml`:
+
+```toml
+[pipeline]
+brand = "versatus"           # --brand
+main  = "main-dynamic.tex"  # --main
+
+[compile]
+dpi        = 150    # --dpi
+full_build = false  # --full-build
+no_preview = false  # --no-preview
+
+[refine]
+enabled = false  # --refine
+passes  = 1      # --refine-passes
+```
+
+CLI flags sempre têm prioridade sobre o arquivo. O arquivo é carregado automaticamente se existir — nenhum flag adicional necessário.
+
+```bash
+# Com pipeline.toml configurado (brand="kosen", full_build=true):
+python automation/scripts/build_cover.py capa.png   # equivale a --brand kosen --full-build
+python automation/scripts/build_cover.py --reuse    # equivale a --reuse --brand kosen --full-build
+
+# Sobrescrever o brand do toml na linha de comando:
+python automation/scripts/build_cover.py capa.png --brand versatus
+```
+
 ### Variáveis de ambiente
 
 | Variável         | Obrigatória | Descrição                                                                                     |
@@ -168,6 +198,7 @@ python automation/scripts/build_cover.py capa.png --brand versatus
 versatus-template-book-v0.2.3/
 │
 ├── automation/
+│   ├── pipeline.toml               # Configuração de defaults (brand, dpi, etc.)
 │   ├── core/
 │   │   └── latex_compiler.py       # Compilador LuaLaTeX com auto-repair
 │   ├── prompt/
@@ -182,6 +213,9 @@ versatus-template-book-v0.2.3/
 │       ├── preview_cover.py        # PDF → PNG (usa pymupdf)
 │       ├── convert_logos.py        # Batch conversion SVG→TikZ por marca
 │       └── svg_to_tikz.py          # Conversor SVG→TikZ puro Python
+│
+├── tests/
+│   └── test_vision_extractor.py    # 84 testes unitários (sem API, sem LaTeX)
 │
 ├── brands/
 │   ├── versatus/
@@ -316,6 +350,18 @@ A capa usa a variante escolhida pela luminância do fundo. O rodapé sempre usa 
 `svg2tikz` depende de `pygobject` (GTK), que exige toolchain nativo para compilar no Windows. Inkscape também não estava disponível como dependência confiável.
 
 A solução foi escrever `svg_to_tikz.py` usando apenas `svgelements` (`pip install svgelements` — puro Python, sem compilação nativa), funcionando em qualquer máquina com Python + pip.
+
+### Validação pré-compilação
+
+Antes de chamar o LuaLaTeX, `_validate_tikz` checa o bloco gerado pelo VLM e emite avisos imediatos (sem esperar 30s de compilação) para:
+
+| Checagem | O que detecta |
+|---|---|
+| `\begin/\end{tikzpicture}` presentes | Bloco estruturalmente inválido |
+| `% LOGO_PLACEMENT` presente | Se ausente, logo vai para posição padrão, ignorando a imagem |
+| `bg=ROLE` corresponde a um `\definecolor` declarado | `bg=dark` em vez de `bg=bg_primary` causaria logo com variante errada |
+| 6 macros obrigatórias presentes (`\BookTitle`, `\BookSubtitle`, `\BookDescription`, `\BookAuthor`, `\BookDate`, `\BookVersion`) | VLM omitiu conteúdo — capa compila mas sem texto |
+| Números > 150 (suspeito de pixels em vez de cm) | Coordenadas em pixels causam geometria fora da página |
 
 ### Enforcement determinístico de cores
 
@@ -455,13 +501,18 @@ Exemplo Kosen: `accent_2 = #3B3CD0` vs `bg_primary = #4038FF` → ratio ≈ 1,19
 ### Python
 ```bash
 pip install google-genai svgelements pymupdf
+
+# Para rodar os testes unitários:
+pip install pytest
+pytest tests/ -v
 ```
 
-| Pacote       | Uso                                           |
-|--------------|-----------------------------------------------|
-| `google-genai` | Chamadas ao Gemini Vision (Fase 1 e 4)      |
-| `svgelements`  | Conversão SVG→TikZ (puro Python, sem GTK)   |
-| `pymupdf`      | Renderização PDF→PNG para preview (Fase 3)  |
+| Pacote         | Uso                                                        |
+|----------------|------------------------------------------------------------|
+| `google-genai` | Chamadas ao Gemini Vision (Fase 1 e 4)                     |
+| `svgelements`  | Conversão SVG→TikZ (puro Python, sem GTK)                  |
+| `pymupdf`      | Renderização PDF→PNG para preview (Fase 3)                 |
+| `pytest`       | Testes unitários (opcional — não necessário para o pipeline)|
 
 ### LaTeX
 - LuaLaTeX (via MiKTeX ou TeX Live)

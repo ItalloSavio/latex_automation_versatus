@@ -1,60 +1,64 @@
 \newcommand{\RenderDynamicCover}{%
-% LOGO_PLACEMENT x=1.5 y=27.0 height=1.5 bg=light
-\definecolor{bg_primary}{HTML}{201F1E}
-\definecolor{bg_secondary}{HTML}{2B2928}
-\definecolor{accent_1}{HTML}{4CB6B4}
-\definecolor{accent_2}{HTML}{DD4F51}
-\definecolor{neutral}{HTML}{BCB9B9}
+% LOGO_PLACEMENT x=2.0 y=27.2 height=1.2 bg=light
+\definecolor{bg_primary}{HTML}{4038FF}
+\definecolor{bg_secondary}{HTML}{C7B99C}
+\definecolor{accent_1}{HTML}{C7B99C}
+\definecolor{accent_2}{HTML}{3B3CD0}
+\definecolor{neutral}{HTML}{C6C6C8}
 \definecolor{light}{HTML}{FFFFFF}
-\definecolor{muted}{HTML}{5D5956}
+\definecolor{muted}{HTML}{757576}
 \begin{tikzpicture}[remember picture, overlay,
   shift={(current page.south west)}, x=1cm, y=1cm]
   %
   % --- BACKGROUND ---
   %
-  % Base background (covers light zones: Top-Left, Middle-Right, Bottom-Left)
-  \fill[light] (-1,-1) rectangle (22, 30.7);
-
-  % Top-Right Block (y: 19.8 to 29.7)
-  \fill[accent_2] (10.5, 19.8) -- (10.5, 30.7) -- (22, 19.8) -- cycle;
-  \fill[bg_primary] (10.5, 30.7) -- (22, 30.7) -- (22, 19.8) -- cycle;
-
-  % Middle-Left Block (y: 9.9 to 19.8)
-  \fill[bg_primary] (-1, 19.8) -- (10.5, 19.8) -- (-1, 9.9) -- cycle;
-  \fill[accent_2] (-1, 9.9) -- (10.5, 19.8) -- (10.5, 9.9) -- cycle;
-
-  % Bottom-Right Block (y: 0 to 9.9)
-  \fill[accent_2] (10.5, 9.9) -- (10.5, -1) -- (22, 9.9) -- cycle;
-  \fill[bg_primary] (10.5, -1) -- (22, -1) -- (22, 9.9) -- cycle;
-
+  \fill[light] (-1,-1) rectangle (22,30.7);
+  
+  % Horizontal separator lines
+  \draw[muted, line width=0.5pt] (2.0, 26.5) -- (19.0, 26.5);
+  \draw[muted, line width=0.5pt] (2.0, 4.5) -- (19.0, 4.5);
+  
+  %
   % --- TEXT ---
   %
-  % Author / Info (Top-Right Orange Zone)
-  \node[anchor=north west, text width=9cm, align=flush left] at (11.0, 25.0) {%
-    {\fontsize{12}{16}\selectfont\bfseries\color{VSCoverFg}\BookAuthor}%
+  
+  % Series (Top Center)
+  \node[anchor=north west, text width=8cm, align=flush left] at (7.5, 27.8) {%
+    {\fontsize{10}{12}\selectfont\bfseries\color{VSCoverFg}\BookSeries}%
   };
 
-  % Subtitle (Middle-Right Light Zone, Top)
-  \node[anchor=north west, text width=9cm, align=flush left] at (11.0, 18.5) {%
-    {\fontsize{14}{18}\selectfont\bfseries\color{VSCoverSubFg}\BookSubtitle}%
+  % Date (Top Right)
+  \node[anchor=north east, text width=5cm, align=flush right] at (19.0, 27.8) {%
+    {\fontsize{10}{12}\selectfont\color{VSCoverMutedFg}\BookDate}%
   };
 
-  % Separator Line
-  \draw[VSRed, line width=1.2pt] (11.0, 14.85) -- (20.0, 14.85);
-
-  % Title (Middle-Right Light Zone, Bottom)
-  \node[anchor=south west, text width=9cm, align=flush left] at (11.0, 10.5) {%
-    {\fontsize{50}{55}\selectfont\bfseries\color{VSCoverFg}\BookTitle}%
+  % Title (Center Left)
+  \node[anchor=north west, text width=6cm, align=flush left] at (7.5, 24.0) {%
+    {\fontsize{22}{26}\selectfont\bfseries\color{VSCoverFg}\BookTitle}%
   };
 
-  % Description (Bottom-Right Orange Zone)
-  \node[anchor=north west, text width=9cm, align=flush left] at (11.0, 8.5) {%
-    {\fontsize{12}{16}\selectfont\bfseries\color{VSCoverSubFg}\BookDescription}%
+  % Subtitle (Below Title)
+  \node[anchor=north west, text width=6cm, align=flush left] at (7.5, 19.5) {%
+    {\fontsize{14}{18}\selectfont\color{VSCoverSubFg}\BookSubtitle}%
   };
 
-  % Date / Version (Bottom-Left Light Zone)
-  \node[anchor=south west, text width=9cm, align=flush left] at (1.5, 1.5) {%
-    {\fontsize{10}{14}\selectfont\color{VSCoverFaintFg}\BookDate\ | \ \BookVersion}%
+  % Description (Center Right)
+  \node[anchor=north west, text width=6cm, align=flush left] at (13.5, 24.0) {%
+    {\fontsize{11}{14}\selectfont\color{VSCoverSubFg}\BookDescription}%
+  };
+
+  % Separator Line (as required by rules, placed between title and subtitle zones)
+  \draw[VSRed, line width=1.2pt] (7.5, 20.5) -- (13.5, 20.5);
+
+  % Author (Bottom Left)
+  \node[anchor=south west, text width=10cm, align=flush left] at (2.0, 3.5) {%
+    {\fontsize{11}{14}\selectfont\bfseries\color{VSCoverFg}\BookAuthor}\\[1mm]
+    {\fontsize{9}{11}\selectfont\color{VSCoverMutedFg}\BookConfidentiality}%
+  };
+
+  % Date | Version (Bottom Right)
+  \node[anchor=south east, text width=6cm, align=flush right] at (19.0, 3.5) {%
+    {\fontsize{10}{12}\selectfont\color{VSCoverFaintFg}\BookDate\ |\ \BookVersion}%
   };
 
 \end{tikzpicture}%

@@ -1,5 +1,5 @@
 \newcommand{\RenderDynamicCover}{%
-% LOGO_PLACEMENT x=2.0 y=27.2 height=1.2 bg=light
+% LOGO_PLACEMENT x=1.0 y=27.0 height=1.5 bg=bg_primary
 \definecolor{bg_primary}{HTML}{4038FF}
 \definecolor{bg_secondary}{HTML}{C7B99C}
 \definecolor{accent_1}{HTML}{C7B99C}
@@ -12,54 +12,48 @@
   %
   % --- BACKGROUND ---
   %
-  \fill[light] (-1,-1) rectangle (22,30.7);
+  % Footer area
+  \fill[light] (-1,-1) rectangle (22, 8.5);
   
-  % Horizontal separator lines
-  \draw[muted, line width=0.5pt] (2.0, 26.5) -- (19.0, 26.5);
-  \draw[muted, line width=0.5pt] (2.0, 4.5) -- (19.0, 4.5);
+  % Bottom row of geometric blocks
+  \fill[accent_2] (-1, 8.5) rectangle (15.75, 14.5);
+  \fill[muted] (15.75, 8.5) rectangle (22, 14.5);
   
-  %
+  % Middle row of geometric blocks
+  \fill[bg_primary] (-1, 14.5) rectangle (5.25, 23.5);
+  % Middle-center split square
+  \fill[neutral] (5.25, 14.5) -- (5.25, 23.5) -- (15.75, 23.5) -- cycle;
+  \fill[accent_1] (5.25, 14.5) -- (15.75, 14.5) -- (15.75, 23.5) -- cycle;
+  \fill[bg_secondary] (15.75, 14.5) rectangle (22, 23.5);
+  
+  % Top row of geometric blocks
+  \fill[bg_primary] (-1, 23.5) rectangle (5.25, 30.7);
+  \fill[accent_2] (5.25, 23.5) rectangle (15.75, 30.7);
+  \fill[bg_secondary] (15.75, 23.5) rectangle (22, 30.7);
+  
   % --- TEXT ---
   %
+  % Main Title
+  \node[anchor=north west, text width=19cm, align=flush left] at (0.8, 8.2) {%
+    {\fontsize{54}{60}\selectfont\bfseries\color{VSCoverFg}\BookTitle}%
+  };
   
-  % Series (Top Center)
-  \node[anchor=north west, text width=8cm, align=flush left] at (7.5, 27.8) {%
-    {\fontsize{10}{12}\selectfont\bfseries\color{VSCoverFg}\BookSeries}%
+  % Separator Line
+  \draw[VSRed, line width=1.2pt] (0.8, 3.2) -- (20.2, 3.2);
+  
+  % Three-column footer text
+  \node[anchor=south west, text width=6cm, align=flush left] at (0.8, 1.2) {%
+    {\fontsize{10}{12}\selectfont\color{VSCoverSubFg}\BookSubtitle}%
   };
-
-  % Date (Top Right)
-  \node[anchor=north east, text width=5cm, align=flush right] at (19.0, 27.8) {%
-    {\fontsize{10}{12}\selectfont\color{VSCoverMutedFg}\BookDate}%
+  
+  \node[anchor=south west, text width=6cm, align=flush left] at (7.5, 1.2) {%
+    {\fontsize{10}{12}\selectfont\color{VSCoverSubFg}\BookDescription}%
   };
-
-  % Title (Center Left)
-  \node[anchor=north west, text width=6cm, align=flush left] at (7.5, 24.0) {%
-    {\fontsize{22}{26}\selectfont\bfseries\color{VSCoverFg}\BookTitle}%
+  
+  \node[anchor=south west, text width=5.5cm, align=flush left] at (14.5, 1.2) {%
+    {\fontsize{10}{12}\selectfont\color{VSCoverMutedFg}\BookAuthor}\\[0.1cm]
+    {\fontsize{9}{11}\selectfont\color{VSCoverFaintFg}\BookDate\ |\ \BookVersion}%
   };
-
-  % Subtitle (Below Title)
-  \node[anchor=north west, text width=6cm, align=flush left] at (7.5, 19.5) {%
-    {\fontsize{14}{18}\selectfont\color{VSCoverSubFg}\BookSubtitle}%
-  };
-
-  % Description (Center Right)
-  \node[anchor=north west, text width=6cm, align=flush left] at (13.5, 24.0) {%
-    {\fontsize{11}{14}\selectfont\color{VSCoverSubFg}\BookDescription}%
-  };
-
-  % Separator Line (as required by rules, placed between title and subtitle zones)
-  \draw[VSRed, line width=1.2pt] (7.5, 20.5) -- (13.5, 20.5);
-
-  % Author (Bottom Left)
-  \node[anchor=south west, text width=10cm, align=flush left] at (2.0, 3.5) {%
-    {\fontsize{11}{14}\selectfont\bfseries\color{VSCoverFg}\BookAuthor}\\[1mm]
-    {\fontsize{9}{11}\selectfont\color{VSCoverMutedFg}\BookConfidentiality}%
-  };
-
-  % Date | Version (Bottom Right)
-  \node[anchor=south east, text width=6cm, align=flush right] at (19.0, 3.5) {%
-    {\fontsize{10}{12}\selectfont\color{VSCoverFaintFg}\BookDate\ |\ \BookVersion}%
-  };
-
+  
 \end{tikzpicture}%
 }

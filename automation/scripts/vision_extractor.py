@@ -438,14 +438,65 @@ def _call_gemini(parts, system_prompt: str, model: str, client) -> str:
 
 
 def _call_gemini_single(image_bytes: bytes, mime: str,
-                        system_prompt: str, model: str, client) -> str:
+                        system_prompt: str, model: str, client,
+                        pre_analysis: str = "") -> str:
     """Single-image Gemini call (initial cover generation)."""
     from google.genai import types  # noqa: PLC0415
+    instruction = "Analyze this cover image and output the TikZ code as instructed."
+    user_text   = f"{pre_analysis}\n\n{instruction}" if pre_analysis else instruction
     parts = [
         types.Part(inline_data=types.Blob(data=image_bytes, mime_type=mime)),
-        types.Part(text="Analyze this cover image and output the TikZ code as instructed."),
+        types.Part(text=user_text),
     ]
     return _call_gemini(parts, system_prompt, model, client)
+
+
+# ─── CV pre-render analysis ───────────────────────────────────────────────────
+
+def _run_cv_analysis(image_path: Path) -> "dict | None":
+    """
+    Run CV pre-render analysis via image_analyzer (same directory).
+    Returns None silently when the module or its dependencies are missing.
+    """
+    try:
+        import importlib.util as _ilu  # noqa: PLC0415
+        _spec = _ilu.spec_from_file_location(
+            "image_analyzer", Path(__file__).parent / "image_analyzer.py"
+        )
+        if _spec is None:
+            return None
+        _mod = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        return _mod.analyze_image(image_path)
+    except Exception as exc:
+        _s = str(exc)
+        if "No module named" in _s or "ModuleNotFoundError" in type(exc).__name__:
+            return None  # missing deps — silent skip
+        print(f"    [CV] Aviso: analise falhou ({type(exc).__name__}: {_s[:80]})")
+        return None
+
+
+def _build_replicate_color_instructions(cv_colors: list[dict]) -> str:
+    """Color instructions for --replicate mode: use CV-detected hex values exactly."""
+    lines = [
+        "   REPLICATE MODE — use EXACTLY these colors detected from the image.",
+        "   Do NOT invent other hex values. Name them c0, c1, c2, ... in coverage order:",
+        "",
+    ]
+    for i, c in enumerate(cv_colors[:_N_REPLICATE_COLORS]):
+        clean = c["hex"].lstrip("#").upper()
+        lines.append(
+            f"   \\definecolor{{c{i}}}{{HTML}}{{{clean}}}  "
+            f"% {c['coverage'] * 100:.1f}% coverage"
+        )
+    lines += [
+        "",
+        "   Map c0–c7 to the geometric zones you see. Do NOT add \\definecolor outside this list.",
+    ]
+    return "\n".join(lines)
+
+
+_N_REPLICATE_COLORS = 8
 
 
 # ─── TikZ extraction ──────────────────────────────────────────────────────────
@@ -802,12 +853,13 @@ def _finalize_block(
 # ─── Public API ───────────────────────────────────────────────────────────────
 
 def extract_tikz(
-    image_path: "str | Path",
-    output_tex: "str | Path | None" = None,
-    brand: "str | None" = None,
+    image_path:  "str | Path",
+    output_tex:  "str | Path | None" = None,
+    brand:       "str | None" = None,
+    replicate:   bool = False,
 ) -> Path:
     """
-    Run the full pipeline: image → Gemini Vision → TikZ macro written to disk.
+    Run the full pipeline: image → CV analysis → Gemini Vision → TikZ macro.
 
     Parameters
     ----------
@@ -820,6 +872,10 @@ def extract_tikz(
         instructed to use ONLY that brand's color roles, and the resulting
         hex values are deterministically forced to the brand's exact colors
         afterwards (see _enforce_brand_colors) — no LLM hallucination risk.
+    replicate : bool
+        When True, skip all brand logic. Colors come from CV analysis (exact
+        K-means hex); no logo injection; no brand preamble. Useful for
+        faithfully replicating a third-party cover without brand transformation.
 
     Returns
     -------
@@ -854,20 +910,44 @@ def extract_tikz(
     if not image_path.exists():
         raise FileNotFoundError(f"Imagem nao encontrada: {image_path}")
 
-    # ── 1. Prompt ─────────────────────────────────────────────────────────────
-    print("[1/3] Carregando prompt de visao…")
+    # ── 1. CV pre-render analysis (always runs; silent if deps missing) ────────
+    print("[1/4] Analise CV da imagem…")
+    cv_data    = _run_cv_analysis(image_path)
+    cv_summary = cv_data.get("summary_text", "") if cv_data else ""
+    if cv_data and cv_data.get("cv_available"):
+        _nc = len(cv_data.get("colors", []))
+        _nr = len(cv_data.get("regions", []))
+        _lt = cv_data.get("layout", {}).get("layout_type", "unknown")
+        print(f"    CV     : {_nc} cores, {_nr} regioes, layout={_lt}")
+    else:
+        print("    CV     : indisponivel (numpy/sklearn/skimage ausentes) — continuando sem pre-analise")
+
+    # ── 2. Prompt ─────────────────────────────────────────────────────────────
+    print("[2/4] Carregando prompt de visao…")
     system_prompt = _load_prompt()
 
-    brand_data, brand_colors = _resolve_brand(brand)
-    if brand:
-        print(f"    Brand  : {brand_data.get('company', brand)} ({len(brand_colors)} cores)")
+    if replicate:
+        # Replicate mode: colors from CV measurement, no brand transformation
+        brand_data, brand_colors = {}, None
+        if cv_data and cv_data.get("colors"):
+            color_block = _build_replicate_color_instructions(cv_data["colors"])
+        else:
+            color_block = (
+                "   REPLICATE MODE — pick colors freely from the image.\n"
+                "   Name them c0, c1, c2, ... in descending coverage order."
+            )
+        print("    Modo   : REPLICATE (sem brand, cores do CV)")
+    else:
+        brand_data, brand_colors = _resolve_brand(brand)
+        if brand:
+            print(f"    Brand  : {brand_data.get('company', brand)} ({len(brand_colors)} cores)")
+        color_block = _build_color_instructions(brand_colors)
 
-    color_block   = _build_color_instructions(brand_colors)
     system_prompt = system_prompt.replace("{{COLOR_INSTRUCTIONS}}", color_block)
     print(f"    Prompt : {_PROMPT_PATH.name} ({len(system_prompt)} chars)")
 
-    # ── 2. Vision API — itera modelos ate obter bloco TikZ completo ───────────
-    print("[2/3] Chamando Gemini Vision…")
+    # ── 3. Vision API — itera modelos ate obter bloco TikZ completo ───────────
+    print("[3/4] Chamando Gemini Vision…")
     _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     model_chain = _resolve_model_chain()
@@ -883,7 +963,10 @@ def extract_tikz(
     for _model in model_chain:
         print(f"    Modelo : {_model}")
         try:
-            raw_text = _call_gemini_single(image_bytes, mime, system_prompt, _model, client)
+            raw_text = _call_gemini_single(
+                image_bytes, mime, system_prompt, _model, client,
+                pre_analysis=cv_summary,
+            )
         except Exception as exc:
             _s       = str(exc)
             _is_busy = "503" in _s or "UNAVAILABLE" in _s or "overloaded" in _s.lower()
@@ -940,19 +1023,25 @@ def extract_tikz(
             f"Primeiros 400 chars: {last_raw[:400]!r}"
         )
 
-    # ── 3. Finalize: enforce colors, inject logo, build preamble ─────────────
+    # ── 4. Finalize: enforce colors, inject logo, build preamble ─────────────
+    # In replicate mode we pass brand=None so _finalize_block skips logo and
+    # brand preamble — the output is a pure color-faithful TikZ replication.
+    _brand_for_finalize = None if replicate else brand
     brand_preamble, logo_inline, block = _finalize_block(
-        block, brand, brand_data, brand_colors
+        block, _brand_for_finalize, brand_data, brand_colors
     )
 
-    # ── 4. Validate + write ───────────────────────────────────────────────────
-    print("[3/3] Validando e escrevendo macro TikZ…")
+    # ── 5. Validate + write ───────────────────────────────────────────────────
+    print("[4/4] Validando e escrevendo macro TikZ…")
     for warning in _validate_tikz(block):
         print(f"    {warning}")
 
-    brand_note = f" (brand: {brand})" if brand else ""
-    _write_tex(tex_path, f"Auto-generated by vision_extractor.py{brand_note}",
-               brand_preamble, logo_inline, block)
+    if replicate:
+        tex_comment = "Replicated by vision_extractor.py (CV colors, no brand)"
+    else:
+        brand_note  = f" (brand: {brand})" if brand else ""
+        tex_comment = f"Auto-generated by vision_extractor.py{brand_note}"
+    _write_tex(tex_path, tex_comment, brand_preamble, logo_inline, block)
     print(f"    Macro TikZ escrita → {tex_path}")
 
     return tex_path

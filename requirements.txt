@@ -16,3 +16,38 @@ jsonschema>=4.17.0
 
 # Reparação automática de JSON truncado (quando o modelo atinge o limite de tokens)
 json-repair>=0.30.0
+
+# ── CV / Image analysis ───────────────────────────────────────────────────────
+
+# Image loading and manipulation
+Pillow>=12.3.0
+
+# Numerical arrays (base de todos os módulos CV)
+numpy>=2.5.1
+
+# K-means color clustering, font clustering
+scikit-learn>=1.9.0
+
+# Connected components, regionprops, SSIM
+scikit-image>=0.26.0
+
+# ── OCR ───────────────────────────────────────────────────────────────────────
+
+# Text detection + recognition — suporta Python 3.12+, sem binários de sistema
+# Instala automaticamente: torch, torchvision, opencv-python-headless, scipy
+easyocr>=1.7.2
+
+# PyTorch (instalado automaticamente pelo easyocr — CPU only, sem CUDA)
+torch>=2.13.0
+
+# ── PDF rendering ─────────────────────────────────────────────────────────────
+
+# PDF → PNG sem dependências de sistema (substitui poppler/pdftoppm)
+pymupdf>=1.28.0
+
+# ── Nota: LaTeX ───────────────────────────────────────────────────────────────
+# LuaLaTeX é necessário para compilar as capas geradas.
+# Instale uma distribuição LaTeX:
+#   Windows : MiKTeX  https://miktex.org/download
+#   Linux   : apt install texlive-full
+#   macOS   : brew install mactex

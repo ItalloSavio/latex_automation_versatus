@@ -21,7 +21,21 @@ imagem
   → tikz_generator.py    JSON → TikZ determinístico (sem LLM)
   → replicate_cover.py   LuaLaTeX ×2 → PDF → PNG (pymupdf) → compara → LOOP de correção
   → visual_comparator.py métricas + diff map + patch_hints
+  → calibrator.py        mede a tinta do render vs original → correção por elemento
 ```
+
+## Loop de auto-correção (replicate_cover.py)
+
+Cada passe: gera TikZ → compila → renderiza → compara (SSIM). Se não bateu a meta,
+propõe correções para o próximo passe:
+- **calibrator** — mede a tinta de CADA texto no render E no original (mesmo método,
+  o viés cancela) e resolve `hscale`/`dx_cm`/`dy_cm` por elemento, com damping 0.8.
+  Remove o número mágico: partindo de hscale=1.0 o loop reencontra ~0.89 sozinho.
+- **patch** — recolore regiões que o comparator marcou como erradas.
+
+**Hill-climbing:** um passe só é aceito se o SSIM subiu; plateau → para no melhor;
+regressão → reverte para o melhor. O output nunca piora. Para quando bate a meta,
+não há mais correção, ou esgota `--max-passes`.
 
 Comando: `python automation/scripts/replicate_cover.py capas_teste/capa_teste4.png --max-passes 1`
 

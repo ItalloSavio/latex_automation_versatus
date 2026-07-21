@@ -28,13 +28,14 @@ CLI usage:
 Options:
     --out-dir DIR      Output directory (default: automation/output/replicated/)
     --semantic         Enable VLM enrichment pass (requires GEMINI_API_KEY)
-    --max-passes N     Maximum correction passes (default: 3)
-    --ssim-threshold F Minimum acceptable SSIM (default: 0.82)
+    --max-passes N     Maximum correction passes (default: 5)
+    --ssim-threshold F Minimum acceptable SSIM (default: 0.95)
     --dpi N            PDF render DPI (default: 150)
     --width-cm F       Canvas width in cm (default: 21.0)
     --height-cm F      Canvas height in cm (default: 29.7)
 """
 
+import copy
 import importlib.util
 import json
 import os
@@ -65,8 +66,8 @@ def replicate(
     image_path:     "str | Path",
     out_dir:        "str | Path | None" = None,
     semantic:       bool  = False,
-    max_passes:     int   = 3,
-    ssim_threshold: float = 0.82,
+    max_passes:     int   = 5,
+    ssim_threshold: float = 0.95,
     dpi:            int   = 150,
     width_cm:       float = 21.0,
     height_cm:      float = 29.7,
@@ -111,19 +112,31 @@ def replicate(
     else:
         _log("  [modo] --local: sem chamada VLM")
 
-    # ── Stage 7: TikZ generation ──────────────────────────────────────────
-    _step(7, "Gerando TikZ deterministico")
-    generator = _load("tikz_generator")
-    generator.generate(analysis, tikz_path)
+    # ── Stages 7–11: self-correcting loop ─────────────────────────────────
+    #
+    # Each pass renders the current analysis, measures the result, and proposes
+    # a correction. Two kinds of correction feed the next pass:
+    #   - calibrator : measures the rendered ink of every text element and
+    #                  solves its own scale/offset (no magic constants)
+    #   - patch      : recolours regions the comparator found wrong
+    # Hill climbing: a pass is only kept when SSIM improved. A pass that makes
+    # things worse is reverted and the loop stops, so output never regresses.
+    generator  = _load("tikz_generator")
+    comparator = _load("visual_comparator")
+    calibrator = _load("calibrator")
 
-    # ── Stages 8–10 + Patch loop ──────────────────────────────────────────
-    quality      = None
-    pass_count   = 0
-    prev_ssim    = None
+    quality       = None
+    pass_count    = 0
+    best_ssim     = -1.0
+    best_analysis = None
+    best_quality  = None
 
     for _pass in range(1, max_passes + 1):
         pass_count = _pass
-        _step(8, f"Compilando LuaLaTeX  (pass {_pass}/{max_passes})")
+        _step(7, f"Gerando TikZ  (pass {_pass}/{max_passes})")
+        generator.generate(analysis, tikz_path)
+
+        _step(8, "Compilando LuaLaTeX")
         _write_tex_wrapper(tex_path, tikz_path, analysis, width_cm, height_cm)
         ok, err = _compile_lualatex(tex_path, pdf_path)
         if not ok:
@@ -131,46 +144,65 @@ def replicate(
             break
 
         _step(9, "Renderizando PDF → PNG")
-        render_path = _render_pdf(pdf_path, render_path, dpi)
-        if render_path is None:
+        rendered = _render_pdf(pdf_path, render_path, dpi)
+        if rendered is None:
             _log("  [!] Render falhou — pymupdf nao instalado?")
             break
+        render_path = rendered
 
         _step(10, "Comparando qualidade (SSIM / Color / Region)")
-        comparator = _load("visual_comparator")
-        quality    = comparator.compare(
+        quality = comparator.compare(
             image_path, render_path,
             analysis=analysis,
             output_dir=out_dir,
             ssim_threshold=ssim_threshold,
         )
         _rename_diff(out_dir, diff_path)
+        ssim = quality["ssim_global"]
 
-        _log(f"  SSIM={quality['ssim_global']:.4f}  "
+        _log(f"  SSIM={ssim:.4f}  "
              f"color_dist={quality['color_dist_mean']:.1f}  "
              f"regions={quality['region_match_rate']*100:.0f}%")
+
+        # ── Hill climbing: keep the best, never regress ────────────────────
+        _EPS = 1e-4
+        if ssim > best_ssim + _EPS:
+            best_ssim     = ssim
+            best_analysis = copy.deepcopy(analysis)
+            best_quality  = quality
+        elif ssim >= best_ssim - _EPS:
+            _log(f"  [=] Convergiu (plateau em {best_ssim:.4f}) — parando")
+            analysis, quality = best_analysis, best_quality
+            break
+        else:
+            _log(f"  [!] Pass piorou ({best_ssim:.4f} → {ssim:.4f}) — revertendo")
+            analysis, quality = best_analysis, best_quality
+            _restore_best(generator, analysis, tex_path, tikz_path, pdf_path,
+                          render_path, width_cm, height_cm, dpi)
+            break
 
         if quality["ssim_pass"]:
             _log(f"  [PASS] SSIM >= {ssim_threshold}")
             break
-
-        # Stop if SSIM didn't improve since last pass (patches aren't helping)
-        if prev_ssim is not None and quality["ssim_global"] <= prev_ssim + 0.005:
-            _log(f"  [!] SSIM nao melhorou ({prev_ssim:.4f} → {quality['ssim_global']:.4f}) — parando")
+        if _pass == max_passes:
             break
-        prev_ssim = quality["ssim_global"]
 
-        if _pass < max_passes and quality["patch_hints"]:
-            _log(f"  [!] SSIM < {ssim_threshold} — aplicando {len(quality['patch_hints'])} patches")
+        # ── Propose the next candidate ────────────────────────────────────
+        _step(11, "Calibrando pelo render + patches de cor")
+        analysis, n_cal = calibrator.calibrate(analysis, image_path, render_path)
+        n_patch = len(quality["patch_hints"])
+        if n_patch:
             analysis = _apply_patches(analysis, quality["patch_hints"])
-            analysis_path.write_text(
-                json.dumps(analysis, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            generator.generate(analysis, tikz_path)
-        else:
-            _log(f"  [!] Sem patches disponíveis")
+        _log(f"  {n_cal} texto(s) calibrado(s), {n_patch} patch(es) de cor")
+
+        if n_cal == 0 and n_patch == 0:
+            _log("  [OK] Convergiu — nenhuma correcao restante")
             break
+
+        analysis_path.write_text(
+            json.dumps(analysis, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     _banner(f"DONE ({pass_count} pass(es))")
     if quality:
@@ -318,6 +350,28 @@ def _write_tex_wrapper(
     tex_path.write_text(content, encoding="utf-8")
 
 
+def _restore_best(
+    generator,
+    analysis:  dict,
+    tex_path:  Path,
+    tikz_path: Path,
+    pdf_path:  Path,
+    render_path: Path,
+    width_cm:  float,
+    height_cm: float,
+    dpi:       int,
+) -> None:
+    """
+    Re-emit the best-scoring analysis so the .tikz/.pdf/.png on disk match the
+    metrics we report. Called when a pass regressed and we roll back to it.
+    """
+    generator.generate(analysis, tikz_path)
+    _write_tex_wrapper(tex_path, tikz_path, analysis, width_cm, height_cm)
+    ok, _ = _compile_lualatex(tex_path, pdf_path)
+    if ok:
+        _render_pdf(pdf_path, render_path, dpi)
+
+
 def _compile_lualatex(
     tex_path: Path,
     pdf_path: Path,
@@ -458,10 +512,10 @@ if __name__ == "__main__":
     parser.add_argument("--out-dir",        default=None,  help="Diretorio de saida")
     parser.add_argument("--semantic",       action="store_true",
                         help="Habilitar passo VLM (requer GEMINI_API_KEY)")
-    parser.add_argument("--max-passes",     type=int,   default=3,
+    parser.add_argument("--max-passes",     type=int,   default=5,
                         help="Numero maximo de passes de correcao (default: 3)")
-    parser.add_argument("--ssim-threshold", type=float, default=0.82,
-                        help="SSIM minimo aceitavel (default: 0.82)")
+    parser.add_argument("--ssim-threshold", type=float, default=0.95,
+                        help="SSIM minimo aceitavel (default: 0.95)")
     parser.add_argument("--dpi",            type=int,   default=150,
                         help="DPI para render do PDF (default: 150)")
     parser.add_argument("--width-cm",       type=float, default=21.0,

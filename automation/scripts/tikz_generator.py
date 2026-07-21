@@ -43,9 +43,12 @@ def _fill_opts(color: str) -> str:
     return f"{color},draw={color},line width={_SEAM_BLEED_PT}pt,line join=miter"
 
 # ─── Text rendering calibration ───────────────────────────────────────────────
-# Swiss-design covers set Helvetica with tight tracking. Rendered here with the
-# available sans fallback (Arial / Helvetica Neue / TeX Gyre Heros) the glyph
-# run comes out ≈11% too wide, so we compress each text node horizontally.
+# Swiss-design covers set Helvetica with tight tracking; the render fallback
+# (TeX Gyre Heros / Arial) comes out wider, so text is compressed horizontally.
+# This is only a COLD-START prior — calibrator.py measures each element's render
+# and writes a per-element `hscale` that overrides it, so the value need not be
+# exact and the pipeline self-adapts to any font. (Proven: starting from 1.0 the
+# loop climbs back on its own.)
 _TEXT_HSCALE = 0.89
 
 # EasyOCR boxes sit slightly below the true baseline (they include descender

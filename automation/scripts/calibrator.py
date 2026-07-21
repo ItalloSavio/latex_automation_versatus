@@ -27,17 +27,27 @@ from pathlib import Path
 # Ink search window around an element's expected box, in cm. Wide enough to find
 # a mis-rendered element, tight enough not to catch its neighbour (text elements
 # on a cover sit ≥0.5cm apart).
-_SEARCH_MARGIN_CM = 0.30
+# Ink search window around an element's expected box, in cm. Horizontal is
+# generous (width error can be large); vertical is TIGHT because cover text
+# lines sit only ~0.2cm apart — a wider window would swallow the neighbouring
+# line and produce nonsense (a full line-height of spurious dy, a doubled height).
+_MARGIN_X_CM = 0.25
+_MARGIN_Y_CM = 0.10
 
 # A pixel counts as ink when it differs from the window's background by more than
 # this RGB distance. The background is the window's median (text is the minority).
 _INK_RGB_DIST = 60.0
 
+# Apply only this fraction of each measured error per pass. Under-correcting is
+# deliberate: it damps the scale⇄position coupling so the loop converges instead
+# of oscillating, and a single bad measurement can never yank an element far.
+_DAMP = 0.8
+
 # Ignore corrections below this — they are measurement noise, not real error.
 _MIN_SHIFT_CM  = 0.015   # ≈0.5px at the reference 86 dpi
-_MIN_SCALE_ADJ = 0.005   # 0.5%
+_MIN_SCALE_ADJ = 0.008   # 0.8%
 
-# Never let one pass swing a value further than this (guards against a bad match).
+# Never let the accumulated correction swing a value past these guards.
 _MAX_SHIFT_CM  = 0.60
 _MAX_SCALE     = (0.60, 1.40)
 
@@ -48,25 +58,30 @@ def calibrate(
     render_path:   "str | Path",
 ) -> "tuple[dict, int]":
     """
-    Measure each text element in the render and correct its scale/offset.
+    Calibrate every text element by measuring the render against the original.
+
+    For each element the SAME ink measurement runs on both images inside the
+    same window, so any systematic bias cancels and the difference is the real
+    error. That error is folded (damped) into per-element hscale/dx_cm/dy_cm,
+    which tikz_generator applies on the next pass.
 
     Parameters
     ----------
-    analysis      : cover_analysis dict (its text_elements carry the ORIGINAL ink
-                    boxes measured by ocr_extractor — the ground truth)
-    original_path : the reference cover image
+    analysis      : cover_analysis dict; text_elements carry bbox_cm (used only
+                    to locate each element's search window)
+    original_path : the reference cover image (ground truth)
     render_path   : PNG of the compiled PDF from the current pass
 
     Returns
     -------
-    (new_analysis, n_changed) — a deep copy with hscale/dx_cm/dy_cm updated, and
-    how many elements actually moved. n_changed == 0 means converged.
+    (new_analysis, n_changed) — deep copy with corrections updated, and how many
+    elements moved. n_changed == 0 means converged.
     """
     import numpy as np                 # noqa: PLC0415
     from PIL import Image              # noqa: PLC0415
 
-    doc    = copy.deepcopy(analysis)
-    texts  = doc.get("text_elements", [])
+    doc   = copy.deepcopy(analysis)
+    texts = doc.get("text_elements", [])
     if not texts:
         return doc, 0
 
@@ -82,10 +97,11 @@ def calibrate(
 
     n_changed = 0
     for el in texts:
-        measured = _measure_element(rend, el, W_cm, H_cm, w_px, h_px)
-        if measured is None:
+        want = _measure_ink(orig, el, W_cm, H_cm, w_px, h_px)   # original (target)
+        got  = _measure_ink(rend, el, W_cm, H_cm, w_px, h_px)   # this render
+        if want is None or got is None:
             continue
-        if _apply_correction(el, measured):
+        if _apply_correction(el, want, got):
             n_changed += 1
 
     return doc, n_changed
@@ -93,8 +109,8 @@ def calibrate(
 
 # ─── Measurement ──────────────────────────────────────────────────────────────
 
-def _measure_element(
-    rend:  "np.ndarray",
+def _measure_ink(
+    img:   "np.ndarray",
     el:    dict,
     W_cm:  float,
     H_cm:  float,
@@ -102,10 +118,10 @@ def _measure_element(
     h_px:  int,
 ) -> "dict | None":
     """
-    Find the ink this element produced in the render.
+    Measure the tight ink box of one element inside its window in `img`.
 
-    Returns {x, y, w, h} in cm (ink box, TikZ orientation) or None when the
-    window holds no ink (element missing or search failed).
+    Returns {x, y, w, h} in cm (TikZ orientation, y = ink bottom) or None when
+    the window holds no ink.
     """
     import numpy as np  # noqa: PLC0415
 
@@ -113,11 +129,10 @@ def _measure_element(
     if not b or b.get("w", 0) <= 0 or b.get("h", 0) <= 0:
         return None
 
-    m  = _SEARCH_MARGIN_CM
-    x0 = max(0.0,  b["x"] - m)
-    x1 = min(W_cm, b["x"] + b["w"] + m)
-    y0 = max(0.0,  b["y"] - m)
-    y1 = min(H_cm, b["y"] + b["h"] + m)
+    x0 = max(0.0,  b["x"] - _MARGIN_X_CM)
+    x1 = min(W_cm, b["x"] + b["w"] + _MARGIN_X_CM)
+    y0 = max(0.0,  b["y"] - _MARGIN_Y_CM)
+    y1 = min(H_cm, b["y"] + b["h"] + _MARGIN_Y_CM)
 
     c0 = int(x0 / W_cm * w_px)
     c1 = int(x1 / W_cm * w_px)
@@ -126,7 +141,7 @@ def _measure_element(
     if c1 <= c0 or r1 <= r0:
         return None
 
-    win = rend[r0:r1, c0:c1].astype(int)
+    win = img[r0:r1, c0:c1].astype(int)
     if win.size == 0:
         return None
 
@@ -153,37 +168,35 @@ def _measure_element(
 
 # ─── Correction ───────────────────────────────────────────────────────────────
 
-def _apply_correction(el: dict, got: dict) -> bool:
+def _apply_correction(el: dict, want: dict, got: dict) -> bool:
     """
-    Fold the measured error into the element's hscale/dx_cm/dy_cm.
+    Fold the measured error (want − got) into hscale/dx_cm/dy_cm, damped.
     Returns True when anything changed by more than the noise floor.
     """
-    want = el["bbox_cm"]
     changed = False
 
     # ── Width → horizontal scale ──────────────────────────────────────────────
     if got["w"] > 1e-6:
         ratio = want["w"] / got["w"]
         if abs(ratio - 1.0) > _MIN_SCALE_ADJ:
-            new_scale = el.get("hscale", 1.0) * ratio
-            new_scale = min(max(new_scale, _MAX_SCALE[0]), _MAX_SCALE[1])
-            if abs(new_scale - el.get("hscale", 1.0)) > 1e-6:
-                el["hscale"] = round(new_scale, 4)
+            cur   = el.get("hscale", 1.0)
+            new_s = cur * (1.0 + _DAMP * (ratio - 1.0))
+            new_s = min(max(new_s, _MAX_SCALE[0]), _MAX_SCALE[1])
+            if abs(new_s - cur) > 1e-6:
+                el["hscale"] = round(new_s, 4)
                 changed = True
 
     # ── Left edge → x shift ───────────────────────────────────────────────────
-    # Measured AFTER the scale correction lands, so only take the part of the gap
-    # that a shift can fix: the left edge itself.
     dx = want["x"] - got["x"]
     if abs(dx) > _MIN_SHIFT_CM:
-        new_dx = _clamp(el.get("dx_cm", 0.0) + dx, _MAX_SHIFT_CM)
+        new_dx = _clamp(el.get("dx_cm", 0.0) + _DAMP * dx, _MAX_SHIFT_CM)
         el["dx_cm"] = round(new_dx, 4)
         changed = True
 
     # ── Ink bottom → y shift ──────────────────────────────────────────────────
     dy = want["y"] - got["y"]
     if abs(dy) > _MIN_SHIFT_CM:
-        new_dy = _clamp(el.get("dy_cm", 0.0) + dy, _MAX_SHIFT_CM)
+        new_dy = _clamp(el.get("dy_cm", 0.0) + _DAMP * dy, _MAX_SHIFT_CM)
         el["dy_cm"] = round(new_dy, 4)
         changed = True
 

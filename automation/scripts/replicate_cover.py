@@ -32,7 +32,7 @@ Options:
     --ssim-threshold F Minimum acceptable SSIM (default: 0.95)
     --dpi N            PDF render DPI (default: 150)
     --width-cm F       Canvas width in cm (default: 21.0)
-    --height-cm F      Canvas height in cm (default: 29.7)
+    --height-cm F      Canvas height in cm (default: derived from image aspect)
 """
 
 import copy
@@ -70,10 +70,16 @@ def replicate(
     ssim_threshold: float = 0.95,
     dpi:            int   = 150,
     width_cm:       float = 21.0,
-    height_cm:      float = 29.7,
+    height_cm:      "float | None" = None,
 ) -> dict:
     """
     Full replication pipeline: image → PDF + quality report.
+
+    The canvas ASPECT RATIO must match the input image, otherwise the final
+    resize (render → original size, done by the comparator) stretches the whole
+    layout and tanks SSIM. So height_cm is derived from the image's own aspect
+    unless the caller passes an explicit value; width_cm is just the reference
+    scale (SSIM works on pixels, the absolute cm size is irrelevant).
 
     Returns
     -------
@@ -84,6 +90,14 @@ def replicate(
     image_path = Path(image_path).resolve()
     if not image_path.exists():
         raise FileNotFoundError(f"Imagem nao encontrada: {image_path}")
+
+    if height_cm is None:
+        from PIL import Image  # noqa: PLC0415
+        with Image.open(image_path) as _im:
+            w_px, h_px = _im.size
+        height_cm = round(width_cm * h_px / w_px, 2)
+        _log(f"  [canvas] {w_px}x{h_px}px → {width_cm} x {height_cm} cm "
+             f"(aspect {w_px/h_px:.3f})")
 
     out_dir = Path(out_dir).resolve() if out_dir else (
         _AUTOMATION / "output" / "replicated"
@@ -520,8 +534,8 @@ if __name__ == "__main__":
                         help="DPI para render do PDF (default: 150)")
     parser.add_argument("--width-cm",       type=float, default=21.0,
                         help="Largura da canvas em cm (default: 21.0)")
-    parser.add_argument("--height-cm",      type=float, default=29.7,
-                        help="Altura da canvas em cm (default: 29.7)")
+    parser.add_argument("--height-cm",      type=float, default=None,
+                        help="Altura da canvas em cm (default: derivada do aspect da imagem)")
 
     args = parser.parse_args()
 

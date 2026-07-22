@@ -51,6 +51,30 @@ _MASK_COLOR_TOL  = 25    # tighter mask tolerance (was 40) to reduce boundary bl
 _RECT_FILL_RATIO = 0.68  # fill_ratio >= this → rectangle (was 0.88, too strict)
 _GRID_MIN_LINES  = 2     # minimum grid lines detected to trust grid mode
 
+# Circle detection (Hough + non-bg filter + radial colour bands)
+_CIRCLE_MIN_R_FRAC   = 0.02   # min radius as fraction of the shorter side
+_CIRCLE_MAX_R_FRAC   = 0.30   # max radius as fraction of the shorter side
+_CIRCLE_NONBG_MIN    = 0.70   # disk must be ≥70% non-background: a FILLED circle,
+                              # not a text glyph (thin strokes over background)
+_CIRCLE_BG_RGB_DIST  = 45     # pixel this far from bg counts as "ink" (non-bg)
+_CIRCLE_BAND_MERGE   = 25     # merge adjacent radial bands within this RGB distance
+_CIRCLE_RADIAL_STEPS = 72     # angular samples for the radial colour profile
+# Hough's Canny runs on luminance, so a high-colour/low-luma edge (red on dark:
+# ΔRGB huge, Δgray only ~95) needs a lower threshold than the default 100 to
+# register. Phantoms this admits are dropped by the non-bg disk filter.
+_CIRCLE_CANNY_HI     = 80
+_CIRCLE_ACCUM_THRESH = 30     # Hough accumulator vote threshold (param2); 38 was
+                              # strict enough to miss clean single circles
+# A genuine circle shows a colour step across its rim all the way round. This
+# fraction of the rim must show that step, else the candidate is a phantom Hough
+# hallucinated over a solid block, a triangle edge, or mosaic noise.
+_CIRCLE_EDGE_SUPPORT = 0.55
+_CIRCLE_RIM_DELTA    = 3      # px inside/outside the rim to compare
+_CIRCLE_RIM_STEP_MIN = 40     # RGB step across the rim that counts as an edge
+# Above this total coverage (circle area ÷ canvas) the circles are a dense
+# tiling / op-art pattern, not discrete motifs → out of this vocabulary.
+_CIRCLE_MAX_COVERAGE = 0.60
+
 
 # ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -108,6 +132,11 @@ def analyze_image(
 
     colors     = _extract_colors(img)
     regions    = _extract_regions(arr, colors, w_px, h_px, w_cm, h_cm)
+    # Circles are detected separately (grid/component detection can't see them)
+    # and appended LAST so they render on top of the grid guess in their footprint.
+    circles    = _detect_circles(arr, colors, w_px, h_px, w_cm, h_cm)
+    if circles:
+        regions = regions + circles
     layout     = _analyze_layout(arr, h_px, w_px)
     text_zones = _detect_text_zones(arr, h_px, w_px, w_cm, h_cm)
     has_logo   = _detect_logo(arr, h_px, w_px)
@@ -245,6 +274,167 @@ def _extract_regions(
 
     regions.sort(key=lambda r: r["area_pct"], reverse=True)
     return regions[:30]
+
+
+# ─── Circle detection ─────────────────────────────────────────────────────────
+
+def _detect_circles(
+    arr:    "np.ndarray",
+    colors: list[dict],
+    w_px:   int, h_px: int,
+    w_cm:   float, h_cm: float,
+) -> list[dict]:
+    """
+    Detect filled circles and concentric rings the grid/component passes miss.
+
+    Pipeline:
+      1. Hough finds circular EDGES (colour-agnostic — works even when a ring
+         shares its colour with surrounding shapes, which breaks connected
+         components).
+      2. Keep only candidates whose disk is mostly non-background (rejects the
+         phantom circles Hough hallucinates over text and empty areas).
+      3. Read each survivor's radial colour profile and emit one filled circle
+         per colour band, largest first, so concentric rings layer correctly.
+
+    Returns region dicts (shape_type="circle", source="circle"); [] if OpenCV
+    is unavailable or nothing circular is found.
+    """
+    try:
+        import cv2  # noqa: PLC0415
+    except ImportError:
+        return []
+    if not colors:
+        return []
+
+    bg_rgb = np.array(colors[0]["rgb"])   # most-coverage colour = background
+    short  = min(h_px, w_px)
+    gray   = cv2.medianBlur(cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY), 3)
+
+    cand = cv2.HoughCircles(
+        gray, cv2.HOUGH_GRADIENT, dp=1.2, minDist=max(8, int(0.05 * short)),
+        param1=_CIRCLE_CANNY_HI, param2=_CIRCLE_ACCUM_THRESH,
+        minRadius=max(6, int(_CIRCLE_MIN_R_FRAC * short)),
+        maxRadius=int(_CIRCLE_MAX_R_FRAC * short),
+    )
+    if cand is None:
+        return []
+
+    yy, xx = np.mgrid[0:h_px, 0:w_px]
+    bands: list[dict] = []
+    for cx, cy, r in np.round(cand[0]).astype(int):
+        rr = 0.85 * r
+        disk = (xx - cx) ** 2 + (yy - cy) ** 2 <= rr * rr
+        if disk.sum() < 20:
+            continue
+        px = arr[disk].astype(int)
+        nonbg = float(np.mean(np.sqrt(((px - bg_rgb) ** 2).sum(1)) > _CIRCLE_BG_RGB_DIST))
+        if nonbg < _CIRCLE_NONBG_MIN:
+            continue
+        if _rim_edge_support(arr, int(cx), int(cy), int(r)) < _CIRCLE_EDGE_SUPPORT:
+            continue   # no colour step around the rim → phantom, not a circle
+        bands.extend(_radial_bands(arr, int(cx), int(cy), int(r), colors, bg_rgb))
+
+    if not bands:
+        return []
+
+    # Dedup near-identical rings (Hough often fires twice on one motif).
+    bands = _dedup_circles(bands)
+
+    # Scope guard: this vocabulary is DISCRETE + CONCENTRIC circles. When the
+    # circles blanket the frame (coverage far above 1 canvas) they are a dense
+    # tiling / op-art pattern — a different primitive that renders worse as
+    # opaque discs than the grid fallback. Bail out and let the grid keep it.
+    coverage = sum(math.pi * b["r_px"] ** 2 for b in bands) / (w_px * h_px)
+    if coverage > _CIRCLE_MAX_COVERAGE:
+        return []
+
+    bands.sort(key=lambda d: -d["r_px"])   # largest first → correct layering
+
+    regions = []
+    for b in bands:
+        cx, cy, rp = b["cx"], b["cy"], b["r_px"]
+        regions.append({
+            "color_hex":  b["color"],
+            "shape_type": "circle",
+            "bbox_cm": {
+                "x": round((cx - rp) / w_px * w_cm, 2),
+                "y": round((h_px - (cy + rp)) / h_px * h_cm, 2),
+                "w": round(2 * rp / w_px * w_cm, 2),
+                "h": round(2 * rp / h_px * h_cm, 2),
+            },
+            "bbox_px":  {"x": cx - rp, "y": cy - rp, "w": 2 * rp, "h": 2 * rp},
+            "area_pct": round(math.pi * rp * rp / (w_px * h_px), 4),
+            "source":   "circle",
+        })
+    return regions
+
+
+def _rim_edge_support(arr: "np.ndarray", cx: int, cy: int, r: int) -> float:
+    """Fraction of the rim (radius r) where colour steps between just-in/just-out."""
+    h_px, w_px = arr.shape[:2]
+    ang = np.linspace(0, 2 * np.pi, 48, endpoint=False)
+    ri, ro = max(1, r - _CIRCLE_RIM_DELTA), r + _CIRCLE_RIM_DELTA
+    xi = (cx + ri * np.cos(ang)).astype(int); yi = (cy + ri * np.sin(ang)).astype(int)
+    xo = (cx + ro * np.cos(ang)).astype(int); yo = (cy + ro * np.sin(ang)).astype(int)
+    ok = (
+        (xi >= 0) & (xi < w_px) & (yi >= 0) & (yi < h_px) &
+        (xo >= 0) & (xo < w_px) & (yo >= 0) & (yo < h_px)
+    )
+    if ok.sum() < 8:
+        return 0.0
+    inner = arr[yi[ok], xi[ok]].astype(int)
+    outer = arr[yo[ok], xo[ok]].astype(int)
+    step  = np.sqrt(((inner - outer) ** 2).sum(axis=1))
+    return float(np.mean(step > _CIRCLE_RIM_STEP_MIN))
+
+
+def _radial_bands(
+    arr: "np.ndarray", cx: int, cy: int, R: int,
+    colors: list[dict], bg_rgb: "np.ndarray",
+) -> list[dict]:
+    """Colour bands along the radius (outer→in); one filled circle per band."""
+    h_px, w_px = arr.shape[:2]
+    ang = np.linspace(0, 2 * np.pi, _CIRCLE_RADIAL_STEPS, endpoint=False)
+    cos, sin = np.cos(ang), np.sin(ang)
+
+    profile = []   # (radius, median_rgb) from R down to 1
+    for rho in range(R, 0, -1):
+        xs = np.clip((cx + rho * cos).astype(int), 0, w_px - 1)
+        ys = np.clip((cy + rho * sin).astype(int), 0, h_px - 1)
+        profile.append((rho, np.median(arr[ys, xs], axis=0)))
+
+    bg_hex = _snap_to_palette(bg_rgb.astype(int), colors)
+    bands, cur_rgb, cur_outer = [], profile[0][1], profile[0][0]
+    for rho, rgb in profile[1:]:
+        if float(np.sqrt(((rgb - cur_rgb) ** 2).sum())) > _CIRCLE_BAND_MERGE:
+            bands.append((cur_outer, cur_rgb))
+            cur_rgb, cur_outer = rgb, rho
+    bands.append((cur_outer, cur_rgb))
+
+    out = []
+    for outer_r, rgb in bands:
+        hex_c = _snap_to_palette(rgb.astype(int), colors)
+        if hex_c == bg_hex or outer_r < 4:
+            continue   # background band = nothing to draw
+        out.append({"cx": cx, "cy": cy, "r_px": outer_r, "color": hex_c})
+    return out
+
+
+def _dedup_circles(bands: list[dict]) -> list[dict]:
+    """Drop rings that duplicate another (same colour, near-equal centre+radius)."""
+    kept: list[dict] = []
+    for b in bands:
+        dup = False
+        for k in kept:
+            if (b["color"] == k["color"]
+                    and abs(b["r_px"] - k["r_px"]) <= 3
+                    and abs(b["cx"] - k["cx"]) <= 6
+                    and abs(b["cy"] - k["cy"]) <= 6):
+                dup = True
+                break
+        if not dup:
+            kept.append(b)
+    return kept
 
 
 # ─── Grid-line detection ──────────────────────────────────────────────────────

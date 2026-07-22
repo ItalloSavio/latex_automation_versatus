@@ -92,6 +92,14 @@ def assemble(
     text_elements = _run_ocr(image_path, width_cm, height_cm)
     print(f"         {len(text_elements)} elemento(s) de texto detectado(s)")
 
+    # Drop OCR hits that land inside a detected circle: a circular graphic (e.g.
+    # a concentric ring motif) is otherwise misread as a glyph ("6"), stamping
+    # phantom text over the shape. The circle already reproduces that pixel area.
+    n_before      = len(text_elements)
+    text_elements = _suppress_text_in_shapes(text_elements, regions)
+    if len(text_elements) < n_before:
+        print(f"         {n_before - len(text_elements)} texto(s) descartado(s) dentro de circulos")
+
     # ── Stage 4: Font matching ────────────────────────────────────────────────
     print("  [4/4] Estimativa de fontes…")
     if text_elements:
@@ -122,6 +130,38 @@ def assemble(
     print(f"  [OK] cover_analysis.json → {output_path}  ({elapsed:.1f}s)")
 
     return doc
+
+
+# ─── OCR / shape reconciliation ───────────────────────────────────────────────
+
+def _suppress_text_in_shapes(text_elements: list, regions: list) -> list:
+    """
+    Drop text elements whose centre falls inside a detected circle.
+
+    OCR happily reads a circular graphic as a digit/letter; when the CV already
+    claims that area as a circle, the text is a false positive to be removed.
+    """
+    circles = [r for r in regions if r.get("shape_type") == "circle"]
+    if not circles:
+        return text_elements
+
+    kept = []
+    for el in text_elements:
+        b  = el.get("bbox_cm", {})
+        cx = b.get("x", 0) + b.get("w", 0) / 2
+        cy = b.get("y", 0) + b.get("h", 0) / 2
+        inside = False
+        for c in circles:
+            cb = c["bbox_cm"]
+            ccx = cb["x"] + cb["w"] / 2
+            ccy = cb["y"] + cb["h"] / 2
+            r   = cb["w"] / 2
+            if (cx - ccx) ** 2 + (cy - ccy) ** 2 <= r * r:
+                inside = True
+                break
+        if not inside:
+            kept.append(el)
+    return kept
 
 
 # ─── Internal runners ─────────────────────────────────────────────────────────

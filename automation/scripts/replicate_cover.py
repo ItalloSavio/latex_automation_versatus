@@ -102,15 +102,17 @@ def replicate(
     out_dir = Path(out_dir).resolve() if out_dir else (
         _AUTOMATION / "output" / "replicated"
     )
-    out_dir.mkdir(parents=True, exist_ok=True)
-
+    # One subfolder per cover, with clean names — keeps `replicated/` tidy.
     stem          = image_path.stem
-    analysis_path = out_dir / f"{stem}_analysis.json"
-    tikz_path     = out_dir / f"{stem}_cover.tikz"
-    tex_path      = out_dir / f"{stem}_cover.tex"
-    pdf_path      = out_dir / f"{stem}_cover.pdf"
-    render_path   = out_dir / f"{stem}_render.png"
-    diff_path     = out_dir / f"{stem}_diff.png"
+    cover_dir     = out_dir / stem
+    cover_dir.mkdir(parents=True, exist_ok=True)
+
+    analysis_path = cover_dir / "analysis.json"
+    tikz_path     = cover_dir / "cover.tikz"
+    tex_path      = cover_dir / "cover.tex"
+    pdf_path      = cover_dir / "cover.pdf"
+    render_path   = cover_dir / "render.png"
+    diff_path     = cover_dir / "diff.png"
 
     _banner(f"REPLICATE: {image_path.name}")
 
@@ -126,83 +128,99 @@ def replicate(
     else:
         _log("  [modo] --local: sem chamada VLM")
 
-    # ── Stages 7–11: self-correcting loop ─────────────────────────────────
-    #
-    # Each pass renders the current analysis, measures the result, and proposes
-    # a correction. Two kinds of correction feed the next pass:
-    #   - calibrator : measures the rendered ink of every text element and
-    #                  solves its own scale/offset (no magic constants)
-    #   - patch      : recolours regions the comparator found wrong
-    # Hill climbing: a pass is only kept when SSIM improved. A pass that makes
-    # things worse is reverted and the loop stops, so output never regresses.
     generator  = _load("tikz_generator")
     comparator = _load("visual_comparator")
     calibrator = _load("calibrator")
 
+    # One render+measure of a candidate analysis → its Score (or None on failure).
+    # Used both to CHOOSE which detector layers to keep and to run the loop below.
+    def _score_of(a: dict) -> "dict | None":
+        generator.generate(a, tikz_path)
+        _write_tex_wrapper(tex_path, tikz_path, a, width_cm, height_cm)
+        ok, _err = _compile_lualatex(tex_path, pdf_path)
+        if not ok or _render_pdf(pdf_path, render_path, dpi) is None:
+            return None
+        return comparator.compare(image_path, render_path, analysis=a,
+                                  output_dir=cover_dir, ssim_threshold=ssim_threshold)
+
+    # ── Stage 7: layer selection (measured "confidence") ──────────────────
+    # Each detector (grid, circles) proposes a LAYER. Instead of trusting a
+    # detector blindly (which caused regressions), we MEASURE: drop a layer and
+    # keep it dropped only if the Score improves without it. This is how a cover
+    # with no real grid (capa7) can shed the grid the detector wrongly imposed.
+    _step(7, "Selecao de camadas (mede a contribuicao de cada detector)")
+    analysis = _select_layers(analysis, _score_of)
+
+    # ── Stages 8–11: self-correcting loop ─────────────────────────────────
+    # Hill climbing on the SCORE: a pass is only kept when the Score improved
+    # (Score weights content over raw SSIM, so the loop can't "fix the background
+    # and wreck the content"). A worse pass is reverted and the loop stops.
     quality       = None
     pass_count    = 0
-    best_ssim     = -1.0
+    best_score    = -1.0
     best_analysis = None
     best_quality  = None
 
     for _pass in range(1, max_passes + 1):
         pass_count = _pass
-        _step(7, f"Gerando TikZ  (pass {_pass}/{max_passes})")
+        _step(8, f"Gerando TikZ  (pass {_pass}/{max_passes})")
         generator.generate(analysis, tikz_path)
 
-        _step(8, "Compilando LuaLaTeX")
+        _step(9, "Compilando LuaLaTeX")
         _write_tex_wrapper(tex_path, tikz_path, analysis, width_cm, height_cm)
         ok, err = _compile_lualatex(tex_path, pdf_path)
         if not ok:
             _log(f"  [!] Compilacao falhou: {err[:200]}")
             break
 
-        _step(9, "Renderizando PDF → PNG")
+        _step(10, "Renderizando PDF → PNG")
         rendered = _render_pdf(pdf_path, render_path, dpi)
         if rendered is None:
             _log("  [!] Render falhou — pymupdf nao instalado?")
             break
         render_path = rendered
 
-        _step(10, "Comparando qualidade (SSIM / Color / Region)")
+        _step(11, "Comparando qualidade (Score / SSIM / content)")
         quality = comparator.compare(
             image_path, render_path,
             analysis=analysis,
-            output_dir=out_dir,
+            output_dir=cover_dir,
             ssim_threshold=ssim_threshold,
         )
-        _rename_diff(out_dir, diff_path)
-        ssim = quality["ssim_global"]
+        _rename_diff(cover_dir, diff_path)
+        score = quality["score"]
 
-        _log(f"  SSIM={ssim:.4f}  "
+        _log(f"  Score={score:.4f}  SSIM={quality['ssim_global']:.4f}  "
+             f"content={quality.get('content_match', 0):.3f}  "
+             f"IoU={quality.get('content_iou', 0):.3f}  "
              f"color_dist={quality['color_dist_mean']:.1f}  "
              f"regions={quality['region_match_rate']*100:.0f}%")
 
-        # ── Hill climbing: keep the best, never regress ────────────────────
+        # ── Hill climbing on the SCORE: keep the best, never regress ───────
         _EPS = 1e-4
-        if ssim > best_ssim + _EPS:
-            best_ssim     = ssim
+        if score > best_score + _EPS:
+            best_score    = score
             best_analysis = copy.deepcopy(analysis)
             best_quality  = quality
-        elif ssim >= best_ssim - _EPS:
-            _log(f"  [=] Convergiu (plateau em {best_ssim:.4f}) — parando")
+        elif score >= best_score - _EPS:
+            _log(f"  [=] Convergiu (plateau em Score {best_score:.4f}) — parando")
             analysis, quality = best_analysis, best_quality
             break
         else:
-            _log(f"  [!] Pass piorou ({best_ssim:.4f} → {ssim:.4f}) — revertendo")
+            _log(f"  [!] Pass piorou (Score {best_score:.4f} → {score:.4f}) — revertendo")
             analysis, quality = best_analysis, best_quality
             _restore_best(generator, analysis, tex_path, tikz_path, pdf_path,
                           render_path, width_cm, height_cm, dpi)
             break
 
-        if quality["ssim_pass"]:
-            _log(f"  [PASS] SSIM >= {ssim_threshold}")
+        if quality["score_pass"]:
+            _log(f"  [PASS] Score >= {ssim_threshold}")
             break
         if _pass == max_passes:
             break
 
         # ── Propose the next candidate ────────────────────────────────────
-        _step(11, "Calibrando pelo render + patches de cor")
+        _step(12, "Calibrando pelo render + patches de cor")
         analysis, n_cal = calibrator.calibrate(analysis, image_path, render_path)
         n_patch = len(quality["patch_hints"])
         if n_patch:
@@ -220,8 +238,10 @@ def replicate(
 
     _banner(f"DONE ({pass_count} pass(es))")
     if quality:
-        _log(f"  SSIM final    : {quality['ssim_global']:.4f}  "
-             f"({'PASS' if quality['ssim_pass'] else 'FAIL'})")
+        _log(f"  Score final   : {quality.get('score', 0):.4f}  "
+             f"({'PASS' if quality.get('score_pass') else 'FAIL'})")
+        _log(f"  SSIM / content: {quality['ssim_global']:.4f} / "
+             f"{quality.get('content_match', 0):.3f}")
         _log(f"  Regioes match : {quality['region_match_rate']*100:.0f}%")
         _log(f"  Diff map      : {diff_path}")
     _log(f"  PDF           : {pdf_path}")
@@ -362,6 +382,51 @@ def _write_tex_wrapper(
         r"\end{document}" + "\n"
     )
     tex_path.write_text(content, encoding="utf-8")
+
+
+def _select_layers(analysis: dict, score_fn) -> dict:
+    """
+    Keep a detector's layer only if it earns its place on the Score.
+
+    Each optional layer (the circles, the whole grid) is dropped in turn; it is
+    removed for good only when doing so IMPROVES the Score. Greedy and MEASURED —
+    the reliable form of "confidence": a detector can be confidently wrong, but
+    the render can't lie. Text and the background are always kept.
+
+    This lets a cover with no real grid (capa7) shed the grid the detector wrongly
+    imposed, without any per-cover heuristic — the measurement decides.
+    """
+    regions = analysis.get("regions", [])
+    if not regions:
+        return analysis
+
+    optional = ("circle", "grid", "hatch")   # layers we are willing to drop
+    grp = lambda r: (r.get("source") if r.get("source") in optional else "core")
+    present = {grp(r) for r in regions} & set(optional)
+    if not present:
+        return analysis
+
+    base = score_fn(analysis)
+    if base is None:
+        return analysis
+    best_score, best_regions = base["score"], regions
+    _log(f"  base Score={best_score:.4f}  (camadas: {', '.join(sorted(present))})")
+
+    for layer in optional:
+        if layer not in present:
+            continue
+        trial = [r for r in best_regions if grp(r) != layer]
+        if len(trial) == len(best_regions):
+            continue
+        q  = score_fn({**analysis, "regions": trial})
+        s2 = q["score"] if q else -1.0
+        if s2 > best_score + 1e-3:            # only drop if it HELPS
+            _log(f"  camada '{layer}': SEM={s2:.4f} > COM={best_score:.4f} → REMOVIDA")
+            best_score, best_regions = s2, trial
+        else:
+            _log(f"  camada '{layer}': SEM={s2:.4f} ≤ COM={best_score:.4f} → mantida")
+
+    return {**analysis, "regions": best_regions}
 
 
 def _restore_best(
@@ -550,7 +615,7 @@ if __name__ == "__main__":
             width_cm       = args.width_cm,
             height_cm      = args.height_cm,
         )
-        sys.exit(0 if (result["quality"] or {}).get("ssim_pass") else 1)
+        sys.exit(0 if (result["quality"] or {}).get("score_pass") else 1)
 
     except FileNotFoundError as exc:
         print(f"\n[ERRO] {exc}", file=sys.stderr)

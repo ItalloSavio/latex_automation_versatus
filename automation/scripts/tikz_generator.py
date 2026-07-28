@@ -236,6 +236,12 @@ def _build_regions(
     for i, r in enumerate(regions):
         if "pattern" not in r:
             continue
+        # The \foreach shortcut TILES RECTANGLES — it emits `rectangle` unconditionally.
+        # A circle/triangle that picked up a pattern must NOT come through here, or it
+        # renders as a box (and often at the pattern's mirror anchor, off its real spot).
+        # Let it fall to Pass 3, which draws each shape at its own bbox, correctly.
+        if r.get("shape_type", "rectangle") not in ("rectangle", "polygon"):
+            continue
         anch  = r.get("foreach_anchor", {})
         key   = (
             r.get("color_hex", ""),

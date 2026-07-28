@@ -32,6 +32,12 @@ _SSIM_THRESH   = 0.82   # minimum acceptable SSIM
 _COLOR_MATCH   = 40.0   # max RGB distance to count a region color as "reproduced"
 _N_PALETTE     = 8      # K-means clusters for palette comparison
 
+# `score` is the single number the correction LOOP optimises. SSIM alone is area-
+# weighted (a big matching background inflates it), so content_match / content_iou
+# — which score only the foreground — carry most of the weight. This is what stops
+# the loop from "improving the background while wrecking the content".
+_SCORE_W = {"ssim": 0.30, "content_match": 0.50, "content_iou": 0.20}
+
 
 # ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -102,6 +108,11 @@ def _run_compare(
     # ── 1. SSIM ────────────────────────────────────────────────────────────
     ssim_val = float(ssim(orig, result, channel_axis=2, data_range=255))
 
+    # ── 1b. Content metrics (SSIM is area-weighted, so a large matching
+    #        background inflates it while missing foreground — circles, text —
+    #        barely moves it. These score ONLY the non-background pixels.) ─────
+    content_match, content_iou = _content_metrics(orig, result)
+
     # ── 2. Color Distance ─────────────────────────────────────────────────
     palette_orig   = _extract_palette(orig,   _N_PALETTE)
     palette_result = _extract_palette(result, _N_PALETTE)
@@ -126,16 +137,68 @@ def _run_compare(
     # ── 5. Patch hints (failed regions) ──────────────────────────────────
     patch_hints = _build_patch_hints(region_scores)
 
+    score = (_SCORE_W["ssim"]          * ssim_val
+             + _SCORE_W["content_match"] * content_match
+             + _SCORE_W["content_iou"]   * content_iou)
+
     return {
+        "score":             round(score, 4),
+        "score_pass":        score >= thresh,
         "ssim_global":       round(ssim_val, 4),
         "ssim_pass":         ssim_val >= thresh,
         "ssim_threshold":    thresh,
+        "content_match":     round(content_match, 4),
+        "content_iou":       round(content_iou, 4),
         "color_dist_mean":   round(color_dist, 2),
         "region_match_rate": round(match_rate, 3),
         "region_scores":     region_scores,
         "diff_map_path":     str(diff_path),
         "patch_hints":       patch_hints,
     }
+
+
+# ─── Content metrics (foreground-only) ───────────────────────────────────────
+
+_CONTENT_BG_DIST = 60    # a pixel this far from the background colour is "content"
+_CONTENT_MATCH_D = 60    # render vs original within this RGB dist = a match
+
+
+def _content_metrics(orig: "np.ndarray", result: "np.ndarray") -> "tuple[float, float]":
+    """
+    Score only where the content is, so a big matching background can't inflate it.
+
+    content_match : of every content pixel (non-background in EITHER image), the
+                    fraction where the render's colour matches the original's.
+    content_iou   : overlap of the two content masks (did we put content where the
+                    original has content?) — catches missing/extra elements.
+
+    A cover that reproduces its background but drops half its circles/text scores
+    high on SSIM yet low here — which is the point.
+    """
+    import numpy as np  # noqa: PLC0415
+
+    o = orig.astype(int)
+    r = result.astype(int)
+    bg = _background_color(orig)
+
+    fg_o = np.sqrt(((o - bg) ** 2).sum(2)) > _CONTENT_BG_DIST
+    fg_r = np.sqrt(((r - bg) ** 2).sum(2)) > _CONTENT_BG_DIST
+    fg   = fg_o | fg_r
+    if fg.sum() == 0:
+        return 1.0, 1.0
+
+    match = float(np.mean(np.sqrt(((o[fg] - r[fg]) ** 2).sum(1)) < _CONTENT_MATCH_D))
+    union = (fg_o | fg_r).sum()
+    iou   = float((fg_o & fg_r).sum() / union) if union else 1.0
+    return match, iou
+
+
+def _background_color(arr: "np.ndarray") -> "np.ndarray":
+    """Most common colour (quantised) = the background."""
+    import numpy as np  # noqa: PLC0415
+    q = (arr // 16).reshape(-1, 3)
+    vals, counts = np.unique(q, axis=0, return_counts=True)
+    return vals[counts.argmax()] * 16 + 8
 
 
 # ─── Palette extraction & comparison ─────────────────────────────────────────

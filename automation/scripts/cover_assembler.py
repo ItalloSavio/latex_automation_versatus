@@ -71,13 +71,22 @@ def assemble(
     t0 = time.monotonic()
     print(f"[ASSEMBLER] {image_path.name}  ({width_cm} × {height_cm} cm)")
 
-    # ── Stage 1: CV analysis ─────────────────────────────────────────────────
-    print("  [1/4] Analise CV (cores, regioes, layout)…")
-    cv_data = _run_cv(image_path, width_cm, height_cm)
+    # ── Stage 1: OCR (runs FIRST so the layout map knows where text is) ──────
+    # The CV grid pass reads big mid-canvas type (e.g. "rancid") as spurious grid
+    # lines. Giving it the OCR text boxes up front lets it mask those pixels, so
+    # letters can't fragment the grid. This is the deterministic "layout map".
+    print("  [1/4] OCR (texto + posicao)…")
+    text_elements = _run_ocr(image_path, width_cm, height_cm)
+    print(f"         {len(text_elements)} elemento(s) de texto detectado(s)")
+    text_boxes_px = _text_boxes_px(text_elements, image_path, width_cm, height_cm)
+
+    # ── Stage 2: CV analysis (grid masks the text zones) ─────────────────────
+    print("  [2/4] Analise CV (cores, regioes, layout)…")
+    cv_data = _run_cv(image_path, width_cm, height_cm, text_boxes_px)
     _report_cv(cv_data)
 
-    # ── Stage 2: Pattern detection on CV regions ──────────────────────────────
-    print("  [2/4] Deteccao de padroes…")
+    # ── Stage 3: Pattern detection on CV regions ──────────────────────────────
+    print("  [3/4] Deteccao de padroes…")
     regions = cv_data.get("regions", []) if cv_data else []
     if regions:
         pat_mod = _load_local("pattern_detector")
@@ -86,11 +95,6 @@ def assemble(
         print(f"         {n_pat}/{len(regions)} regioes com padrao detectado")
     else:
         print("         (sem regioes para analisar)")
-
-    # ── Stage 3: OCR ─────────────────────────────────────────────────────────
-    print("  [3/4] OCR (texto + posicao)…")
-    text_elements = _run_ocr(image_path, width_cm, height_cm)
-    print(f"         {len(text_elements)} elemento(s) de texto detectado(s)")
 
     # Drop OCR hits that land inside a detected circle: a circular graphic (e.g.
     # a concentric ring motif) is otherwise misread as a glyph ("6"), stamping
@@ -132,6 +136,51 @@ def assemble(
     return doc
 
 
+# ─── Layout map ───────────────────────────────────────────────────────────────
+
+# Grow each OCR box by this many px so the outer edges of the glyphs are covered.
+# At 2px the LAST glyph's edge gradient sat just outside the mask, leaving a spurious
+# vertical grid line at the box's right edge (capa6: "rancid"'s 'd' → a phantom column
+# at x=19.2 that squeezed the diagonals). 4px covers the edge; only the LINE-FINDING
+# projection is masked, so a slightly larger box can't touch colour classification.
+_TEXT_BOX_PAD_PX = 4
+
+
+def _text_boxes_px(
+    text_elements: list,
+    image_path:    Path,
+    width_cm:      float,
+    height_cm:     float,
+) -> "list[tuple[int,int,int,int]]":
+    """
+    Convert OCR bbox_cm (TikZ orientation) to image pixel boxes (x0,y0,x1,y1).
+
+    These tell the CV grid pass where text lives so it can mask those pixels —
+    the deterministic layout map. Returns [] if the image can't be read.
+    """
+    if not text_elements:
+        return []
+    try:
+        from PIL import Image  # noqa: PLC0415
+        with Image.open(image_path) as im:
+            w_px, h_px = im.size
+    except Exception:
+        return []
+
+    boxes = []
+    for el in text_elements:
+        b = el.get("bbox_cm", {})
+        if not b:
+            continue
+        x0 = int(b["x"] / width_cm * w_px) - _TEXT_BOX_PAD_PX
+        x1 = int((b["x"] + b["w"]) / width_cm * w_px) + _TEXT_BOX_PAD_PX
+        # TikZ y grows up from the bottom; convert the box's top/bottom to rows.
+        y0 = int(h_px - (b["y"] + b["h"]) / height_cm * h_px) - _TEXT_BOX_PAD_PX
+        y1 = int(h_px - b["y"] / height_cm * h_px) + _TEXT_BOX_PAD_PX
+        boxes.append((max(0, x0), max(0, y0), min(w_px, x1), min(h_px, y1)))
+    return boxes
+
+
 # ─── OCR / shape reconciliation ───────────────────────────────────────────────
 
 def _suppress_text_in_shapes(text_elements: list, regions: list) -> list:
@@ -140,6 +189,12 @@ def _suppress_text_in_shapes(text_elements: list, regions: list) -> list:
 
     OCR happily reads a circular graphic as a digit/letter; when the CV already
     claims that area as a circle, the text is a false positive to be removed.
+
+    (Tried a Fase-4 "larger shape wins" reconciliation to also drop the TINY Hough
+    rings hallucinated over "BRAUN" and keep the text — semantically right, but the
+    condensed logo font renders too wide and OVERFLOWS, so recovering the text
+    regressed the metric; capa1 also lost 2 real circles. The BRAUN area is tiny, so
+    it's a wash. Reverted — it's the same text-render ceiling as the small type.)
     """
     circles = [r for r in regions if r.get("shape_type") == "circle"]
     if not circles:
@@ -166,11 +221,16 @@ def _suppress_text_in_shapes(text_elements: list, regions: list) -> list:
 
 # ─── Internal runners ─────────────────────────────────────────────────────────
 
-def _run_cv(image_path: Path, width_cm: float, height_cm: float) -> "dict | None":
+def _run_cv(
+    image_path: Path, width_cm: float, height_cm: float,
+    text_boxes_px: "list | None" = None,
+) -> "dict | None":
     try:
         mod = _load_local("image_analyzer")
-        # Pass canvas dimensions so region bbox_cm coords match the TikZ canvas
-        return mod.analyze_image(image_path, canvas_w_cm=width_cm, canvas_h_cm=height_cm)
+        # Pass canvas dimensions so region bbox_cm coords match the TikZ canvas,
+        # and the OCR text boxes so the grid pass can mask them (layout map).
+        return mod.analyze_image(image_path, canvas_w_cm=width_cm,
+                                 canvas_h_cm=height_cm, text_boxes_px=text_boxes_px)
     except Exception as exc:
         _s = str(exc)
         if "No module named" in _s:

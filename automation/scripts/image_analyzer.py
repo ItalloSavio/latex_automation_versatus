@@ -75,6 +75,18 @@ _CIRCLE_RIM_STEP_MIN = 40     # RGB step across the rim that counts as an edge
 # tiling / op-art pattern, not discrete motifs → out of this vocabulary.
 _CIRCLE_MAX_COVERAGE = 0.60
 
+# Hatching (a field of regular parallel lines). MINIMUM version: find the region,
+# paint it its DOMINANT colour as one solid block — a solid base to refine later
+# (lines come next). Vertical lines make dense HORIZONTAL gradients (sobel_v).
+_HATCH_WIN_FRAC      = 0.03   # local density window ÷ short side
+_HATCH_DENSITY       = 0.30   # vertical-edge density above which it's line-like.
+                              # High on purpose: isolates the DENSE hatch core from
+                              # sparse single diagonals/text edges that merge in low.
+_HATCH_MIN_AREA_FRAC = 0.05   # the region must be a real chunk of the canvas
+_HATCH_BBOX_FILL_MIN = 0.30   # region ÷ its bbox — rejects thin diagonals/text bands
+_HATCH_PERIOD_MIN    = 0.30   # autocorrelation peak needed to call it PERIODIC
+                              # (a hatch repeats; a diagonal/text edge does not)
+
 
 # ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -82,6 +94,7 @@ def analyze_image(
     path: "str | Path",
     canvas_w_cm: "float | None" = None,
     canvas_h_cm: "float | None" = None,
+    text_boxes_px: "list[tuple[int,int,int,int]] | None" = None,
 ) -> dict:
     """
     Analyze a cover image using CV and return a structured dict.
@@ -131,12 +144,18 @@ def analyze_image(
     arr = np.array(img)  # (H, W, 3) uint8
 
     colors     = _extract_colors(img)
-    regions    = _extract_regions(arr, colors, w_px, h_px, w_cm, h_cm)
-    # Circles are detected separately (grid/component detection can't see them)
-    # and appended LAST so they render on top of the grid guess in their footprint.
+    # Layout map: the grid pass masks the OCR text boxes so letters can't be read
+    # as grid lines. (Masking CIRCLE footprints too was tried and reverted — the
+    # grid carries colour the circles don't fully replace, so it regressed.)
+    regions    = _extract_regions(arr, colors, w_px, h_px, w_cm, h_cm,
+                                  text_boxes_px=text_boxes_px)
+    # Hatching field → one solid block of its dominant colour. Drawn LAST (over the
+    # circles) so it also covers the false circles Hough hallucinates on its own
+    # parallel lines — without permanently deleting them: if layer selection later
+    # drops the hatch, the circles are simply uncovered again (no side effect).
     circles    = _detect_circles(arr, colors, w_px, h_px, w_cm, h_cm)
-    if circles:
-        regions = regions + circles
+    hatch      = _detect_hatch(arr, colors, w_px, h_px, w_cm, h_cm)
+    regions    = regions + circles + hatch
     layout     = _analyze_layout(arr, h_px, w_px)
     text_zones = _detect_text_zones(arr, h_px, w_px, w_cm, h_cm)
     has_logo   = _detect_logo(arr, h_px, w_px)
@@ -225,9 +244,11 @@ def _extract_regions(
     colors: list[dict],
     w_px: int, h_px: int,
     w_cm: float, h_cm: float,
+    text_boxes_px: "list[tuple[int,int,int,int]] | None" = None,
 ) -> list[dict]:
     # ── Try grid-line detection first ────────────────────────────────────────
-    grid_regions = _detect_grid_blocks(arr, w_px, h_px, w_cm, h_cm, palette=colors)
+    grid_regions = _detect_grid_blocks(arr, w_px, h_px, w_cm, h_cm,
+                                       palette=colors, text_boxes_px=text_boxes_px)
     if len(grid_regions) >= 4:
         grid_regions.sort(key=lambda r: r["area_pct"], reverse=True)
         return grid_regions[:30]
@@ -437,6 +458,98 @@ def _dedup_circles(bands: list[dict]) -> list[dict]:
     return kept
 
 
+# ─── Hatching (parallel-line field) ───────────────────────────────────────────
+
+def _detect_hatch(
+    arr:    "np.ndarray",
+    colors: list[dict],
+    w_px:   int, h_px: int,
+    w_cm:   float, h_cm: float,
+) -> list[dict]:
+    """
+    Detect a hatching field (regular parallel lines) and return it as ONE solid
+    block of its DOMINANT colour — the minimum viable representation (lines are a
+    later refinement). Vertical lines create dense HORIZONTAL gradients; a real
+    hatch is a 2-D region whose column-edge profile is PERIODIC, which separates
+    it from a single diagonal edge or a text band (dense edges, but not periodic).
+
+    Returns [] when there is no such field (so it is a no-op on covers without it).
+    """
+    try:
+        from skimage.filters import sobel_v          # noqa: PLC0415
+        from scipy.ndimage import uniform_filter, label as nd_label  # noqa: PLC0415
+    except ImportError:
+        return []
+    if not colors:
+        return []
+
+    gray   = arr.mean(2)
+    strong = np.abs(sobel_v(gray)) > (np.abs(sobel_v(gray)).mean() + np.abs(sobel_v(gray)).std())
+    win    = max(9, int(min(h_px, w_px) * _HATCH_WIN_FRAC))
+    density = uniform_filter(strong.astype(np.float32), win)
+    mask    = density > _HATCH_DENSITY
+
+    min_area = _HATCH_MIN_AREA_FRAC * h_px * w_px
+    if mask.sum() < min_area:
+        return []
+
+    lbl, n = nd_label(mask)
+    if n == 0:
+        return []
+    sizes = np.bincount(lbl.ravel()); sizes[0] = 0
+    comp  = lbl == int(sizes.argmax())
+    if comp.sum() < min_area:
+        return []
+
+    ys, xs = np.where(comp)
+    r0, r1, c0, c1 = int(ys.min()), int(ys.max()) + 1, int(xs.min()), int(xs.max()) + 1
+    bw, bh = c1 - c0, r1 - r0
+    if bw < 4 or bh < 4:
+        return []
+    if comp.sum() / (bw * bh) < _HATCH_BBOX_FILL_MIN:   # thin edge, not a field
+        return []
+    if not _profile_is_periodic(strong[r0:r1, c0:c1]):
+        return []
+
+    dom = _dominant_color(arr[comp], colors)
+    return [{
+        "color_hex":  dom,
+        "shape_type": "rectangle",
+        "bbox_cm": {
+            "x": round(c0 / w_px * w_cm, 2),
+            "y": round((h_px - r1) / h_px * h_cm, 2),
+            "w": round(bw / w_px * w_cm, 2),
+            "h": round(bh / h_px * h_cm, 2),
+        },
+        "bbox_px":  {"x": c0, "y": r0, "w": bw, "h": bh},
+        "area_pct": round(comp.sum() / (w_px * h_px), 4),
+        "source":   "hatch",
+    }]
+
+
+def _profile_is_periodic(strong_roi: "np.ndarray") -> bool:
+    """True when the column edge-profile has a regular period (a real hatch)."""
+    prof = strong_roi.sum(axis=0).astype(float)
+    if prof.size < 10:
+        return False
+    prof = prof - prof.mean()
+    ac = np.correlate(prof, prof, mode="full")[prof.size - 1:]
+    if ac[0] <= 0:
+        return False
+    ac = ac / ac[0]
+    hi = min(30, len(ac) - 1)
+    peaks = [ac[k] for k in range(3, hi) if ac[k] > ac[k - 1] and ac[k] >= ac[k + 1]]
+    return bool(peaks) and max(peaks) > _HATCH_PERIOD_MIN
+
+
+def _dominant_color(pixels: "np.ndarray", colors: list[dict]) -> str:
+    """Hex of the palette colour that the most pixels snap to (the field's base)."""
+    pal = np.array([c["rgb"] for c in colors])
+    d   = ((pixels[:, None, :].astype(int) - pal[None, :, :]) ** 2).sum(2)
+    idx = d.argmin(1)
+    return colors[int(np.bincount(idx, minlength=len(colors)).argmax())]["hex"]
+
+
 # ─── Grid-line detection ──────────────────────────────────────────────────────
 
 def _detect_grid_blocks(
@@ -444,6 +557,7 @@ def _detect_grid_blocks(
     w_px: int, h_px: int,
     w_cm: float, h_cm: float,
     palette: "list[dict] | None" = None,
+    text_boxes_px: "list[tuple[int,int,int,int]] | None" = None,
 ) -> list[dict]:
     """
     Detect rectangular blocks by finding strong horizontal/vertical edges via
@@ -468,17 +582,32 @@ def _detect_grid_blocks(
     h_grad = np.abs(sobel_h(gray))
     v_grad = np.abs(sobel_v(gray))
 
-    # ── Horizontal lines: top 73% to skip text-zone horizontal edges ────────
-    # Large typography in the lower text band creates horizontal Sobel peaks
-    # at every letter-top boundary, fragmenting the graphic section into thin
-    # spurious cells. Using 73% captures the real graphic/text boundary
-    # (typically at ~70-72%) while excluding text-area false peaks.
-    graphic_rows_h = max(1, int(h_px * 0.73))
+    # Layout map: zero the gradient where TEXT lives so letters can't be read as
+    # grid lines (the reason mid-canvas type like "rancid" shatters the grid).
+    # text_boxes_px comes from OCR (deterministic — it won't mistake circles for
+    # text, which an edge-density heuristic did). Only the LINE-FINDING projection
+    # is masked; the per-cell colour/diagonal classification still sees real pixels.
+    if text_boxes_px:
+        for (x0, y0, x1, y1) in text_boxes_px:
+            h_grad[y0:y1, x0:x1] = 0.0
+            v_grad[y0:y1, x0:x1] = 0.0
+
+    # ── Horizontal lines: skip the bottom text band (only if there IS text) ─
+    # The 73% cutoff exists to stop lower-band typography from fragmenting the
+    # grid with a horizontal Sobel peak at every letter-top boundary. But a cover
+    # with NO detected text is graphic all the way down (op-art like capa3), and
+    # capping at 73% leaves its bottom rows unsplit — one tall band the diagonal
+    # pass then slices into phantom triangles. No text → search the FULL height.
+    graphic_rows_h = h_px if not text_boxes_px else max(1, int(h_px * 0.73))
     h_profile = h_grad[:graphic_rows_h].mean(axis=1)
 
     # ── Vertical lines: only the top 65% to skip text-area character edges ─
     # Large typography in the lower graphic band creates a vertical Sobel peak
     # at every character boundary, fragmenting the left grid column.
+    # (Tried extending to full height when text-less — like the horizontal cutoff.
+    #  REVERTED: capa5's big bottom triangle + "grafik" spike phantom vertical lines
+    #  that shatter its grid — capa5 0.612→0.444. This cutoff is load-bearing, not a
+    #  blind assumption. capa3 was unchanged. So it stays capped.)
     graphic_rows = max(1, int(h_px * 0.65))
     v_profile = v_grad[:graphic_rows].mean(axis=0)
 

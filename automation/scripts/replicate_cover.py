@@ -62,6 +62,35 @@ def _load(name: str):
 
 # ─── Public API ───────────────────────────────────────────────────────────────
 
+def _vlm_pass(analysis, image_path, render_path, cover_dir, score_fn, refresh):
+    """Fase 5 — the VLM proposer pass, gated. Runs ONLY on plateau (called by replicate).
+    The VLM proposes typed edits; `edit_gate` grounds + MEASURES each (score_fn renders),
+    so nothing hallucinated lands. The reply is CACHED (vlm_edits.json) → re-runs are
+    deterministic and don't re-spend the API. Returns (best_analysis, best_quality)."""
+    eg = _load("edit_gate")
+    vp = _load("vlm_proposer")
+    eg.assign_ids(analysis)
+    cache = cover_dir / "vlm_edits.json"
+    if cache.exists() and not refresh:
+        edits = json.loads(cache.read_text(encoding="utf-8"))
+        _log(f"  [VLM] {len(edits)} edits do CACHE ({cache.name}; --vlm-refresh p/ rechamar)")
+    else:
+        _log("  [VLM] chamando Gemini (visao)...")
+        zones = vp.zones_for(image_path, render_path)
+        edits = vp.propose(analysis, image_path, render_path, zones=zones)
+        cache.write_text(json.dumps(edits, ensure_ascii=False, indent=2), encoding="utf-8")
+        _log(f"  [VLM] Gemini propos {len(edits)} edits (cacheados em {cache.name})")
+    edits = eg.snap_text_adds(edits, image_path, analysis.get("canvas", {}))  # ink-snap positions
+    best, quality, log = eg.run_gate(analysis, edits, score_fn)
+    best = eg.dedup_text(best)   # drop OCR misreads a VLM text.add supersedes (e.g. huge "Welter Knol")
+    for e in log:
+        _log(f"    {e['verdict']:16} {e['op']:14} {e['info']}")
+    n_gap = eg.persist_vocab_gaps(best, cover_dir.name)
+    if n_gap:
+        _log(f"  [VLM] {n_gap} vocab.gap -> output/vocab_gaps.jsonl (fila do dev)")
+    return best, quality
+
+
 def replicate(
     image_path:     "str | Path",
     out_dir:        "str | Path | None" = None,
@@ -71,6 +100,8 @@ def replicate(
     dpi:            int   = 150,
     width_cm:       float = 21.0,
     height_cm:      "float | None" = None,
+    vlm:            bool  = False,
+    vlm_refresh:    bool  = False,
 ) -> dict:
     """
     Full replication pipeline: image → PDF + quality report.
@@ -235,6 +266,33 @@ def replicate(
             json.dumps(analysis, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+    # ── Stage 13: VLM proposer on PLATEAU (Fase 5 — gated + cached) ───────────
+    # The deterministic loop has settled. If still below the goal, run the VLM. The ADOPTED
+    # analysis is cached (vlm_analysis.json) and, on reuse, rendered DIRECTLY — so the board
+    # rebuild is fast, reproducible, and free of OCR/id drift (the bug that made the VLM work
+    # vanish from the deliverable). The gate is the AUTHORITY (grounding + per-edit measured
+    # guard + eye-wanted _TRUST_OPS): its output IS the deliverable, no blind-Score veto.
+    if vlm and best_analysis is not None and not (best_quality or {}).get("score_pass"):
+        _step(13, "VLM (Gemini) proponente de edits no PLATO")
+        vlm_cache = cover_dir / "vlm_analysis.json"
+        if vlm_cache.exists() and not vlm_refresh:
+            best_analysis = json.loads(vlm_cache.read_text(encoding="utf-8"))
+            _log(f"  [VLM] analysis ADOTADO do cache ({vlm_cache.name}; --vlm-refresh p/ refazer)")
+        else:
+            _score_of(best_analysis)   # current BEST render for the VLM to see
+            best_analysis, _ = _vlm_pass(
+                best_analysis, image_path, render_path, cover_dir, _score_of, vlm_refresh)
+            vlm_cache.write_text(
+                json.dumps(best_analysis, ensure_ascii=False, indent=2), encoding="utf-8")
+        # Render + persist the VLM result AS THE DELIVERABLE (the missing link before).
+        best_quality = _score_of(best_analysis) or best_quality
+        best_score   = (best_quality or {}).get("score", best_score)
+        analysis, quality = best_analysis, best_quality
+        _rename_diff(cover_dir, diff_path)
+        analysis_path.write_text(
+            json.dumps(best_analysis, ensure_ascii=False, indent=2), encoding="utf-8")
+        _log(f"  [VLM] deliverable atualizado -> Score {best_score:.4f}")
 
     _banner(f"DONE ({pass_count} pass(es))")
     if quality:
@@ -601,6 +659,10 @@ if __name__ == "__main__":
                         help="Largura da canvas em cm (default: 21.0)")
     parser.add_argument("--height-cm",      type=float, default=None,
                         help="Altura da canvas em cm (default: derivada do aspect da imagem)")
+    parser.add_argument("--vlm",            action="store_true",
+                        help="Passe do VLM (Gemini) no PLATO — proponente de edits, gated (requer GEMINI_API_KEY)")
+    parser.add_argument("--vlm-refresh",    action="store_true",
+                        help="Ignorar o cache de edits do VLM e rechamar o Gemini")
 
     args = parser.parse_args()
 
@@ -614,6 +676,8 @@ if __name__ == "__main__":
             dpi            = args.dpi,
             width_cm       = args.width_cm,
             height_cm      = args.height_cm,
+            vlm            = args.vlm,
+            vlm_refresh    = args.vlm_refresh,
         )
         sys.exit(0 if (result["quality"] or {}).get("score_pass") else 1)
 

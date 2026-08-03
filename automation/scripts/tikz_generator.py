@@ -299,11 +299,28 @@ def _build_regions(
         col_name = _color_name(r, color_map)
         bx       = r["bbox_cm"]
 
-        if shape == "rectangle" or shape == "polygon":
+        if shape == "polygon" and r.get("points_cm"):
+            lines.append(_cmd_polygon(col_name, r["points_cm"]))
+
+        elif shape == "rectangle" or shape == "polygon":
             lines.append(_cmd_rect(col_name, bx))
 
         elif shape == "circle":
             lines.append(_cmd_circle(col_name, bx))
+
+        elif shape == "circle_lattice":     # op-art: tiled circles + accent lenses
+            col_b = _color_name({"color_hex": r.get("color_b_hex", "#FFFFFF")}, color_map)
+            lens  = _color_name({"color_hex": r.get("lens_hex", "#FFFFFF")}, color_map)
+            lines.append(_cmd_circle_lattice(
+                col_name, col_b, lens, r.get("period_cm", 5.0), r.get("radius_cm", 3.5),
+                r.get("lens_w_cm", 2.5), r.get("lens_h_cm", 1.2), W, H,
+                r.get("phase_x_cm", 0.0), r.get("phase_y_cm", 0.0)))
+
+        elif shape == "hatch":
+            base = (_color_name({"color_hex": r["base_hex"]}, color_map)
+                    if r.get("base_hex") else None)
+            lines.append(_cmd_hatch(col_name, base, bx, r.get("period_cm", 0.2),
+                                    r.get("line_width_pt", 0.8), r.get("direction", "v")))
 
         elif shape == "triangle":
             if i in tri_done:
@@ -343,6 +360,62 @@ def _cmd_circle(color: str, b: dict) -> str:
     cy = _f(b["y"] + b["h"] / 2)
     r  = _f(min(b["w"], b["h"]) / 2)
     return f"  \\fill[{_fill_opts(color)}] ({cx},{cy}) circle ({r}cm);"
+
+
+def _cmd_circle_lattice(col_a: str, col_b: str, lens: str, p: float, r: float,
+                        lw: float, lh: float, W: float, H: float,
+                        phx: float = 0.0, phy: float = 0.0) -> str:
+    """Op-art circle lattice: a checkerboard of two circle colours tiled at period `p`,
+    plus horizontal accent LENSES at the vertical seams. A parametric VISUAL primitive —
+    period/radius/colours/lens size/phase are DATA (measured from the image), so it grows
+    the vocabulary without new code. Renders bottom (col_b bg) → circles → lenses on top.
+    `phx`/`phy` shift the grid so the circles land on the original's (measured phase)."""
+    p = max(0.5, p)
+    nx = int(W / p) + 2
+    ny = int(H / p) + 2
+    out = [f"  \\fill[{col_b}] (0,0) rectangle ({_f(W)},{_f(H)});"]
+    for j in range(-1, ny):
+        for i in range(-1, nx):
+            col = col_a if (i + j) % 2 == 0 else col_b
+            out.append(f"  \\fill[{col}] ({_f(phx+i*p)},{_f(phy+j*p)}) circle ({_f(r)});")
+    # accent LENS = the true vesica (intersection of two vertically-adjacent circles), drawn by
+    # clipping to the lower circle and filling the upper — a thin POINTED lens, not a fat ellipse
+    # (the ellipse made the orange dominate and read as "inverted"). lw/lh are now unused.
+    for j in range(-1, ny):
+        for i in range(-1, nx):
+            cx = _f(phx + i * p); cyl = _f(phy + j * p); cyh = _f(phy + (j + 1) * p)
+            out.append(f"  \\begin{{scope}}\\clip ({cx},{cyl}) circle ({_f(r)});"
+                       f"\\fill[{lens}] ({cx},{cyh}) circle ({_f(r)});\\end{{scope}}")
+    return "\n".join(out)
+
+
+def _cmd_polygon(color: str, points_cm: list) -> str:
+    """Parametric primitive: an arbitrary filled polygon from its vertices (cm, TikZ
+    y-up). The general shape that lets a proposer express what the fixed primitives
+    can't — it emits VERTICES (data), the renderer stays deterministic."""
+    pts = " -- ".join(f"({_f(x)},{_f(y)})" for x, y in points_cm)
+    return f"  \\fill[{_fill_opts(color)}] {pts} -- cycle;"
+
+
+def _cmd_hatch(line_col: str, base_col: "str | None", b: dict,
+               period: float, lw: float, direction: str) -> str:
+    """Parallel-line hatch: an optional base fill + a \\foreach of thin lines. A parametric
+    VISUAL primitive — direction/period/width/colours are DATA, so a proposer grows the
+    vocabulary without new code. direction 'h' = horizontal lines, else vertical."""
+    x1, y1 = _f(b["x"]), _f(b["y"])
+    x2, y2 = _f(b["x"] + b["w"]), _f(b["y"] + b["h"])
+    step   = max(0.03, period)
+    lws    = _f(max(0.1, lw))
+    out = []
+    if base_col:
+        out.append(f"  \\fill[{_fill_opts(base_col)}] ({x1},{y1}) rectangle ({x2},{y2});")
+    if direction == "h":
+        out.append(f"  \\foreach \\y in {{{y1},{_f(b['y'] + step)},...,{y2}}} "
+                   f"{{\\draw[{line_col},line width={lws}pt] ({x1},\\y) -- ({x2},\\y);}}")
+    else:
+        out.append(f"  \\foreach \\x in {{{x1},{_f(b['x'] + step)},...,{x2}}} "
+                   f"{{\\draw[{line_col},line width={lws}pt] (\\x,{y1}) -- (\\x,{y2});}}")
+    return "\n".join(out)
 
 
 def _cmd_triangle_ul(color: str, b: dict) -> str:

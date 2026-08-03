@@ -41,7 +41,11 @@ def _discover(args: "list[str]") -> "list[int]":
 
 
 def _build(nums: "list[int]") -> None:
-    """Re-run the pipeline for each cover (1 pass) so the renders are current."""
+    """Re-run the pipeline for each cover (1 pass) so the renders are current.
+    Passes --vlm so the board shows the ADOPTED VLM render (the deliverable the eye
+    judges), not the deterministic one — and reuses the cached vlm_edits.json, so a
+    rebuild spends NO API. Without --vlm, --build overwrote render.png with the plain
+    deterministic render and every VLM gain vanished from the board."""
     for n in nums:
         img = _COVERS / f"capa_teste{n}.png"
         if not img.exists():
@@ -49,7 +53,7 @@ def _build(nums: "list[int]") -> None:
         print(f"[build] capa_teste{n} …", flush=True)
         subprocess.run(
             [sys.executable, str(_HERE / "replicate_cover.py"), str(img),
-             "--max-passes", "1"],
+             "--max-passes", "1", "--vlm"],
             capture_output=True, text=True,
         )
 

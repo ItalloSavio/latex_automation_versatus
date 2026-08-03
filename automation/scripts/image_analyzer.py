@@ -155,7 +155,13 @@ def analyze_image(
     # drops the hatch, the circles are simply uncovered again (no side effect).
     circles    = _detect_circles(arr, colors, w_px, h_px, w_cm, h_cm)
     hatch      = _detect_hatch(arr, colors, w_px, h_px, w_cm, h_cm)
-    regions    = regions + circles + hatch
+    regions    = _drop_concentric_noise(regions + circles + hatch)   # kill Hough logo-rings
+    # Op-art circle lattice (tiled circles + accent lenses): when detected it IS the whole
+    # cover, so it REPLACES the grid/circle guesses. Conservative trigger (see the detector)
+    # → fires only on a genuine text-less lattice, so the other 6 covers are untouched.
+    lattice    = _detect_circle_lattice(arr, colors, w_px, h_px, w_cm, h_cm, text_boxes_px)
+    if lattice is not None:
+        regions = [lattice]
     layout     = _analyze_layout(arr, h_px, w_px)
     text_zones = _detect_text_zones(arr, h_px, w_px, w_cm, h_cm)
     has_logo   = _detect_logo(arr, h_px, w_px)
@@ -459,6 +465,142 @@ def _dedup_circles(bands: list[dict]) -> list[dict]:
 
 
 # ─── Hatching (parallel-line field) ───────────────────────────────────────────
+
+def _drop_concentric_noise(regions: list) -> list:
+    """Drop the tiny CONCENTRIC circle clusters Hough hallucinates on logo/typography (the
+    false 'target' over BRAUN in capa7). A ring is noise when it is small (r < 1.2 cm) AND
+    shares a centre with another circle (nested). Real design circles are larger and never
+    nested, so they're untouched (verified on the 7 covers)."""
+    circ = [r for r in regions if r.get("shape_type") == "circle" and r.get("bbox_cm")]
+    def cen(r):
+        b = r["bbox_cm"]; return b["x"] + b["w"] / 2, b["y"] + b["h"] / 2, min(b["w"], b["h"]) / 2
+    drop = set()
+    for i, ri in enumerate(circ):
+        cxi, cyi, rri = cen(ri)
+        if rri >= 1.2:
+            continue
+        for j, rj in enumerate(circ):
+            if i == j:
+                continue
+            cxj, cyj, _ = cen(rj)
+            if ((cxi - cxj) ** 2 + (cyi - cyj) ** 2) ** 0.5 < 0.6:   # concentric neighbour
+                drop.add(id(ri)); break
+    return [r for r in regions if id(r) not in drop]
+
+
+_LATTICE_MIN_COVER = 0.82     # top-3 colours must fill at least this much of the canvas
+_LATTICE_PERIODS   = (3, 14)  # canvas must span this many periods (a real circle grid)
+_LATTICE_MIN_COMPS = 5        # accent colour must repeat this many times (the lenses)
+_LATTICE_MIN_ASPECT = 1.4     # accent components must be WIDE (horizontal lenses)
+
+
+def _detect_circle_lattice(
+    arr:    "np.ndarray",
+    colors: list[dict],
+    w_px:   int, h_px: int,
+    w_cm:   float, h_cm: float,
+    text_boxes_px: "list | None",
+) -> "dict | None":
+    """Op-art CIRCLE LATTICE — a checkerboard of two circle colours tiled at a single
+    period, with a WIDE accent colour (horizontal lenses) at the seams. Returns ONE
+    parametric region carrying the MEASURED period/radius/colours/lens size, or None.
+
+    Conservative by design (the trigger IS the gate — the render metric is near-blind to
+    op-art): fires only on a TEXT-LESS cover whose top-3 colours periodically fill the
+    whole canvas and whose accent repeats as many wide-short blobs. Grids (capa4), mosaics
+    and text covers all fail a guard, so they're untouched."""
+    if text_boxes_px:                      # op-art covers carry no text — strong guard
+        return None
+    if len(colors) < 3:
+        return None
+    from scipy import ndimage
+    a = arr.astype(float)
+    masks = []
+    for c in colors[:5]:
+        m = np.sum((a - np.array(c["rgb"])) ** 2, axis=2) < 2500
+        masks.append((float(m.mean()), c, m))
+    masks.sort(key=lambda t: -t[0])
+    top3 = masks[:3]
+    if sum(t[0] for t in top3) < _LATTICE_MIN_COVER:
+        return None
+
+    def comp_stats(m):
+        lbl, n = ndimage.label(m)
+        if n == 0:
+            return 0, 1.0, 1, 1
+        ws, hs = [], []
+        for s in ndimage.find_objects(lbl):
+            hs.append(s[0].stop - s[0].start)
+            ws.append(s[1].stop - s[1].start)
+        ws, hs = np.array(ws), np.array(hs)
+        return n, float(np.median(ws / np.maximum(1, hs))), int(np.median(ws)), int(np.median(hs))
+
+    stats = [(comp_stats(m), cov, c, m) for cov, c, m in top3]
+    lens_i = max(range(3), key=lambda k: stats[k][0][1] if stats[k][0][0] >= _LATTICE_MIN_COMPS else 0)
+    (n_l, ar_l, wl, hl), _, lens_c, lens_mask = stats[lens_i]
+    if n_l < _LATTICE_MIN_COMPS or ar_l < _LATTICE_MIN_ASPECT:
+        return None                        # no wide-short repeating accent → not a lattice
+
+    def period(sig):
+        sig = sig - sig.mean()
+        ac = np.correlate(sig, sig, "full")[len(sig) - 1:]
+        for i in range(3, len(ac) // 2):
+            if ac[i] > ac[i - 1] and ac[i] > ac[i + 1] and ac[i] > 0.30 * ac[0]:
+                return i
+        return None
+
+    px = period(lens_mask.sum(0))
+    py = period(lens_mask.sum(1))
+    if not px or not py:
+        return None
+    p_px = (px + py) / 2.0
+    if not (_LATTICE_PERIODS[0] <= w_px / p_px <= _LATTICE_PERIODS[1]):
+        return None
+
+    p_cm = p_px / w_px * w_cm
+    circ = sorted((stats[k][2] for k in range(3) if k != lens_i), key=lambda c: sum(c["rgb"]))
+    a_c, b_c = circ[0], circ[1]            # darkest circle colour = a, lightest = b (bg)
+    r_cm = p_cm * 0.70
+
+    # PHASE: place the checkerboard so its navy circles land on the original's navy. Search
+    # in the RENDERER's convention (tikz y-up → image row = (H-y)/H·h_px) so the phase is
+    # directly usable. The tiny image makes the brute-force cheap.
+    navy_mask = np.sum((a - np.array(a_c["rgb"])) ** 2, axis=2) < 2500
+    yy, xx = np.mgrid[0:h_px, 0:w_px]
+    r_px = p_px * 0.70
+    nxx, nyy = int(w_px / p_px) + 2, int(h_px / p_px) + 2
+    best = (-1.0, 0.0, 0.0)
+    for sy in range(0, int(p_px), max(1, int(p_px // 8))):
+        for sx in range(0, int(p_px), max(1, int(p_px // 8))):
+            ideal = np.zeros((h_px, w_px), bool)
+            for j in range(nyy):
+                for i in range(nxx):
+                    if (i + j) % 2 == 0:
+                        cx = sx + i * p_px
+                        cy_img = h_px - (sy + j * p_px)      # tikz y-up → image row
+                        ideal |= (xx - cx) ** 2 + (yy - cy_img) ** 2 <= r_px ** 2
+            ov = float((ideal & navy_mask).sum())
+            if ov > best[0]:
+                best = (ov, sx, sy)
+    phase_x_cm = round(best[1] / w_px * w_cm, 2)
+    phase_y_cm = round(best[2] / h_px * h_cm, 2)
+
+    return {
+        "shape_type":  "circle_lattice",
+        "color_hex":   a_c["hex"],
+        "color_b_hex": b_c["hex"],
+        "lens_hex":    lens_c["hex"],
+        "period_cm":   round(p_cm, 2),
+        "radius_cm":   round(r_cm, 2),
+        "lens_w_cm":   round(wl / w_px * w_cm * 0.5, 2),
+        "lens_h_cm":   round(hl / h_px * h_cm * 0.5, 2),
+        "phase_x_cm":  phase_x_cm,
+        "phase_y_cm":  phase_y_cm,
+        "bbox_cm":     {"x": 0, "y": 0, "w": round(w_cm, 2), "h": round(h_cm, 2)},
+        "area_pct":    1.0,
+        "source":      "circle_lattice",
+    }
+
 
 def _detect_hatch(
     arr:    "np.ndarray",

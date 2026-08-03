@@ -141,6 +141,13 @@ def _run_compare(
              + _SCORE_W["content_match"] * content_match
              + _SCORE_W["content_iou"]   * content_iou)
 
+    # text_match: the Fase-5 text gate (None when the cover has no text boxes).
+    tboxes = _text_boxes_from_analysis(analysis, W, H, orig.shape)
+    tmatch = text_match(orig, result, tboxes)
+    # per-box ink F1 (aligned with text_elements order) — a text.add is judged on the box
+    # it appended (the last one), which the diluted mean can't show.
+    tbox_scores = [round(_text_box_f1(orig, result, b), 4) for b in tboxes]
+
     return {
         "score":             round(score, 4),
         "score_pass":        score >= thresh,
@@ -149,6 +156,8 @@ def _run_compare(
         "ssim_threshold":    thresh,
         "content_match":     round(content_match, 4),
         "content_iou":       round(content_iou, 4),
+        "text_match":        round(tmatch, 4) if tmatch is not None else None,
+        "text_box_scores":   tbox_scores,
         "color_dist_mean":   round(color_dist, 2),
         "region_match_rate": round(match_rate, 3),
         "region_scores":     region_scores,
@@ -161,6 +170,15 @@ def _run_compare(
 
 _CONTENT_BG_DIST = 60    # a pixel this far from the background colour is "content"
 _CONTENT_MATCH_D = 60    # render vs original within this RGB dist = a match
+
+# Text-aware metric (Fase 5): content_match is nearly BLIND to thin type (capa2 = 0.03
+# even when it looks fine) because a 1px stroke offset zeroes the exact-pixel match. The
+# text gate for the VLM measures ink OVERLAP inside the OCR boxes, TOLERANT of small
+# misalignment (dilate both masks first), so a correct, well-placed string scores high
+# even a pixel or two off. Measures the RENDERING of text; the STRING's correctness is
+# the VLM's contained bit of trust (grounding + audit), not this metric.
+_TEXT_INK_DIST  = 55     # pixel this far from the box's local background = ink
+_TEXT_DILATE_PX = 3      # misalignment tolerance (px) — dilate ink before matching
 
 
 def _content_metrics(orig: "np.ndarray", result: "np.ndarray") -> "tuple[float, float]":
@@ -199,6 +217,89 @@ def _background_color(arr: "np.ndarray") -> "np.ndarray":
     q = (arr // 16).reshape(-1, 3)
     vals, counts = np.unique(q, axis=0, return_counts=True)
     return vals[counts.argmax()] * 16 + 8
+
+
+def _text_boxes_from_analysis(
+    analysis: "dict | None", w_cm: float, h_cm: float, shape: tuple, pad: int = 3,
+) -> "list[tuple[int,int,int,int]]":
+    """OCR bbox_cm (TikZ y-up) → image pixel boxes (x0,y0,x1,y1), padded a little."""
+    if not analysis:
+        return []
+    H, W = shape[0], shape[1]
+    boxes = []
+    for t in analysis.get("text_elements", []):
+        b = t.get("bbox_cm")
+        if not b:
+            continue
+        x0 = int(b["x"] / w_cm * W) - pad
+        x1 = int((b["x"] + b["w"]) / w_cm * W) + pad
+        y0 = int(H - (b["y"] + b["h"]) / h_cm * H) - pad
+        y1 = int(H - b["y"] / h_cm * H) + pad
+        boxes.append((x0, y0, x1, y1))
+    return boxes
+
+
+def text_match(
+    orig: "np.ndarray", result: "np.ndarray",
+    text_boxes_px: "list[tuple[int,int,int,int]]",
+    ink_dist: int = _TEXT_INK_DIST, dilate: int = _TEXT_DILATE_PX,
+) -> "float | None":
+    """Misalignment-tolerant ink overlap inside the OCR text boxes (the Fase-5 text gate).
+
+    Per box: ink = pixels far from that box's LOCAL background (handles white-on-dark and
+    dark-on-light alike). Dilate both the original and rendered ink by `dilate` px, then:
+      recall    = original ink that has rendered ink within tolerance
+      precision = rendered ink that has original ink within tolerance
+    Return their F1 (harmonic mean), aggregated over all boxes by ink count. Missing text
+    → recall 0; phantom/extra text → precision 0; right shape, ~right place → high. Returns
+    None when there are no text boxes (metric not applicable). Reuses _background_color and
+    the same ink threshold family as content_match, so it's the same metric authority.
+    """
+    import numpy as np  # noqa: PLC0415
+    from scipy.ndimage import binary_dilation  # noqa: PLC0415
+
+    if not text_boxes_px:
+        return None
+
+    o, r = orig.astype(int), result.astype(int)
+    H, W = o.shape[:2]
+    rec_n = rec_d = prec_n = prec_d = 0
+    for (x0, y0, x1, y1) in text_boxes_px:
+        x0, y0 = max(0, x0), max(0, y0)
+        x1, y1 = min(W, x1), min(H, y1)
+        if x1 <= x0 or y1 <= y0:
+            continue
+        ob, rb = o[y0:y1, x0:x1], r[y0:y1, x0:x1]
+        bg     = _background_color(orig[y0:y1, x0:x1])
+        ink_o  = np.sqrt(((ob - bg) ** 2).sum(2)) > ink_dist
+        ink_r  = np.sqrt(((rb - bg) ** 2).sum(2)) > ink_dist
+        dil_o  = binary_dilation(ink_o, iterations=dilate)
+        dil_r  = binary_dilation(ink_r, iterations=dilate)
+        rec_n += int((ink_o & dil_r).sum()); rec_d += int(ink_o.sum())
+        prec_n += int((ink_r & dil_o).sum()); prec_d += int(ink_r.sum())
+
+    recall = rec_n / rec_d if rec_d else 1.0
+    prec   = prec_n / prec_d if prec_d else 1.0
+    return 0.0 if (prec + recall) == 0 else 2 * prec * recall / (prec + recall)
+
+
+def _text_box_f1(orig, result, box, ink_dist=_TEXT_INK_DIST, dilate=_TEXT_DILATE_PX) -> float:
+    """The misalignment-tolerant ink F1 for ONE box (so a text.add can be judged on its
+    OWN box, not the diluted mean over all boxes)."""
+    import numpy as np  # noqa: PLC0415
+    from scipy.ndimage import binary_dilation  # noqa: PLC0415
+    H, W = orig.shape[:2]
+    x0, y0, x1, y1 = max(0, box[0]), max(0, box[1]), min(W, box[2]), min(H, box[3])
+    if x1 <= x0 or y1 <= y0:
+        return 1.0
+    ob, rb = orig[y0:y1, x0:x1].astype(int), result[y0:y1, x0:x1].astype(int)
+    bg     = _background_color(orig[y0:y1, x0:x1])
+    ink_o  = np.sqrt(((ob - bg) ** 2).sum(2)) > ink_dist
+    ink_r  = np.sqrt(((rb - bg) ** 2).sum(2)) > ink_dist
+    dil_o, dil_r = binary_dilation(ink_o, iterations=dilate), binary_dilation(ink_r, iterations=dilate)
+    rec  = (ink_o & dil_r).sum() / ink_o.sum() if ink_o.sum() else 1.0
+    prec = (ink_r & dil_o).sum() / ink_r.sum() if ink_r.sum() else 1.0
+    return 0.0 if (prec + rec) == 0 else float(2 * prec * rec / (prec + rec))
 
 
 # ─── Palette extraction & comparison ─────────────────────────────────────────

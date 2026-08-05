@@ -147,7 +147,7 @@ def _build_tikz(doc: dict) -> str:
     # Text elements
     if texts:
         lines.append("  % Text elements")
-        lines += _build_text_nodes(_resolve_text_overlap(texts), color_map, bg_hex)
+        lines += _build_text_nodes(_resolve_text_overlap(texts), color_map, bg_hex, W)
         lines.append("")
 
     lines.append(r"  \end{tikzpicture}%")
@@ -378,14 +378,16 @@ def _cmd_circle_lattice(col_a: str, col_b: str, lens: str, p: float, r: float,
         for i in range(-1, nx):
             col = col_a if (i + j) % 2 == 0 else col_b
             out.append(f"  \\fill[{col}] ({_f(phx+i*p)},{_f(phy+j*p)}) circle ({_f(r)});")
-    # accent LENS = the true vesica (intersection of two vertically-adjacent circles), drawn by
-    # clipping to the lower circle and filling the upper — a thin POINTED lens, not a fat ellipse
-    # (the ellipse made the orange dominate and read as "inverted"). lw/lh are now unused.
+    # accent LENS = the vesica (intersection of two vertically-adjacent circles), clipped from a
+    # slightly LARGER radius (lr) so neighbouring lenses MERGE at the diagonal centres into the
+    # original's continuous horizontal chains — with the plain circle r they fell just short
+    # (half-width 0.49p < 0.5p), leaving bg gaps that read as "inverted". lw/lh are unused.
+    lr = round(r + 0.02 * p, 2)
     for j in range(-1, ny):
         for i in range(-1, nx):
             cx = _f(phx + i * p); cyl = _f(phy + j * p); cyh = _f(phy + (j + 1) * p)
-            out.append(f"  \\begin{{scope}}\\clip ({cx},{cyl}) circle ({_f(r)});"
-                       f"\\fill[{lens}] ({cx},{cyh}) circle ({_f(r)});\\end{{scope}}")
+            out.append(f"  \\begin{{scope}}\\clip ({cx},{cyl}) circle ({_f(lr)});"
+                       f"\\fill[{lens}] ({cx},{cyh}) circle ({_f(lr)});\\end{{scope}}")
     return "\n".join(out)
 
 
@@ -513,7 +515,8 @@ def _resolve_text_overlap(texts: list) -> list:
     return sorted(result, key=lambda e: e["bbox_cm"]["y"])
 
 
-def _build_text_nodes(texts: list, color_map: dict, bg_hex: str = "FFFFFF") -> "list[str]":
+def _build_text_nodes(texts: list, color_map: dict, bg_hex: str = "FFFFFF",
+                      W: float = 21.0) -> "list[str]":
     bg_rgb = _hex_to_rgb(bg_hex)
 
     # Pre-build a reverse map: color name → hex, for contrast lookup
@@ -527,6 +530,15 @@ def _build_text_nodes(texts: list, color_map: dict, bg_hex: str = "FFFFFF") -> "
         text    = _escape_latex(el.get("text", ""))
         bx      = el["bbox_cm"]
         pt      = el.get("font_size_pt", 10.0)
+        # OVERFLOW GUARD: shrink a font that would run off the canvas right edge (an OCR
+        # mis-measure — e.g. capa1's title came out 126pt and bled off the page). Estimate
+        # the line width at ~0.52 em per char; only shrinks genuinely off-canvas text.
+        _raw  = el.get("text", "")
+        _hs   = el.get("hscale", _TEXT_HSCALE)
+        _avail = max(0.5, (W - bx["x"]) * 0.99)
+        _estw  = len(_raw) * pt * 0.52 / _PT_PER_CM * _hs
+        if _estw > _avail:
+            pt = max(6.0, round(pt * _avail / _estw, 1))
         leading = _f(round(pt * 1.2, 1))
         pt_str  = _f(pt)
         cmd     = el.get("latex_cmd",   r"\sffamily")

@@ -113,14 +113,21 @@ def snap_text_adds(edits: list, image_path, canvas: dict) -> list:
         return edits
     hpx, wpx = g.shape
     W = canvas.get("width_cm", 21.0); H = canvas.get("height_cm", 29.7)
-    # ink = strokes notably DARKER than the local bright bg (relative, so it catches black-on-
-    # orange AND light-GRAY-on-cream); `mx > 100` excludes solid dark blocks (bg not bright).
-    mx  = ndimage.maximum_filter(g, size=7)
-    ink = (g < mx - 55) & (mx > 100)
+    # ink = strokes that CONTRAST with the local bg, in the direction of the text COLOUR:
+    # dark text → darker than the bright bg (black-on-orange, gray-on-cream); light text →
+    # brighter than the dark bg (capa7 white-on-black). Picking the wrong direction snaps to
+    # noise (capa7 "systems" collapsed to box_local 0.148).
+    mx = ndimage.maximum_filter(g, size=7)
+    mn = ndimage.minimum_filter(g, size=7)
+    dark_ink  = (g < mx - 55) & (mx > 100)     # dark strokes on a bright bg
+    light_ink = (g > mn + 55) & (mn < 155)     # light strokes on a dark bg
     out = []
     for e in edits:
         if e.get("op") != "text.add" or not e.get("bbox_cm"):
             out.append(e); continue
+        hx = e.get("hex", "#000000").lstrip("#")
+        bright = (int(hx[0:2], 16) + int(hx[2:4], 16) + int(hx[4:6], 16)) / 3 if len(hx) >= 6 else 0
+        ink = light_ink if bright > 128 else dark_ink
         b = e["bbox_cm"]; m = 1.6
         c0 = max(0, int((b["x"] - m) / W * wpx)); c1 = min(wpx, int((b["x"] + b["w"] + m) / W * wpx))
         r0 = max(0, int((H - (b["y"] + b["h"] + m)) / H * hpx)); r1 = min(hpx, int((H - (b["y"] - m)) / H * hpx))
@@ -277,15 +284,21 @@ def apply_edit(analysis: dict, edit: dict) -> "dict | None":
         # each other. Each row (blank or not) reserves one line_h; blanks emit no element.
         line_h = b.get("h", 0.5) / len(rows)
         pt     = edit.get("font_size_pt") or round(line_h * _PT_PER_CM / 1.3, 1)
+        # Swiss convention: a MULTI-line block's 1st line is BOLD (a header); a lone line
+        # (a date, "01") stays regular — so only bold the first when there are ≥2 real lines.
+        bold_first = sum(1 for r in rows if r) >= 2
+        first = True
         for i, ln in enumerate(rows):          # row 0 = top of the block (highest y, y-up)
             if not ln:
                 continue
             texts.append({
                 "text": ln, "font_size_pt": pt, "color_hex": edit.get("hex", "#000000"),
+                "weight_hint": "bold" if (first and bold_first) else "regular",
                 "bbox_cm": {"x": b["x"], "y": round(b["y"] + b["h"] - (i + 1) * line_h, 3),
                             "w": b["w"], "h": round(line_h, 3)},
                 "source": "vlm", "_id": f"vt{len(texts)}",
             })
+            first = False
         return a
 
     if op in _TEXT_OPS:
@@ -342,9 +355,10 @@ def apply_edit(analysis: dict, edit: dict) -> "dict | None":
 # ─── The gate (layer ② + metric routing) ───────────────────────────────────────
 
 _TEXT_ADD_MIN       = 0.35     # a text.add is kept if its OWN box's ink match clears this
-_TEXT_ADD_SCORE_TOL = _GUARD_EPS  # box_local is the JUDGE; the Score guard is generous (thin
-                               # text is blind to Score and ADDING ink always dips content a
-                               # hair) — same trust as _TRUST_OPS. box_local≥floor is the gate.
+_TEXT_ADD_SCORE_TOL = 0.02     # box_local (≥floor) is the JUDGE of a text.add; the global Score
+                               # is BLIND to thin text (a well-placed block still dips content
+                               # ~0.005 from sub-pixel), so the Score guard is generous — it only
+                               # catches a real collapse. Tight 5e-3 wrongly killed capa7's blocks.
 
 
 def _primary(op: str) -> str:

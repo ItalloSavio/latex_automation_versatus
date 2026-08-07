@@ -101,6 +101,15 @@ def calibrate(
         got  = _measure_ink(rend, el, W_cm, H_cm, w_px, h_px)   # this render
         if want is None or got is None:
             continue
+        # Don't act on a measurement you can't trust. When the ink reaches the window's top
+        # or bottom the box is either CLIPPED or a NEIGHBOURING LINE bled in — and then the
+        # width is that neighbour's, not this element's. Correcting from it is how capa2's
+        # small text got stretched to the hscale ceiling (1.4): hscale is the only lever
+        # here, so a bogus width error is "fixed" by squashing the type sideways. capa4 (the
+        # reference, where calibration is proven) measures CLEAN on every element, so its
+        # gains are untouched; this only silences the cases that were noise to begin with.
+        if want["clipped"] or got["clipped"]:
+            continue
         if _apply_correction(el, want, got):
             n_changed += 1
 
@@ -120,8 +129,10 @@ def _measure_ink(
     """
     Measure the tight ink box of one element inside its window in `img`.
 
-    Returns {x, y, w, h} in cm (TikZ orientation, y = ink bottom) or None when
-    the window holds no ink.
+    Returns {x, y, w, h, clipped} in cm (TikZ orientation, y = ink bottom) or None
+    when the window holds no ink. `clipped` flags ink reaching the window's top or
+    bottom row — vertically the window is TIGHT, so that means a neighbouring line
+    leaked in (or the element overflows), and the box is not this element's.
     """
     import numpy as np  # noqa: PLC0415
 
@@ -163,6 +174,9 @@ def _measure_ink(
         "y": (h_px - (r0 + ink_r1)) / h_px * H_cm,   # ink bottom
         "w": (ink_c1 - ink_c0) / w_px * W_cm,
         "h": (ink_r1 - ink_r0) / h_px * H_cm,
+        # only the VERTICAL edges matter: a long string legitimately fills the box
+        # sideways, but cover lines sit ~0.2cm apart, so top/bottom contact = a neighbour.
+        "clipped": ink_r0 == 0 or ink_r1 == mask.shape[0],
     }
 
 

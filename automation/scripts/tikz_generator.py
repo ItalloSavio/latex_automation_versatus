@@ -308,6 +308,13 @@ def _build_regions(
         elif shape == "circle":
             lines.append(_cmd_circle(col_name, bx))
 
+        elif shape == "annulus_sector":      # one coloured wedge of a ring (see _cmd_*)
+            cx = bx["x"] + bx["w"] / 2
+            cy = bx["y"] + bx["h"] / 2
+            lines.append(_cmd_annulus_sector(
+                col_name, cx, cy, r.get("r_in_cm", 0.0), min(bx["w"], bx["h"]) / 2,
+                r.get("angle0_deg", 0.0), r.get("angle1_deg", 360.0)))
+
         elif shape == "circle_lattice":     # op-art: tiled circles + accent lenses
             col_b = _color_name({"color_hex": r.get("color_b_hex", "#FFFFFF")}, color_map)
             lens  = _color_name({"color_hex": r.get("lens_hex", "#FFFFFF")}, color_map)
@@ -389,6 +396,24 @@ def _cmd_circle_lattice(col_a: str, col_b: str, lens: str, p: float, r: float,
             out.append(f"  \\begin{{scope}}\\clip ({cx},{cyl}) circle ({_f(lr)});"
                        f"\\fill[{lens}] ({cx},{cyh}) circle ({_f(lr)});\\end{{scope}}")
     return "\n".join(out)
+
+
+def _cmd_annulus_sector(color: str, cx: float, cy: float, r0: float, r1: float,
+                        a0: float, a1: float) -> str:
+    """One wedge of a ring: outer arc a0→a1 at r1, back along the inner arc at r0.
+
+    Bauhaus/Swiss covers build big discs out of these (capa1's ring is 2 rings × 4
+    quadrants, each a different colour). A full disc is just r0=0, where the wedge
+    degenerates to a pie slice through the centre — the same command covers both."""
+    import math
+    xa, ya = cx + r1 * math.cos(math.radians(a0)), cy + r1 * math.sin(math.radians(a0))
+    if r0 <= 1e-6:
+        return (f"  \\fill[{_fill_opts(color)}] ({_f(cx)},{_f(cy)}) -- ({_f(xa)},{_f(ya)}) "
+                f"arc ({_f(a0)}:{_f(a1)}:{_f(r1)}cm) -- cycle;")
+    xb, yb = cx + r0 * math.cos(math.radians(a1)), cy + r0 * math.sin(math.radians(a1))
+    return (f"  \\fill[{_fill_opts(color)}] ({_f(xa)},{_f(ya)}) "
+            f"arc ({_f(a0)}:{_f(a1)}:{_f(r1)}cm) -- ({_f(xb)},{_f(yb)}) "
+            f"arc ({_f(a1)}:{_f(a0)}:{_f(r0)}cm) -- cycle;")
 
 
 def _cmd_polygon(color: str, points_cm: list) -> str:

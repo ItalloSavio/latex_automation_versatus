@@ -36,6 +36,13 @@ _GUARD_EPS        = 5e-3     # a guarded metric may not fall by more than this
 _PT_PER_CM        = 72.0 / 2.54                 # points per cm (for text.add font size)
 _TEXT_OPS = {"text.string", "text.move", "text.hscale", "text.add"}
 
+# Em ratios for sizing a font from MEASURED ink height (same model as ocr_extractor):
+# ascender→baseline ≈ 0.735·em; ascender→descender ≈ 0.945·em. Which one applies is decided
+# by the STRING, deterministically — we know what the VLM read.
+_ASCENDER_EM = 0.735
+_ASC_DESC_EM = 0.945
+_DESC_CHARS  = set("gjpqyçÇ,;()[]{}@$_")
+
 # Grounded edits the EYE clearly wants but the pixel metric is BLIND to: a fixed OCR string,
 # a thin rule / shape that's in the original. content_match barely moves (or dips sub-pixel)
 # on these, so demanding it RISE wrongly reverts correct elements (the "Score green, eye red"
@@ -98,12 +105,105 @@ def dedup_text(analysis: dict) -> dict:
     return analysis
 
 
+def _glyph_only(win, span_px=0.0):
+    """Strip everything that is not glyph-sized from an ink window.
+
+    A region EDGE (capa6's black/orange diagonal) is dark next to a bright neighbour, so it
+    passes the ink test — but it is ONE component far taller than any line of the block. The
+    height limit comes from the VLM's block height (`span_px`), NOT from the window: a
+    window-relative 0.35 killed capa5's "grafik" TITLE, whose letters are 30px in a 75px
+    window, and the snap then read the small text below as the title. Not a median over
+    components either — a hard edge shatters into hundreds of anti-alias specks and drags
+    any median to 1px (that collapsed capa6's middle block)."""
+    from scipy import ndimage
+    import numpy as np
+    h, w = win.shape
+    lim = min(max(1.5 * span_px, 12.0), 0.9 * h)        # never keep a window-spanning blob
+    lbl, n = ndimage.label(win)
+    if n == 0:
+        return win
+    out = np.zeros_like(win)
+    for i, o in enumerate(ndimage.find_objects(lbl)):
+        if (o[0].stop - o[0].start) > lim or (o[1].stop - o[1].start) > 0.90 * w:
+            continue                                    # too tall / too wide → not a glyph
+        sub = lbl[o] == i + 1
+        if sub.sum() >= 2:                              # a lone pixel is anti-alias noise
+            out[o] |= sub
+    return out
+
+
+def _row_runs(win):
+    """Contiguous inked row spans, keeping only those dense and small enough to be a text
+    LINE: an edge remnant is sparse (few px per row), a graphic blob is far taller."""
+    import numpy as np
+    prof = win.sum(1)
+    runs, s = [], None
+    for i, v in enumerate(prof >= 2):
+        if v and s is None:
+            s = i
+        elif not v and s is not None:
+            runs.append((s, i - 1)); s = None
+    if s is not None:
+        runs.append((s, len(prof) - 1))
+    if not runs:
+        return []
+    dens = np.array([prof[a:b + 1].mean() for a, b in runs])
+    hs   = np.array([b - a + 1 for a, b in runs], float)
+    return [r for r, d, h in zip(runs, dens, hs)
+            if d >= 0.30 * np.median(dens) and h <= 2.5 * np.median(hs)]
+
+
+def _pick_lines(runs, slots, ctr_row, win_h, span_px=0.0):
+    """Choose the N row-runs that best fit `top_i = y0 + slot_i·pitch`.
+
+    `slots` are the line indices INCLUDING blank spacers, so a header gapped from its body
+    (capa7 "systems" ⏎⏎ "25 November to") fits the same linear model as an even block. The
+    residual of that fit is the anti-hallucination test: real lines of a block sit on a
+    regular baseline grid, stray ink does not."""
+    import itertools
+    import numpy as np
+    n = len(slots)
+    if len(runs) < n:
+        return None
+    if n == 1:
+        return [min(runs, key=lambda r: abs((r[0] + r[1]) / 2 - ctr_row))]
+    A = np.vstack([np.array(slots, float), np.ones(n)]).T
+    best, best_cost, best_res = None, 1e9, 1e9
+    for grp in itertools.combinations(runs[:9], n):      # cap the search; 9 choose 4 = 126
+        tops = np.array([r[0] for r in grp], float)
+        sol, *_ = np.linalg.lstsq(A, tops, rcond=None)
+        pitch = sol[0]
+        if pitch <= 0.5:
+            continue
+        res = float(np.abs(A @ sol - tops).max()) / pitch
+        hs  = np.array([r[1] - r[0] + 1 for r in grp], float)
+        # Lines of a block are ADJACENT: real leading runs ~1.2–2.2× the glyph height. Without
+        # this the fit is vacuous for a 2-line block (a straight line through 2 points always
+        # has zero residual), and capa5 SKIPPED "verbandes schweiz. grafiker" to pair line 1
+        # with the NEXT block's first line — a pitch of exactly two lines.
+        # The VLM misplaces a block but reads its EXTENT well, so its bbox height is a good
+        # soft prior on the SPAN. This is what separates capa5's true pair (span 16px vs the
+        # VLM's 17px) from the pair that skips a line (26px) — both fit a line exactly.
+        span = grp[-1][1] - grp[0][0] + 1
+        cost = (res + hs.std() / max(hs.mean(), 1e-6)
+                + 1.5 * max(0.0, pitch / max(hs.mean(), 1e-6) - 2.2)
+                + (abs(span - span_px) / span_px if span_px > 1 else 0.0)
+                + 0.6 * abs((grp[0][0] + grp[-1][1]) / 2 - ctr_row) / max(win_h, 1))
+        if cost < best_cost:
+            best, best_cost, best_res = list(grp), cost, res
+    if best is None or best_res > 0.35:                  # off the baseline grid → not this block
+        return None
+    return best
+
+
 def snap_text_adds(edits: list, image_path, canvas: dict) -> list:
     """Refine each text.add's bbox to where the ORIGINAL's TEXT INK actually is (the VLM
     reads the string right but places it imprecisely → box_local fails on position alone).
-    Isolates text strokes from solid blocks (dark AND a bright pixel nearby), snaps the box
-    to the ink extent, and sizes the font from the measured glyph height. Deterministic +
-    grounded — the position comes from measured pixels, not a second guess."""
+    Isolates text strokes from solid blocks (dark AND a bright pixel nearby) and measures
+    where each LINE sits — per-line box + one measured font per block. Deterministic +
+    grounded: the position comes from measured pixels, not a second guess. When the lines
+    can't be resolved (too low-res, ink fused with a graphic) it returns the edit UNTOUCHED
+    rather than guessing; the gate measures it regardless."""
     try:
         import numpy as np
         from PIL import Image
@@ -134,6 +234,64 @@ def snap_text_adds(edits: list, image_path, canvas: dict) -> list:
         win = ink[r0:r1, c0:c1]
         if win.sum() < 8:
             out.append(e); continue
+        # ── Measure each LINE, don't average the block ────────────────────────────────
+        # The whole-ink extent divided by the line count spread capa6's blocks to a 1.56cm
+        # leading against a measured 0.60cm (and any edge inside the window inflated the
+        # extent further). Banding recovers the real baseline grid. A ONE-line block runs
+        # the same path (n=1 = pick the run nearest the VLM box): the old extent tail sized
+        # it from the median component height CLAMPED to 8–15pt, which is fine for body copy
+        # but crushed capa5's "grafik" TITLE from 43.6pt to 8pt. One measurement model.
+        rows_all = [r.strip() for r in e.get("value", "").replace("\\n", "\n").split("\n")]
+        while rows_all and not rows_all[0]:
+            rows_all.pop(0)
+        while rows_all and not rows_all[-1]:
+            rows_all.pop()
+        slots = [i for i, r in enumerate(rows_all) if r]
+        real  = [r for r in rows_all if r]
+        span_px = b["h"] / H * hpx
+        gwin = _glyph_only(win, span_px)
+        # Banding earns its keep on LEADING, which only exists with ≥2 lines. On a lone line
+        # it measured WORSE than the extent (capa2's date box_local 0.607→0.389): the em comes
+        # from one band via the descender-aware ratio, and when the band clips a thin descender
+        # ('j' in "12 de junho") the ratio is the wrong one with no median to dilute it.
+        if len(real) >= 2:
+            ctr  = ((H - (b["y"] + b["h"] / 2)) / H * hpx) - r0
+            sel  = _pick_lines(_row_runs(gwin), slots, ctr, gwin.shape[0], span_px=span_px)
+            # a band under 3px is noise, not a measurable glyph (capa5 is 300px wide)
+            if sel and min(t - s + 1 for s, t in sel) >= 3:
+                gy, gx = np.where(gwin)
+                bx0, bw_px = gx.min(), gx.max() - gx.min() + 1
+                pts = []
+                for txt, (s, t) in zip(real, sel):
+                    hcm = (t - s + 1) / hpx * H
+                    pts.append(hcm / (_ASC_DESC_EM if any(c in _DESC_CHARS for c in txt)
+                                      else _ASCENDER_EM) * _PT_PER_CM)
+                # ONE size per block: within a Swiss block the header differs in WEIGHT, not
+                # size, and a per-line em is ±1px noisy at these scales. Median is robust.
+                pt = max(6.0, round(float(np.median(pts)), 1))
+                lines_cm = [{"y": round((hpx - (r0 + t + 1)) / hpx * H, 3),
+                             "h": round((t - s + 1) / hpx * H, 3)} for s, t in sel]
+                top  = max(l["y"] + l["h"] for l in lines_cm)
+                bot  = min(l["y"] for l in lines_cm)
+                nx   = min(max((c0 + bx0) / wpx * W, b["x"] - 0.5), b["x"] + 0.5)
+                if abs((top + bot) / 2 - (b["y"] + b["h"] / 2)) <= 1.5:   # same clamp as below
+                    dx = nx - (c0 + bx0) / wpx * W
+                    for l in lines_cm:
+                        l["x"] = round(nx, 3)
+                        l["w"] = round(min(bw_px / wpx * W + dx, b["w"] + 1.0), 3)
+                    out.append({**e, "font_size_pt": pt, "lines_cm": lines_cm,
+                                "bbox_cm": {"x": round(nx, 2), "y": round(bot, 2),
+                                            "w": lines_cm[0]["w"], "h": round(top - bot, 2)}})
+                    continue
+        # ── Fallback: the whole-ink EXTENT ────────────────────────────────────────────
+        # Trustworthy only when the window really is this text's. If the glyph filter had to
+        # discard most of the ink, the window is dominated by a graphic and the extent
+        # measures THAT: capa5's "grafik" fuses with a region edge into one 75px blob (84%
+        # discarded at 300px wide), and the extent read 5.25cm → the 8–15pt clamp crushed the
+        # title to 8pt. There, DON'T GUESS — the VLM's own bbox is the better answer (43.6pt,
+        # box_local 0.984). The gate measures the edit either way; unrefined ≠ wrong.
+        if gwin.sum() < 0.5 * win.sum():
+            out.append(e); continue
         ys, xs = np.where(win)
         ix, iy = c0 + xs.min(), r0 + ys.min()
         iw, ih = (xs.max() - xs.min() + 1), (ys.max() - ys.min() + 1)
@@ -148,8 +306,6 @@ def snap_text_adds(edits: list, image_path, canvas: dict) -> list:
         nw = min(nw, b["w"] + 2 * DX)
         nb = {"x": round(nx, 2), "y": round(ny, 2), "w": round(nw, 2), "h": round(nh, 2)}
         # font from the median glyph-component height (cap height ≈ 0.7·em), floored to body size.
-        # (The ink EXTENT is the block height — it captures each block's real leading; a tighter
-        # nlines·font model was tried and REVERTED, it regressed blocks with wide native leading.)
         lbl, n = ndimage.label(win)
         gh = float(np.median([s[0].stop - s[0].start for s in ndimage.find_objects(lbl)])) if n else 10
         pt = max(8.0, min(15.0, round(gh / hpx * H * _PT_PER_CM / 0.7, 1)))
@@ -279,11 +435,34 @@ def apply_edit(analysis: dict, edit: dict) -> "dict | None":
         if not any(rows):
             return None
         texts  = a.setdefault("text_elements", [])
+        # MEASURED per-line boxes (snap_text_adds banded the block) — use the real baseline
+        # grid instead of an even split, which is what got the leading wrong.
+        meas = edit.get("lines_cm")
+        if meas and len(meas) == sum(1 for r in rows if r):
+            pt = edit.get("font_size_pt", 10.0)
+            bold_first = len(meas) >= 2
+            for i, (ln, m) in enumerate(zip([r for r in rows if r], meas)):
+                texts.append({
+                    "text": ln, "font_size_pt": pt, "color_hex": edit.get("hex", "#000000"),
+                    "weight_hint": "bold" if i == 0 and bold_first else "regular",
+                    "bbox_cm": {"x": m.get("x", b["x"]), "y": m["y"],
+                                "w": m.get("w", b["w"]), "h": m["h"]},
+                    "source": "vlm", "_id": f"vt{len(texts)}",
+                })
+            return a
         # …but KEEP interior blank lines as SPACERS — the VLM uses them to gap a header from
         # its body (DESCRIÇÃO / … Material técnico…). Dropping them collapsed the two onto
         # each other. Each row (blank or not) reserves one line_h; blanks emit no element.
         line_h = b.get("h", 0.5) / len(rows)
         pt     = edit.get("font_size_pt") or round(line_h * _PT_PER_CM / 1.3, 1)
+        # The extent here is the LAST resort (banding failed), so it may be inflated by a
+        # graphic the window swallowed — capa5 spread two 6px lines over 2.17cm each. No
+        # typeface leads at more than ~1.6 em, so cap it. Blank spacer rows keep their own
+        # slot, so a header still gaps from its body. Only for ≥2 rows: with a single row
+        # `line_h` is not a leading at all, it is what seats the line on the box's bottom
+        # edge — capping it lifted capa2's right footer onto the rule above it.
+        if len(rows) >= 2:
+            line_h = min(line_h, 1.6 * pt / _PT_PER_CM)
         # Swiss convention: a MULTI-line block's 1st line is BOLD (a header); a lone line
         # (a date, "01") stays regular — so only bold the first when there are ≥2 real lines.
         bold_first = sum(1 for r in rows if r) >= 2

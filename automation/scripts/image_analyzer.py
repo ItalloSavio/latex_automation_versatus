@@ -59,6 +59,23 @@ _CIRCLE_NONBG_MIN    = 0.70   # disk must be ≥70% non-background: a FILLED cir
 _CIRCLE_BG_RGB_DIST  = 45     # pixel this far from bg counts as "ink" (non-bg)
 _CIRCLE_BAND_MERGE   = 25     # merge adjacent radial bands within this RGB distance
 _CIRCLE_RADIAL_STEPS = 72     # angular samples for the radial colour profile
+_CIRCLE_BAND_ANGLE_FRAC = 0.25  # a radial boundary = this share of angles change at once
+_CIRCLE_SECTOR_MIN_SPAN = 25    # deg; a shorter run is anti-alias between sectors
+_CIRCLE_EXTEND_MIN   = 0.80   # keep growing the radius while this share of the ring is ink
+_CIRCLE_SECTOR_MIN_THICK = 0.15  # a ring thinner than this·r can't carry angular sectors
+_CIRCLE_ANGULAR_MIN_FRAC = 0.50  # share of radii that must show ≥2 colours to be "sectored"
+
+# Fine triangle mosaic (capa1). Deliberately narrow: the period must land in the
+# FINE band, or a coarse poster grid (capa4/capa6 cells are ~1/3 of the frame) would
+# be re-tiled on top of the grid that already draws it.
+_MOSAIC_MIN_P_FRAC = 0.05     # cell period, as a fraction of the shorter side
+_MOSAIC_MAX_P_FRAC = 0.18
+_MOSAIC_MIN_INK    = 0.08     # below this the cover is nearly empty — nothing to tile
+_MOSAIC_MAX_INK    = 0.75     # above this it is a dense field, not a mosaic on a ground
+_MOSAIC_SOLID_MIN  = 0.90     # one colour over this share of a cell → solid tile
+_MOSAIC_DIAG_MIN   = 0.88     # two half-medians must explain this share → diagonal tile
+_MOSAIC_MIN_DIAG   = 8        # fewer diagonal tiles than this is noise, not a mosaic
+_MOSAIC_MIN_FIT    = 0.55     # share of NON-EMPTY cells that must fit solid-or-diagonal
 # Hough's Canny runs on luminance, so a high-colour/low-luma edge (red on dark:
 # ΔRGB huge, Δgray only ~95) needs a lower threshold than the default 100 to
 # register. Phantoms this admits are dropped by the non-bg disk filter.
@@ -154,8 +171,14 @@ def analyze_image(
     # parallel lines — without permanently deleting them: if layer selection later
     # drops the hatch, the circles are simply uncovered again (no side effect).
     circles    = _detect_circles(arr, colors, w_px, h_px, w_cm, h_cm)
+    # Fine periodic tile lattice — ADDED beside the grid (never replacing it) and drawn
+    # BEFORE the circles so a disc still paints over the tiles it sits on. Returns [] on
+    # every cover without a measured lattice.
+    bg_rgb     = np.array(colors[0]["rgb"], dtype=float) if colors else np.zeros(3)
+    mosaic     = _detect_mosaic(arr, colors, bg_rgb, w_px, h_px, w_cm, h_cm,
+                                circles, regions)
     hatch      = _detect_hatch(arr, colors, w_px, h_px, w_cm, h_cm)
-    regions    = _drop_concentric_noise(regions + circles + hatch)   # kill Hough logo-rings
+    regions    = _drop_concentric_noise(regions + mosaic + circles + hatch)
     # Op-art circle lattice (tiled circles + accent lenses): when detected it IS the whole
     # cover, so it REPLACES the grid/circle guesses. Conservative trigger (see the detector)
     # → fires only on a genuine text-less lattice, so the other 6 covers are untouched.
@@ -359,6 +382,8 @@ def _detect_circles(
             continue
         if _rim_edge_support(arr, int(cx), int(cy), int(r)) < _CIRCLE_EDGE_SUPPORT:
             continue   # no colour step around the rim → phantom, not a circle
+        r = _true_radius(arr, int(cx), int(cy), int(r), bg_rgb,
+                         int(_CIRCLE_MAX_R_FRAC * short))
         bands.extend(_radial_bands(arr, int(cx), int(cy), int(r), colors, bg_rgb))
 
     if not bands:
@@ -380,7 +405,7 @@ def _detect_circles(
     regions = []
     for b in bands:
         cx, cy, rp = b["cx"], b["cy"], b["r_px"]
-        regions.append({
+        reg = {
             "color_hex":  b["color"],
             "shape_type": "circle",
             "bbox_cm": {
@@ -392,8 +417,216 @@ def _detect_circles(
             "bbox_px":  {"x": cx - rp, "y": cy - rp, "w": 2 * rp, "h": 2 * rp},
             "area_pct": round(math.pi * rp * rp / (w_px * h_px), 4),
             "source":   "circle",
-        })
+        }
+        if "a0_deg" in b:                    # an angular slice of a ring, not a full disc
+            span = (b["a1_deg"] - b["a0_deg"]) / 360.0
+            reg["shape_type"]  = "annulus_sector"
+            reg["r_in_cm"]     = round(b["r_in_px"] / w_px * w_cm, 3)
+            reg["angle0_deg"]  = round(b["a0_deg"], 1)
+            reg["angle1_deg"]  = round(b["a1_deg"], 1)
+            reg["area_pct"]    = round(math.pi * (rp ** 2 - b["r_in_px"] ** 2)
+                                       * span / (w_px * h_px), 4)
+        regions.append(reg)
     return regions
+
+
+def _true_radius(arr: "np.ndarray", cx: int, cy: int, r: int,
+                 bg_rgb: "np.ndarray", max_r: int) -> int:
+    """Grow the Hough radius outward while the ring is still filled with non-background.
+
+    Hough locates the CENTRE well but its radius is only a lower bound: capa1's big ring
+    has a gray quadrant against a near-black background, so a quarter of the outer rim
+    gives almost no gradient and the accumulator peaks on the INNER disc (r=57) instead of
+    the true outer edge (r=113). The render then drew two flat discs at half size. The
+    centre is trustworthy, so measure the extent from pixels instead of trusting the vote.
+    """
+    h_px, w_px = arr.shape[:2]
+    ang = np.linspace(0, 2 * np.pi, _CIRCLE_RADIAL_STEPS, endpoint=False)
+    cos, sin = np.cos(ang), np.sin(ang)
+    best = r
+    for rho in range(r + 1, max_r + 1):
+        xs, ys = (cx + rho * cos).astype(int), (cy + rho * sin).astype(int)
+        ok = (xs >= 0) & (xs < w_px) & (ys >= 0) & (ys < h_px)
+        if ok.sum() < _CIRCLE_RADIAL_STEPS * 0.75:
+            break                                   # ring runs off the canvas
+        px = arr[ys[ok], xs[ok]].astype(float)
+        filled = float(np.mean(np.sqrt(((px - bg_rgb) ** 2).sum(1)) > _CIRCLE_BG_RGB_DIST))
+        if filled < _CIRCLE_EXTEND_MIN:
+            break                                   # reached the background → real edge
+        best = rho
+    return best
+
+
+def _detect_mosaic(
+    arr: "np.ndarray", colors: list, bg_rgb: "np.ndarray",
+    w_px: int, h_px: int, w_cm: float, h_cm: float,
+    circles: list, existing: list,
+) -> list:
+    """A fine PERIODIC lattice of half-cell triangles → the existing rect/polygon vocabulary.
+
+    capa1's left half is a mosaic of ~57px cells, each empty, solid, or split on a diagonal.
+    The main grid never sees it: `_detect_grid_blocks` projects Sobel over the WHOLE frame, so
+    a lattice confined to one column is diluted away, and even when its lines were recovered
+    the cells (3.2k px²) fell under `_MIN_REGION_AREA_FRAC` (6.5k px²) and were dropped. This
+    is a SEPARATE pass with its own area rule, ADDED beside the grid rather than replacing it.
+
+    Returns [] unless a real lattice is measured — the gate is the period agreeing on both
+    axes, landing in the fine-mosaic band, and most non-empty cells fitting solid-or-diagonal.
+    """
+    short = min(w_px, h_px)
+    nonbg = np.sqrt(((arr.astype(float) - bg_rgb) ** 2).sum(2)) > _CIRCLE_BG_RGB_DIST
+    if not (_MOSAIC_MIN_INK < nonbg.mean() < _MOSAIC_MAX_INK):
+        return []
+
+    lo, hi = int(_MOSAIC_MIN_P_FRAC * short), int(_MOSAIC_MAX_P_FRAC * short)
+    if hi - lo < 4:
+        return []
+
+    gray = arr.mean(2)
+    dv = np.abs(np.diff(gray, axis=1)).sum(0)
+    dh = np.abs(np.diff(gray, axis=0)).sum(1)
+
+    def _comb(edge):
+        """Share of EDGE energy landing on one lattice phase, normalised so flat = 1.0.
+        (The raw ink profile is useless here — dominated by big regions, its autocorrelation
+        just decays and always peaks at the smallest lag.)"""
+        tot = float(edge.sum())
+        if tot <= 0:
+            return []
+        return sorted(((float(max(edge[o::p].sum() for o in range(p)) / (tot / p)), p)
+                       for p in range(lo, hi)), reverse=True)
+
+    # Candidates from both axes — but the comb is only a SHORTLIST. Which period is right is
+    # decided below by how well the cells actually FIT, i.e. by the objective itself: on
+    # capa1 the comb nails the rows (57) and misses the columns (it locks onto the ring's
+    # strong vertical edges), so trusting it outright picked a lattice that fits nothing.
+    cand: list[int] = []
+    for lst in (_comb(dv), _comb(dh)):
+        for _, p in lst[:6]:
+            if all(abs(p - q) > 2 for q in cand):
+                cand.append(p)
+    if not cand:
+        return []
+
+    pal = np.array([c["rgb"] for c in colors], dtype=float)
+    bg_hex = _snap_to_palette(bg_rgb.astype(int), colors)
+    bg_i = next((i for i, c in enumerate(colors) if c["hex"] == bg_hex), 0)
+    discs = []
+    for r in circles:
+        b = r["bbox_cm"]
+        discs.append(((b["x"] + b["w"] / 2) / w_cm * w_px,
+                      (h_cm - (b["y"] + b["h"] / 2)) / h_cm * h_px,
+                      b["w"] / 2 / w_cm * w_px))
+
+    # What the existing regions already PAINT (background-coloured blocks paint nothing —
+    # capa1's grid covers the mosaic area with bg-coloured rectangles, i.e. leaves it bare).
+    covered = np.zeros((h_px, w_px), dtype=bool)
+    for r in existing:
+        if r.get("color_hex", "").upper() == bg_hex.upper():
+            continue
+        b = r.get("bbox_cm")
+        if not b:
+            continue
+        c0 = max(0, int(b["x"] / w_cm * w_px)); c1 = min(w_px, int((b["x"] + b["w"]) / w_cm * w_px))
+        r1 = min(h_px, int((h_cm - b["y"]) / h_cm * h_px))
+        r0 = max(0, int((h_cm - (b["y"] + b["h"])) / h_cm * h_px))
+        if c1 > c0 and r1 > r0:
+            covered[r0:r1, c0:c1] = True
+
+    best: "tuple | None" = None
+    for P in cand:
+        phx = max(range(P), key=lambda o: sum(dv[i] for i in range(o, len(dv), P)))
+        phy = max(range(P), key=lambda o: sum(dh[i] for i in range(o, len(dh), P)))
+        cells = _mosaic_cells(arr, pal, colors, bg_i, discs, covered, P, phx, phy,
+                              w_px, h_px, w_cm, h_cm)
+        if not cells:
+            continue
+        # A mosaic is a CONNECTED patch of tiles. Keeping only tiles with a tile neighbour
+        # drops the isolated lucky fits (a letter, a shape corner) that a whole-cover fit
+        # RATE could never separate — that rate counted every cell on the cover, so the
+        # text column alone dragged capa1's real lattice under the threshold.
+        keep = {ij for ij in cells
+                if any((ij[0] + di, ij[1] + dj) in cells
+                       for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)))}
+        n_diag = sum(1 for ij in keep if cells[ij][0] == "diag")
+        if n_diag < _MOSAIC_MIN_DIAG:
+            continue
+        if best is None or len(keep) > best[0]:
+            best = (len(keep), [r for ij in keep for r in cells[ij][1]])
+    return best[1] if best else []
+
+
+def _mosaic_cells(arr, pal, colors, bg_i, discs, covered, P, phx, phy,
+                  w_px, h_px, w_cm, h_cm):
+    """Classify one candidate lattice → {(row,col): (kind, [regions])} for FITTING cells."""
+    cells: dict = {}
+    # Start one period EARLY: a cropped poster shows a PARTIAL first row/column. Classify on
+    # the visible pixels but emit the full cell — the page \clip trims the overhang.
+    for i, r0 in enumerate(range(phy % P - P, h_px, P)):
+        for j, c0 in enumerate(range(phx % P - P, w_px, P)):
+            rv0, rv1 = max(0, r0), min(h_px, r0 + P)
+            cv0, cv1 = max(0, c0), min(w_px, c0 + P)
+            if (rv1 - rv0) < 0.45 * P or (cv1 - cv0) < 0.45 * P:
+                continue
+            ccx, ccy = c0 + P / 2, r0 + P / 2
+            if any((ccx - dx) ** 2 + (ccy - dy) ** 2 < (dr * 0.85) ** 2 for dx, dy, dr in discs):
+                continue                # that is the disc's own curve, not a tile
+            # Only fill what the grid left EMPTY. capa1's tiles sit on bare background (its
+            # grid blocks there are background-coloured); capa4's frame is already fully
+            # covered by real grid blocks, so nothing is offered and no tiles are emitted.
+            if covered[min(int(ccy), h_px - 1), min(int(ccx), w_px - 1)]:
+                continue
+            cell = arr[rv0:rv1, cv0:cv1]
+            inner = cell[2:-2, 2:-2] if min(cell.shape[:2]) > 8 else cell
+            idx = (((inner.reshape(-1, 3).astype(float)[:, None, :] - pal[None, :, :]) ** 2)
+                   .sum(2).argmin(1).reshape(inner.shape[:2]))
+            vals, cnt = np.unique(idx, return_counts=True)
+            dom, frac = int(vals[cnt.argmax()]), cnt.max() / idx.size
+            xl, xr = c0 / w_px * w_cm, (c0 + P) / w_px * w_cm
+            yb, yt = (h_px - (r0 + P)) / h_px * h_cm, (h_px - r0) / h_px * h_cm
+            if frac > _MOSAIC_SOLID_MIN:
+                if dom == bg_i:
+                    continue            # empty cell: the background already covers it
+                cells[(i, j)] = ("solid", [{
+                    "color_hex": colors[dom]["hex"], "shape_type": "rectangle",
+                    "bbox_cm": {"x": round(xl, 3), "y": round(yb, 3),
+                                "w": round(xr - xl, 3), "h": round(yt - yb, 3)},
+                    "area_pct": round(P * P / (w_px * h_px), 4), "source": "mosaic"}])
+                continue
+            ih, iw = idx.shape
+            yy, xx = np.mgrid[0:ih, 0:iw]
+            tris = {"tl": ((xx / iw + yy / ih) < 1.0, [(xl, yt), (xr, yt), (xl, yb)]),
+                    "br": ((xx / iw + yy / ih) >= 1.0, [(xr, yt), (xr, yb), (xl, yb)]),
+                    "tr": ((xx / iw) >= (yy / ih), [(xl, yt), (xr, yt), (xr, yb)]),
+                    "bl": ((xx / iw) < (yy / ih), [(xl, yt), (xl, yb), (xr, yb)])}
+            best = (0.0, None)
+            for pair in (("tl", "br"), ("tr", "bl")):
+                a, b = idx[tris[pair[0]][0]], idx[tris[pair[1]][0]]
+                if a.size < 10 or b.size < 10:
+                    continue
+                va, ca = np.unique(a, return_counts=True)
+                vb, cb = np.unique(b, return_counts=True)
+                if va[ca.argmax()] == vb[cb.argmax()]:
+                    continue
+                sc = (ca.max() + cb.max()) / idx.size
+                if sc > best[0]:
+                    best = (sc, (pair, int(va[ca.argmax()]), int(vb[cb.argmax()])))
+            if best[0] <= _MOSAIC_DIAG_MIN:
+                continue                # neither solid nor a clean diagonal → not a tile
+            (pair, ia, ib) = best[1]
+            halves = []
+            for nm, ci in ((pair[0], ia), (pair[1], ib)):
+                if ci == bg_i:
+                    continue            # background half → leave the page showing through
+                halves.append({
+                    "color_hex": colors[ci]["hex"], "shape_type": "polygon",
+                    "points_cm": [[round(x, 3), round(y, 3)] for x, y in tris[nm][1]],
+                    "bbox_cm": {"x": round(xl, 3), "y": round(yb, 3),
+                                "w": round(xr - xl, 3), "h": round(yt - yb, 3)},
+                    "area_pct": round(P * P / 2 / (w_px * h_px), 4), "source": "mosaic"})
+            cells[(i, j)] = ("diag", halves)
+
+    return cells
 
 
 def _rim_edge_support(arr: "np.ndarray", cx: int, cy: int, r: int) -> float:
@@ -419,10 +652,21 @@ def _radial_bands(
     arr: "np.ndarray", cx: int, cy: int, R: int,
     colors: list[dict], bg_rgb: "np.ndarray",
 ) -> list[dict]:
-    """Colour bands along the radius (outer→in); one filled circle per band."""
+    """Colour bands along the radius (outer→in); one filled circle per band.
+
+    A circle whose colour varies with ANGLE (capa1's ring is 2 rings × 4 quadrants) is
+    handled by `_angular_bands` instead — the median over angles would mush its four
+    colours into one that matches nothing. That path is ADDITIVE: it is entered only when
+    angular structure is measured, so every other cover keeps this exact code. (Rewriting
+    the banding itself for everyone cost capa7 two of its concentric rings, −0.017.)
+    """
     h_px, w_px = arr.shape[:2]
     ang = np.linspace(0, 2 * np.pi, _CIRCLE_RADIAL_STEPS, endpoint=False)
     cos, sin = np.cos(ang), np.sin(ang)
+
+    sectors = _angular_bands(arr, cx, cy, R, colors, bg_rgb, cos, sin)
+    if sectors is not None:
+        return sectors
 
     profile = []   # (radius, median_rgb) from R down to 1
     for rho in range(R, 0, -1):
@@ -447,6 +691,124 @@ def _radial_bands(
     return out
 
 
+def _angular_bands(
+    arr: "np.ndarray", cx: int, cy: int, R: int, colors: list[dict],
+    bg_rgb: "np.ndarray", cos: "np.ndarray", sin: "np.ndarray",
+) -> "list[dict] | None":
+    """Decompose a circle into annulus SECTORS, or None when it has no angular structure.
+
+    Returning None is the common case and hands the circle back to the plain radial banding
+    untouched — the whole point is that this feature costs nothing where it doesn't apply.
+    Fires on capa1's ring: at any radius in its outer annulus four different colours are
+    present (teal/red/white/gray), which no median can represent.
+    """
+    if not colors:
+        return None
+    h_px, w_px = arr.shape[:2]
+    N = len(cos)
+    pal = np.array([c["rgb"] for c in colors], dtype=float)
+    radii = list(range(R, 0, -1))
+    sig = np.empty((len(radii), N), dtype=int)          # palette index per (radius, angle)
+    for k, rho in enumerate(radii):
+        xs = np.clip((cx + rho * cos).astype(int), 0, w_px - 1)
+        ys = np.clip((cy + rho * sin).astype(int), 0, h_px - 1)
+        px = arr[ys, xs].astype(float)
+        sig[k] = ((px[:, None, :] - pal[None, :, :]) ** 2).sum(2).argmin(1)
+
+    bg_hex = _snap_to_palette(bg_rgb.astype(int), colors)
+    bg_idx = {i for i, c in enumerate(colors) if c["hex"] == bg_hex}
+    # GATE: a radius counts as "angular" when ≥2 non-background colours each hold a real
+    # wedge of it. Only if that holds over most of the circle is this a sectored ring.
+    need = max(2, int(_CIRCLE_SECTOR_MIN_SPAN / (360.0 / N)))
+    angular = 0
+    for k in range(len(radii)):
+        cnt = np.bincount(sig[k], minlength=len(colors))
+        if sum(1 for i, c in enumerate(cnt) if c >= need and i not in bg_idx) >= 2:
+            angular += 1
+    if angular < _CIRCLE_ANGULAR_MIN_FRAC * len(radii):
+        return None
+
+    cuts = [0]
+    for k in range(1, len(radii)):
+        if float(np.mean(sig[k] != sig[k - 1])) > _CIRCLE_BAND_ANGLE_FRAC:
+            cuts.append(k)
+    cuts.append(len(radii))
+
+    out = []
+    for i in range(len(cuts) - 1):
+        k0, k1 = cuts[i], cuts[i + 1]
+        r_out, r_in = radii[k0], radii[k1 - 1]
+        if r_out < 4 or k1 - k0 < 2:
+            continue
+        core = sig[k0 + 1:k1 - 1] if k1 - k0 > 3 else sig[k0:k1]   # skip anti-aliased edges
+        modes = np.array([np.bincount(core[:, a]).argmax() for a in range(N)])
+        runs = _angular_runs(modes, N)
+        # A ring thinner than this can't carry sectors — its "quadrants" would be slivers
+        # of anti-alias.
+        thick = (r_out - r_in) >= max(3, _CIRCLE_SECTOR_MIN_THICK * r_out)
+        if len(runs) == 1 or not thick:
+            wide = [(a1 - a0, colors[j]["hex"]) for j, a0, a1 in runs
+                    if colors[j]["hex"] != bg_hex]
+            if wide:
+                out.append({"cx": cx, "cy": cy, "r_px": r_out, "color": max(wide)[1]})
+            continue
+        for idx, a0, a1 in runs:
+            hex_c = colors[idx]["hex"]
+            if hex_c == bg_hex:
+                continue                       # background sector = nothing to draw
+            out.append({"cx": cx, "cy": cy, "r_px": r_out, "r_in_px": max(0, r_in - 1),
+                        # image rows grow DOWN, TikZ y grows UP → negate the angle
+                        "a0_deg": -a1, "a1_deg": -a0, "color": hex_c})
+    return out or None
+
+
+def _angular_runs(modes: "np.ndarray", N: int) -> list:
+    """Group equal-colour angular samples into runs (wrapping at 0°).
+
+    Returns [(palette_idx, a0_deg, a1_deg)]. Slivers below _CIRCLE_SECTOR_MIN_SPAN are
+    anti-alias between two sectors, not a sector — they are absorbed by their neighbour.
+    """
+    step = 360.0 / N
+    start = 0
+    while start < N and modes[start] == modes[(start - 1) % N]:
+        start += 1                                    # rotate to a real boundary
+    if start >= N:                                    # one colour all the way round
+        return [(int(modes[0]), 0.0, 360.0)]
+    order = [(start + i) % N for i in range(N)]
+    runs, cur, n = [], modes[order[0]], 1
+    for j in range(1, N):
+        if modes[order[j]] == cur:
+            n += 1
+        else:
+            runs.append([int(cur), n]); cur, n = modes[order[j]], 1
+    runs.append([int(cur), n])
+    merged = []                                       # absorb slivers into the neighbour
+    for idx, n in runs:
+        if merged and (n * step < _CIRCLE_SECTOR_MIN_SPAN or merged[-1][0] == idx):
+            merged[-1][1] += n
+        else:
+            merged.append([idx, n])
+    if len(merged) > 1 and merged[0][0] == merged[-1][0]:
+        merged[0][1] += merged.pop()[1]               # close the wrap
+    # A sliver that landed FIRST had no left neighbour to be absorbed into; sweep again
+    # until every surviving run is a real sector. (capa6's phantoms leaked through as 5°
+    # arcs precisely this way.)
+    while len(merged) > 1:
+        small = min(range(len(merged)), key=lambda i: merged[i][1])
+        if merged[small][1] * step >= _CIRCLE_SECTOR_MIN_SPAN:
+            break
+        idx_n = (small + 1) % len(merged)
+        merged[idx_n][1] += merged[small][1]
+        merged.pop(small)
+    if len({m[0] for m in merged}) == 1:               # one colour after all → not sectored
+        return [(int(merged[0][0]), 0.0, 360.0)]
+    out, a = [], (start * step) % 360.0
+    for idx, n in merged:
+        out.append((idx, a, a + n * step))
+        a += n * step
+    return out
+
+
 def _dedup_circles(bands: list[dict]) -> list[dict]:
     """Drop rings that duplicate another (same colour, near-equal centre+radius)."""
     kept: list[dict] = []
@@ -456,7 +818,11 @@ def _dedup_circles(bands: list[dict]) -> list[dict]:
             if (b["color"] == k["color"]
                     and abs(b["r_px"] - k["r_px"]) <= 3
                     and abs(b["cx"] - k["cx"]) <= 6
-                    and abs(b["cy"] - k["cy"]) <= 6):
+                    and abs(b["cy"] - k["cy"]) <= 6
+                    # two sectors of one ring share colour, centre and radius — they are
+                    # only duplicates if they cover the same ANGLES too
+                    and abs(b.get("a0_deg", 0) - k.get("a0_deg", 0)) <= 5
+                    and abs(b.get("a1_deg", 0) - k.get("a1_deg", 0)) <= 5):
                 dup = True
                 break
         if not dup:

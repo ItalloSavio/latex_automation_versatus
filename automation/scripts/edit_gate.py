@@ -43,6 +43,10 @@ _ASCENDER_EM = 0.735
 _ASC_DESC_EM = 0.945
 _DESC_CHARS  = set("gjpqyçÇ,;()[]{}@$_")
 
+# Banding a proposed region only earns its place if it explains the pixels this much
+# better than a single flat fill — otherwise it is extra geometry for nothing.
+_REGION_BAND_GAIN = 0.15
+
 # Grounded edits the EYE clearly wants but the pixel metric is BLIND to: a fixed OCR string,
 # a thin rule / shape that's in the original. content_match barely moves (or dips sub-pixel)
 # on these, so demanding it RISE wrongly reverts correct elements (the "Score green, eye red"
@@ -105,6 +109,114 @@ def dedup_text(analysis: dict) -> dict:
     return analysis
 
 
+def _clip_slab(poly, lo, hi, axis):
+    """Sutherland–Hodgman clip of a polygon to lo ≤ p[axis] ≤ hi."""
+    def half(pts, keep_low, bound):
+        out = []
+        for i, p in enumerate(pts):
+            q = pts[(i + 1) % len(pts)]
+            pin = (p[axis] <= bound) if keep_low else (p[axis] >= bound)
+            qin = (q[axis] <= bound) if keep_low else (q[axis] >= bound)
+            if pin:
+                out.append(p)
+            if pin != qin and abs(q[axis] - p[axis]) > 1e-9:
+                t = (bound - p[axis]) / (q[axis] - p[axis])
+                out.append((p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])))
+        return out
+    poly = half(poly, False, lo)
+    return half(poly, True, hi) if poly else []
+
+
+def _mask_mean(img, poly_px, ImageDraw, Image, np):
+    """(mean RGB, pixel count) inside a polygon given in image pixels."""
+    h, w = img.shape[:2]
+    m = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(m).polygon([(float(x), float(y)) for x, y in poly_px], fill=1)
+    sel = np.asarray(m, dtype=bool)
+    n = int(sel.sum())
+    return (img[sel].mean(0) if n else None), n
+
+
+def snap_region_colors(edits: list, image_path, canvas: dict, palette: list) -> list:
+    """Repaint each proposed region with the colour actually MEASURED inside its shape.
+
+    The VLM reads SHAPE well and guesses VALUE. capa5's poster is four triangles meeting at
+    the centre; the VLM got all four right but filled the hatched one with the bright red of
+    the sector above (#C43228) when its measured mean is a much darker #A24139 — so the gate
+    reverted a geometrically PERFECT region for being the wrong colour. Same division of
+    labour as `snap_text_adds`: the proposal supplies the geometry, pixels supply the rest.
+    Snapped to the existing palette, so `ground_edit`'s colour check still holds.
+    """
+    try:
+        import numpy as np
+        from PIL import Image, ImageDraw
+        img = np.asarray(Image.open(image_path).convert("RGB")).astype(float)
+    except Exception:
+        return edits
+    if not palette:
+        return edits
+    hpx, wpx = img.shape[:2]
+    W = canvas.get("width_cm", 21.0); H = canvas.get("height_cm", 29.7)
+    pal = np.array([p["rgb"] for p in palette], dtype=float)
+    out = []
+    for e in edits:
+        pts = e.get("points_cm")
+        if e.get("op") != "region.add" or e.get("shape") != "polygon" or not pts or len(pts) < 3:
+            out.append(e); continue
+        xy = [(p[0] / W * wpx, (H - p[1]) / H * hpx) for p in pts]
+        mask = Image.new("L", (wpx, hpx), 0)
+        ImageDraw.Draw(mask).polygon(xy, fill=1)
+        m = np.asarray(mask, dtype=bool)
+        if m.sum() < 50:
+            out.append(e); continue
+        mean = img[m].mean(0)
+        flat_i = int(((mean[None, :] - pal) ** 2).sum(1).argmin())
+        flat_err = float(((img[m] - pal[flat_i]) ** 2).sum(1).mean())
+
+        # A field that SHADES across the region needs more than one flat colour. capa5's
+        # hatched sector is a gradient (dense strokes left → sparse right), and drawing the
+        # strokes themselves is the known sub-pixel trap. Bands are the same polygon
+        # primitive at LOW frequency, so they render exactly.
+        best = None
+        for axis in (0, 1):
+            lo = min(p[axis] for p in xy); hi = max(p[axis] for p in xy)
+            if hi - lo < 8:
+                continue
+            for nb in (3, 4, 5):
+                bands, err, npx = [], 0.0, 0
+                for k in range(nb):
+                    a = lo + (hi - lo) * k / nb
+                    b = lo + (hi - lo) * (k + 1) / nb
+                    sub = _clip_slab(xy, a, b, axis)
+                    if len(sub) < 3:
+                        continue
+                    mu, n = _mask_mean(img, sub, ImageDraw, Image, np)
+                    if mu is None or n < 30:
+                        continue
+                    ci = int(((mu[None, :] - pal) ** 2).sum(1).argmin())
+                    sm = Image.new("L", (wpx, hpx), 0)
+                    ImageDraw.Draw(sm).polygon([(float(x), float(y)) for x, y in sub], fill=1)
+                    sel = np.asarray(sm, dtype=bool)
+                    err += float(((img[sel] - pal[ci]) ** 2).sum(1).sum()); npx += n
+                    bands.append({"points_cm": [[round(x / wpx * W, 3),
+                                                 round(H - y / hpx * H, 3)] for x, y in sub],
+                                  "hex": palette[ci]["hex"]})
+                # Adjacent slabs that snap to the same colour are left as separate polygons:
+                # they abut exactly, so the render is identical and no polygon union is
+                # needed. What matters is that the band set carries MORE THAN ONE colour —
+                # otherwise this is just a flat fill cut into pieces.
+                if len(bands) < 2 or not npx or len({b["hex"] for b in bands}) < 2:
+                    continue
+                score = err / npx
+                if best is None or score < best[0]:
+                    best = (score, bands)
+        if best is not None and best[0] < flat_err * (1.0 - _REGION_BAND_GAIN):
+            out.append({**e, "hex": palette[flat_i]["hex"], "bands_cm": best[1]})
+        else:
+            out.append({**e, "hex": palette[flat_i]["hex"]})
+    return out
+
+
 def _glyph_only(win, span_px=0.0):
     """Strip everything that is not glyph-sized from an ink window.
 
@@ -147,6 +259,10 @@ def _row_runs(win):
         runs.append((s, len(prof) - 1))
     if not runs:
         return []
+    # NOTE: trimming the run to rows carrying a share of its PEAK ink was TRIED and REVERTED
+    # (2026-08-06). It looks like an anti-alias trim but it cuts REAL glyph rows: the top of
+    # a line holds only the ASCENDERS, so its ink count is genuinely low. Measured: capa6
+    # 12.1→8.0pt and capa7 14.5→11.3pt, both of which had been verified CORRECT by width.
     dens = np.array([prof[a:b + 1].mean() for a, b in runs])
     hs   = np.array([b - a + 1 for a, b in runs], float)
     return [r for r, d, h in zip(runs, dens, hs)
@@ -505,6 +621,17 @@ def apply_edit(analysis: dict, edit: dict) -> "dict | None":
                     "w": max(xs) - min(xs), "h": max(ys) - min(ys)}
         if bbox is None:                            # nothing to place it by → reject
             return None
+        bands = edit.get("bands_cm")
+        if bands:                                   # measured shading → one polygon per band
+            for bd in bands:
+                bp = bd["points_cm"]
+                xs = [p[0] for p in bp]; ys = [p[1] for p in bp]
+                regions.append({
+                    "shape_type": "polygon", "color_hex": bd["hex"], "points_cm": bp,
+                    "bbox_cm": {"x": min(xs), "y": min(ys),
+                                "w": max(xs) - min(xs), "h": max(ys) - min(ys)},
+                    "source": "vlm", "_id": f"v{len(regions)}"})
+            return a
         new = {"shape_type": edit.get("shape", "polygon"), "color_hex": edit["hex"],
                "source": "vlm", "_id": f"v{len(regions)}", "bbox_cm": bbox}
         if pts:

@@ -81,6 +81,8 @@ def _vlm_pass(analysis, image_path, render_path, cover_dir, score_fn, refresh):
         cache.write_text(json.dumps(edits, ensure_ascii=False, indent=2), encoding="utf-8")
         _log(f"  [VLM] Gemini propos {len(edits)} edits (cacheados em {cache.name})")
     edits = eg.snap_text_adds(edits, image_path, analysis.get("canvas", {}))  # ink-snap positions
+    edits = eg.snap_region_colors(edits, image_path, analysis.get("canvas", {}),
+                                  analysis.get("colors", []))   # measure the fill, don't guess
     best, quality, log = eg.run_gate(analysis, edits, score_fn)
     best = eg.dedup_text(best)   # drop OCR misreads a VLM text.add supersedes (e.g. huge "Welter Knol")
     for e in log:

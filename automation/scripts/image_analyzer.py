@@ -76,6 +76,11 @@ _MOSAIC_SOLID_MIN  = 0.90     # one colour over this share of a cell → solid t
 _MOSAIC_DIAG_MIN   = 0.88     # two half-medians must explain this share → diagonal tile
 _MOSAIC_MIN_DIAG   = 8        # fewer diagonal tiles than this is noise, not a mosaic
 _MOSAIC_MIN_FIT    = 0.55     # share of NON-EMPTY cells that must fit solid-or-diagonal
+
+# Retiring a grid block that a measured pass took over. Both thresholds must be met; the
+# coverage one is what keeps this inert on covers with no mosaic/circles (capa4, capa6).
+_GRID_SHADOW_COV   = 0.40     # this share of the block is owned by a measured pass
+_GRID_SHADOW_MATCH = 0.40     # …and it matches the original on less of what still shows
 # Hough's Canny runs on luminance, so a high-colour/low-luma edge (red on dark:
 # ΔRGB huge, Δgray only ~95) needs a lower threshold than the default 100 to
 # register. Phantoms this admits are dropped by the non-bg disk filter.
@@ -179,6 +184,7 @@ def analyze_image(
                                 circles, regions)
     hatch      = _detect_hatch(arr, colors, w_px, h_px, w_cm, h_cm)
     regions    = _drop_concentric_noise(regions + mosaic + circles + hatch)
+    regions    = _drop_shadowed_grid(regions, arr, colors, w_px, h_px, w_cm, h_cm)
     # Op-art circle lattice (tiled circles + accent lenses): when detected it IS the whole
     # cover, so it REPLACES the grid/circle guesses. Conservative trigger (see the detector)
     # → fires only on a genuine text-less lattice, so the other 6 covers are untouched.
@@ -612,6 +618,55 @@ def _mosaic_cells(arr, pal, colors, bg_i, discs, covered, P, phx, phy,
                 if sc > best[0]:
                     best = (sc, (pair, int(va[ca.argmax()]), int(vb[cb.argmax()])))
             if best[0] <= _MOSAIC_DIAG_MIN:
+                # Not solid, not a diagonal — try a DISC filling part of the cell. capa1's
+                # mosaic has quarter-circles (centred on a cell corner, r = cell) and
+                # half-circles (centred on an edge midpoint, r = cell/2). No new renderer is
+                # needed: `_cmd_annulus_sector` with r_in=0 degenerates to a pie slice.
+                yc, xc = np.mgrid[0:ih, 0:iw]
+                fy, fx = yc / max(ih - 1, 1), xc / max(iw - 1, 1)   # 0..1 inside the cell
+                cands = [
+                    # (mask, centre_cm, radius_cm, a0, a1)   — TikZ angles, y grows UP
+                    ((fx ** 2 + fy ** 2) <= 1.0,             (xl, yt), 1.0, -90.0, 0.0),
+                    (((1 - fx) ** 2 + fy ** 2) <= 1.0,       (xr, yt), 1.0, 180.0, 270.0),
+                    ((fx ** 2 + (1 - fy) ** 2) <= 1.0,       (xl, yb), 1.0, 0.0, 90.0),
+                    (((1 - fx) ** 2 + (1 - fy) ** 2) <= 1.0, (xr, yb), 1.0, 90.0, 180.0),
+                    ((fx ** 2 + (fy - 0.5) ** 2) <= 0.25,    (xl, (yt + yb) / 2), 0.5, -90.0, 90.0),
+                    (((1 - fx) ** 2 + (fy - 0.5) ** 2) <= 0.25, (xr, (yt + yb) / 2), 0.5, 90.0, 270.0),
+                    (((fx - 0.5) ** 2 + fy ** 2) <= 0.25,    ((xl + xr) / 2, yt), 0.5, 180.0, 360.0),
+                    (((fx - 0.5) ** 2 + (1 - fy) ** 2) <= 0.25, ((xl + xr) / 2, yb), 0.5, 0.0, 180.0),
+                    # …and the HALF-radius corner quarters. A disc sitting on a lattice CORNER
+                    # spans two cells, and each of them sees a quarter of radius cell/2 — that
+                    # is how capa1's teal semicircle is built, so full-radius quarters miss it.
+                    ((fx ** 2 + fy ** 2) <= 0.25,             (xl, yt), 0.5, -90.0, 0.0),
+                    (((1 - fx) ** 2 + fy ** 2) <= 0.25,       (xr, yt), 0.5, 180.0, 270.0),
+                    ((fx ** 2 + (1 - fy) ** 2) <= 0.25,       (xl, yb), 0.5, 0.0, 90.0),
+                    (((1 - fx) ** 2 + (1 - fy) ** 2) <= 0.25, (xr, yb), 0.5, 90.0, 180.0),
+                ]
+                dbest = (0.0, None)
+                for msk, ctr, rf, a0, a1 in cands:
+                    ins, outs = idx[msk], idx[~msk]
+                    if ins.size < 20 or outs.size < 20:
+                        continue
+                    vi, ci = np.unique(ins, return_counts=True)
+                    vo, co = np.unique(outs, return_counts=True)
+                    di, do = int(vi[ci.argmax()]), int(vo[co.argmax()])
+                    # only the case we can DRAW: a disc on bare background (the complement of
+                    # a disc is not a primitive, so a coloured outside would be unrenderable)
+                    if di == do or do != bg_i or di == bg_i:
+                        continue
+                    sc = (ci.max() + co.max()) / idx.size
+                    if sc > dbest[0]:
+                        dbest = (sc, (ctr, rf, a0, a1, di))
+                if dbest[0] > _MOSAIC_DIAG_MIN:
+                    (ctr, rf, a0, a1, di) = dbest[1]
+                    rad = rf * (xr - xl)
+                    cells[(i, j)] = ("diag", [{
+                        "color_hex": colors[di]["hex"], "shape_type": "annulus_sector",
+                        "r_in_cm": 0.0, "angle0_deg": a0, "angle1_deg": a1,
+                        "bbox_cm": {"x": round(ctr[0] - rad, 3), "y": round(ctr[1] - rad, 3),
+                                    "w": round(2 * rad, 3), "h": round(2 * rad, 3)},
+                        "area_pct": round(math.pi * rad * rad * ((a1 - a0) / 360.0)
+                                          / (w_cm * h_cm), 4), "source": "mosaic"}])
                 continue                # neither solid nor a clean diagonal → not a tile
             (pair, ia, ib) = best[1]
             halves = []
@@ -627,6 +682,78 @@ def _mosaic_cells(arr, pal, colors, bg_i, discs, covered, P, phx, phy,
             cells[(i, j)] = ("diag", halves)
 
     return cells
+
+
+def _drop_shadowed_grid(
+    regions: list, arr: "np.ndarray", colors: list,
+    w_px: int, h_px: int, w_cm: float, h_cm: float,
+) -> list:
+    """Retire a coarse GRID block once a MEASURED pass has taken over its area and the block
+    is painting the wrong colour on whatever still shows.
+
+    The exact converse of the mosaic's "only fill what the grid left empty": where the ring
+    sectors and mosaic tiles now own a region, the old block is redundant, and the part of it
+    that pokes out beyond them paints the WRONG thing — capa1 had a gray square sticking out
+    of the ring's lower-right, a white one at its lower-left and a phantom gray triangle in
+    the bottom-left corner. BOTH conditions are required: coverage alone would delete honest
+    blocks, and colour alone would delete honest TRIANGLES (their mask here is the full bbox,
+    so a legitimate half only ever matches ~50% — capa4 would lose its diagonals).
+    """
+    try:
+        from PIL import Image, ImageDraw
+    except Exception:
+        return regions
+    pal = np.array([c["rgb"] for c in colors], float) if colors else None
+    if pal is None:
+        return regions
+    hexes = [c["hex"] for c in colors]
+
+    def paint(r):
+        m = Image.new("L", (w_px, h_px), 0)
+        dr = ImageDraw.Draw(m)
+        b = r.get("bbox_cm")
+        if not b:
+            return None
+        c0 = b["x"] / w_cm * w_px; c1 = (b["x"] + b["w"]) / w_cm * w_px
+        r0 = (h_cm - (b["y"] + b["h"])) / h_cm * h_px; r1 = (h_cm - b["y"]) / h_cm * h_px
+        st = r.get("shape_type")
+        if st == "polygon" and r.get("points_cm"):
+            dr.polygon([(p[0] / w_cm * w_px, (h_cm - p[1]) / h_cm * h_px)
+                        for p in r["points_cm"]], fill=1)
+        elif st in ("circle", "annulus_sector"):
+            dr.ellipse([c0, r0, c1, r1], fill=1)
+        else:
+            dr.rectangle([c0, r0, c1, r1], fill=1)
+        return np.asarray(m, dtype=bool)
+
+    owned = np.zeros((h_px, w_px), dtype=bool)
+    for r in regions:
+        if r.get("source") in ("mosaic", "circle") or r.get("shape_type") == "annulus_sector":
+            m = paint(r)
+            if m is not None:
+                owned |= m
+    if not owned.any():
+        return regions                       # no measured pass fired → nothing to arbitrate
+
+    kept = []
+    for r in regions:
+        if r.get("source") != "grid":
+            kept.append(r); continue
+        m = paint(r)
+        if m is None or not m.any():
+            kept.append(r); continue
+        if float((m & owned).sum()) / m.sum() < _GRID_SHADOW_COV:
+            kept.append(r); continue
+        out = m & ~owned
+        if out.sum() < 200:
+            continue                         # fully taken over → the block is redundant
+        lab = ((arr[out].astype(float)[:, None, :] - pal[None, :, :]) ** 2).sum(2).argmin(1)
+        cnt = np.bincount(lab, minlength=len(colors))
+        mine = hexes.index(r["color_hex"]) if r.get("color_hex") in hexes else -1
+        share = cnt[mine] / cnt.sum() if mine >= 0 else 0.0
+        if share >= _GRID_SHADOW_MATCH:
+            kept.append(r)                   # still painting the right colour where it shows
+    return kept
 
 
 def _rim_edge_support(arr: "np.ndarray", cx: int, cy: int, r: int) -> float:

@@ -37,6 +37,17 @@ Each edit is one JSON object. Allowed ops and fields (reference elements by thei
                         "hex":"#FFFFFF"}                        #   (do NOT use vocab.gap for text)
   {"op":"text.move",    "id":"t0", "dx_cm":0.4, "dy_cm":-0.2}  # nudge text
   {"op":"text.hscale",  "id":"t0", "value":0.72}               # condense a wide font
+  {"op":"text.size",    "id":"t0", "value":30.0}               # SET the font size in pt. The
+                                                               #   OCR sizes type from measured
+                                                               #   ink, so a misread graphic
+                                                               #   arrives absurd (126pt, 72pt).
+                                                               #   Compare against the ORIGINAL
+                                                               #   and give the real size.
+  {"op":"text.remove",  "id":"t3"}                             # DELETE text the OCR invented:
+                                                               #   a graphic misread as a glyph
+                                                               #   (a ring read as "6"), or a
+                                                               #   duplicate. Use the _id from
+                                                               #   TEXT ELEMENTS above.
   {"op":"region.color", "id":"r5", "hex":"#EF5623"}            # recolour (palette only)
   {"op":"region.move",  "id":"r5", "dx_cm":0.3, "dy_cm":0}
   {"op":"region.resize","id":"r5", "w_cm":5.1, "h_cm":5.1}
@@ -78,10 +89,35 @@ def _load(name: str):
     return mod
 
 
-def _context_text(analysis: dict, zones: "list | None") -> str:
+def _residual_text(blobs: list) -> str:
+    """The system's own read of what it got wrong, as concrete places to look.
+
+    A zone map says "this sixth of the page is bad"; a residual blob says "at exactly this
+    box the original is #4CB5B3 and we drew #1F1F1E". That is the difference between the
+    VLM guessing what to fix and being pointed at it.
+    """
+    if not blobs:
+        return ""
+    lines = []
+    for i, b in enumerate(blobs, 1):
+        bb = b["bbox_cm"]
+        lines.append(
+            f"  {i}. bbox_cm x={bb['x']} y={bb['y']} w={bb['w']} h={bb['h']}"
+            f"  ({b['area_pct']}% da capa)  ORIGINAL={b['orig_hex']} vs NOSSO={b['render_hex']}")
+    return ("RESIDUAL — regioes onde o render DISCORDA do original, pior primeiro.\n"
+            "Para CADA uma diga o que ha ali no ORIGINAL e proponha o edit que a corrige\n"
+            "(region.add com points_cm quando for forma, text.add quando for texto,\n"
+            "logo.mark quando for marca, vocab.gap se nada do vocabulario expressar):\n"
+            + "\n".join(lines))
+
+
+def _context_text(analysis: dict, zones: "list | None", blobs: "list | None" = None) -> str:
     """The structured evidence the VLM reasons over — palette, text, shapes, worst zones."""
     pal = ", ".join(c["hex"] for c in analysis.get("colors", [])[:8])
-    texts = [{"_id": t.get("_id"), "text": t.get("text"), "bbox_cm": t.get("bbox_cm")}
+    # font_size_pt is part of the evidence: a `text.size` fix is impossible if the model
+    # cannot see what the OCR currently believes (capa1's title arrives at 126pt).
+    texts = [{"_id": t.get("_id"), "text": t.get("text"), "bbox_cm": t.get("bbox_cm"),
+              "font_size_pt": t.get("font_size_pt")}
              for t in analysis.get("text_elements", [])]
     shapes = [{"_id": r.get("_id"), "shape": r.get("shape_type"),
                "hex": r.get("color_hex"), "bbox_cm": r.get("bbox_cm")}
@@ -96,6 +132,8 @@ def _context_text(analysis: dict, zones: "list | None") -> str:
         worst = "; ".join(f"{z['loc']} content={z['cm']:.2f} err%={z['pct']:.0f}"
                           for z in zones[:6])
         parts.append(f"WORST ZONES (error x area, worst first): {worst}")
+    if blobs:
+        parts.append(_residual_text(blobs))
     return "\n".join(parts)
 
 
@@ -114,6 +152,7 @@ def _edits_from_text(text: str) -> list:
 def propose(
     analysis: dict, image_path: "str | Path", render_path: "str | Path",
     zones: "list | None" = None, mock: "list | None" = None, max_edits: int = 12,
+    blobs: "list | None" = None,
 ) -> list:
     """Ask the VLM (or a mock) for a list of typed edits. Returns the edits list.
 
@@ -127,7 +166,7 @@ def propose(
     ve = _load("vision_extractor")       # reuse _call_gemini + the model chain (no edits)
 
     client = genai.Client(http_options={"api_version": "v1beta"})   # reads GEMINI_API_KEY
-    prompt = (_context_text(analysis, zones)
+    prompt = (_context_text(analysis, zones, blobs)
               + f"\n\nPropose at most {max_edits} edits. Return ONLY JSON: "
               '{"edits":[ ... ]}.')
     parts = [

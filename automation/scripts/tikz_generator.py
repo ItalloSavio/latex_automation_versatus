@@ -228,6 +228,11 @@ def _build_regions(
     Generate \\fill / \\foreach commands for all regions.
     Returns (lines, consumed_indices).
     """
+    # The photographed poster's paper MARGIN trims everything, so it must be painted last —
+    # otherwise a VLM `region.add` (appended after the analysis was built) covers it and the
+    # frame silently does nothing. Stable partition: every other region keeps its order.
+    regions = ([r for r in regions if r.get("source") != "margin"]
+               + [r for r in regions if r.get("source") == "margin"])
     lines: list[str] = []
     consumed: set[int] = set()
 
@@ -241,6 +246,12 @@ def _build_regions(
         # renders as a box (and often at the pattern's mirror anchor, off its real spot).
         # Let it fall to Pass 3, which draws each shape at its own bbox, correctly.
         if r.get("shape_type", "rectangle") not in ("rectangle", "polygon"):
+            continue
+        # The page MARGIN is a frame, never a repeat. `pattern_detector` sees two thin
+        # look-alike bars (left and right edge) and groups them into a \foreach with a
+        # nonsense period, tiling them off-canvas — so the frame silently loses two sides.
+        # Same failure family as the circle-drawn-as-rectangle bug.
+        if r.get("source") == "margin":
             continue
         anch  = r.get("foreach_anchor", {})
         key   = (

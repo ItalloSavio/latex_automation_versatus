@@ -34,7 +34,8 @@ _GROUND_COLOR_TOL = 70       # a proposed hex must be within this RGB dist of th
 _ACCEPT_EPS       = 1e-3     # primary metric must rise by at least this to accept
 _GUARD_EPS        = 5e-3     # a guarded metric may not fall by more than this
 _PT_PER_CM        = 72.0 / 2.54                 # points per cm (for text.add font size)
-_TEXT_OPS = {"text.string", "text.move", "text.hscale", "text.add"}
+_TEXT_OPS = {"text.string", "text.move", "text.hscale", "text.add", "text.remove", "text.size"}
+_TEXT_PT_RANGE = (4.0, 200.0)   # a font outside this isn't type, it's a mis-measurement
 
 # Em ratios for sizing a font from MEASURED ink height (same model as ocr_extractor):
 # ascender→baseline ≈ 0.735·em; ascender→descender ≈ 0.945·em. Which one applies is decided
@@ -455,6 +456,18 @@ def ground_edit(analysis: dict, edit: dict) -> "tuple[bool, str]":
             return False, "text.add sem bbox_cm"
         if not v or not any(c.isalnum() for c in v):
             return False, "string vazia/sem alfanumérico"
+        # ALREADY THERE? Text never matches pixel-for-pixel, so the residual keeps flagging a
+        # text area as "wrong" and the VLM keeps re-proposing the very block it already
+        # landed. Without this the iterated residual loop stacks duplicate type on itself
+        # (measured on capa5: round 3 re-added round 1's three blocks, 0.7605 → 0.7398).
+        first = next((ln.strip().casefold() for ln in v.replace("\\n", "\n").split("\n")
+                      if ln.strip()), "")
+        for t in analysis.get("text_elements", []):
+            tb = t.get("bbox_cm") or {}
+            if (t.get("text", "").strip().casefold() == first and tb
+                    and abs(tb.get("x", 0) - b["x"]) < 2.0
+                    and abs(tb.get("y", 0) - b["y"]) < 2.0):
+                return False, f"texto '{first[:24]}' ja existe nessa posicao"
         if not (-1 <= b.get("x", 0) and b["x"] + b.get("w", 0) <= W + 1
                 and -1 <= b.get("y", 0) and b["y"] + b.get("h", 0) <= H + 1):
             return False, "bbox fora do canvas"
@@ -473,6 +486,10 @@ def ground_edit(analysis: dict, edit: dict) -> "tuple[bool, str]":
                 return False, "string longa demais pra caixa"
         if op == "text.hscale" and not (0.3 <= edit.get("value", 0) <= 1.6):
             return False, "hscale fora de [0.3, 1.6]"
+        if op == "text.size":
+            v = edit.get("value")
+            if not isinstance(v, (int, float)) or not (_TEXT_PT_RANGE[0] <= v <= _TEXT_PT_RANGE[1]):
+                return False, f"font_size_pt fora de {_TEXT_PT_RANGE}"
         return True, "ok"
 
     if op == "region.add":
@@ -596,6 +613,9 @@ def apply_edit(analysis: dict, edit: dict) -> "dict | None":
             first = False
         return a
 
+    if op == "text.remove":                    # must precede the _TEXT_OPS branch below —
+        return _remove_text(a, edit)           # that one only MUTATES an element in place
+
     if op in _TEXT_OPS:
         el = _find(a.get("text_elements", []), edit["id"])
         if el is None:
@@ -609,6 +629,11 @@ def apply_edit(analysis: dict, edit: dict) -> "dict | None":
                 el["baseline_y_cm"] += edit.get("dy_cm", 0)
         elif op == "text.hscale":
             el["hscale"] = edit["value"]
+        elif op == "text.size":
+            # The OCR sizes a glyph from measured ink, so a graphic it mis-read as type comes
+            # out absurd (capa1's title arrived as ONE 126pt element, "versatus" at 72pt).
+            # The VLM can SEE the right size; before this it could only move or restring.
+            el["font_size_pt"] = float(edit["value"])
         return a
 
     regions = a.get("regions", [])
@@ -658,6 +683,20 @@ def apply_edit(analysis: dict, edit: dict) -> "dict | None":
     return a
 
 
+def _remove_text(a: dict, edit: dict) -> "dict | None":
+    """Delete a text element the OCR hallucinated.
+
+    The system could ADD text the OCR missed but never DELETE what it invented — and that is
+    exactly what blocked capa1 from running end to end: EasyOCR reads the big ring as the
+    digit "6" and sizes it at 411pt, a glyph covering half the cover. The VLM did propose
+    `text.remove` for it, round after round, and every one died in grounding because the op
+    did not exist. Judged by the SCORE (a spurious glyph is a graphics-scale error), not by
+    text_match, whose box set changes when an element goes away."""
+    texts = a.get("text_elements", [])
+    a["text_elements"] = [t for t in texts if t.get("_id") != edit["id"]]
+    return a if len(a["text_elements"]) != len(texts) else None
+
+
 # ─── The gate (layer ② + metric routing) ───────────────────────────────────────
 
 _TEXT_ADD_MIN       = 0.35     # a text.add is kept if its OWN box's ink match clears this
@@ -668,6 +707,12 @@ _TEXT_ADD_SCORE_TOL = 0.02     # box_local (≥floor) is the JUDGE of a text.add
 
 
 def _primary(op: str) -> str:
+    # text.remove is a TEXT op but must be judged by the SCORE: deleting an element changes
+    # the very box set text_match averages over, so that metric cannot compare before/after.
+    # What a spurious glyph wrecks is the picture (capa1's fake "6" at 411pt), and the Score
+    # sees that plainly.
+    if op == "text.remove":
+        return "score"
     return "text_match" if op in _TEXT_OPS else "score"
 
 
@@ -685,6 +730,20 @@ def _improved(before: dict, after: dict, op: str) -> "tuple[bool, str]":
         ok = local >= _TEXT_ADD_MIN and sa >= sb - _TEXT_ADD_SCORE_TOL
         return ok, f"box_local {local:.3f} x{n_added} (score {sb:.4f}->{sa:.4f})"
 
+    if op == "text.size":
+        # Judge it on the box that actually CHANGED, not on the mean. text_match averages
+        # every OCR box, so resizing one element barely moves it (measured on capa1: seven
+        # proposals, all reported 0.6132→0.6132 and all rejected) — the same dilution that
+        # made text.add unjudgeable until it got its own box score. The box set and its order
+        # are untouched by a resize, so the element is found as the box that moved most.
+        bs, as_ = before.get("text_box_scores") or [], after.get("text_box_scores") or []
+        if len(bs) == len(as_) and bs:
+            d = [a - b for a, b in zip(as_, bs)]
+            i = max(range(len(d)), key=lambda k: abs(d[k]))
+            sb, sa = before.get("score", 0.0), after.get("score", 0.0)
+            ok = d[i] > _ACCEPT_EPS and sa >= sb - _TEXT_ADD_SCORE_TOL
+            return ok, (f"box[{i}] {bs[i]:.3f}->{as_[i]:.3f} (score {sb:.4f}->{sa:.4f})")
+
     prim = _primary(op)
     b_p, a_p = before.get(prim), after.get(prim)
     if b_p is None or a_p is None:                    # no text boxes → judge by score
@@ -700,7 +759,13 @@ def _improved(before: dict, after: dict, op: str) -> "tuple[bool, str]":
 
     if a_p < b_p + _ACCEPT_EPS:
         return False, delta
-    for g in ("score", "text_match"):                 # guard the other metric
+    # text.remove has NO comparable text_match: that metric averages ink inside the OCR
+    # BOXES, and deleting an element changes the box set itself. capa1's fake "6" carries a
+    # box covering half the cover, so almost anything inside it "matches" and the mean is
+    # inflated to 0.87; removing it reveals the real 0.46 and a text_match guard would veto
+    # a change worth +0.07 of Score. The Score is the honest judge for a deletion.
+    guards = () if op == "text.remove" else ("score", "text_match")
+    for g in guards:
         if g == prim:
             continue
         gb, ga = before.get(g), after.get(g)

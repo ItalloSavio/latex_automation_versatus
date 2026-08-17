@@ -71,7 +71,7 @@ def _metrics(orig, rend) -> "tuple[float, float, float]":
     o = np.asarray(orig)
     r = np.asarray(rend)
     ss     = float(ssim(o, r, channel_axis=2, data_range=255))
-    cm, iou = vc._content_metrics(o, r)
+    cm, iou, _tol = vc._content_metrics(o, r)
     w      = vc._SCORE_W
     score  = w["ssim"] * ss + w["content_match"] * cm + w["content_iou"] * iou
     return score, ss, cm

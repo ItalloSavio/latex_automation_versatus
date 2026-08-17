@@ -62,31 +62,111 @@ def _load(name: str):
 
 # ─── Public API ───────────────────────────────────────────────────────────────
 
+_RESIDUAL_ROUNDS  = 3       # how many residual→propose→gate cycles to run at most
+_RESIDUAL_MIN_PCT = 0.15    # a blob under this share of the cover isn't worth a round
+_RESIDUAL_GUARD   = 0.005   # Score may dip this much across rounds before the net trips
+
+
+def _residual_of(analysis, image_path, render_path, top=6):
+    """The system's own read of where it is still wrong (see visual_comparator)."""
+    try:
+        return _load("visual_comparator").residual_blobs(
+            image_path, render_path, analysis.get("canvas", {}), top=top)
+    except Exception as exc:
+        _log(f"  [residuo] indisponivel ({exc})")
+        return []
+
+
 def _vlm_pass(analysis, image_path, render_path, cover_dir, score_fn, refresh):
-    """Fase 5 — the VLM proposer pass, gated. Runs ONLY on plateau (called by replicate).
-    The VLM proposes typed edits; `edit_gate` grounds + MEASURES each (score_fn renders),
-    so nothing hallucinated lands. The reply is CACHED (vlm_edits.json) → re-runs are
-    deterministic and don't re-spend the API. Returns (best_analysis, best_quality)."""
+    """Fase 5 — the VLM proposer, gated, driven by the system's OWN RESIDUAL and ITERATED.
+
+    Each round: render the current best → measure where it still disagrees with the original
+    → hand those exact boxes to the VLM → gate every proposed edit → repeat. It stops when
+    no blob is left worth fixing, when a round lands nothing, or at _RESIDUAL_ROUNDS.
+
+    This is the piece that takes the dev out of the loop: previously a human read the diff
+    map, decided what each smudge was and wrote a detector. Rounds are CACHED so a re-run is
+    deterministic and free (`--vlm-refresh` to re-call). Returns (best_analysis, quality)."""
     eg = _load("edit_gate")
     vp = _load("vlm_proposer")
-    eg.assign_ids(analysis)
     cache = cover_dir / "vlm_edits.json"
+    cached_rounds = None
     if cache.exists() and not refresh:
-        edits = json.loads(cache.read_text(encoding="utf-8"))
-        _log(f"  [VLM] {len(edits)} edits do CACHE ({cache.name}; --vlm-refresh p/ rechamar)")
+        raw = json.loads(cache.read_text(encoding="utf-8"))
+        # legacy caches hold a single flat list of edits; treat it as round 1
+        cached_rounds = raw.get("rounds") if isinstance(raw, dict) else [raw]
+        _log(f"  [VLM] cache com {len(cached_rounds)} rodada(s) ({cache.name}; "
+             f"--vlm-refresh p/ rechamar)")
+
+    best, quality = eg.assign_ids(analysis), None
+    kept, kept_q = None, None                      # best across ROUNDS (never end worse)
+    rounds_out, canvas = [], analysis.get("canvas", {})
+    for rnd in range(_RESIDUAL_ROUNDS):
+        quality = score_fn(best) or quality        # render the CURRENT best for the residual
+        if kept is None or (quality or {}).get("score", -1) > (kept_q or {}).get("score", -1):
+            kept, kept_q = copy.deepcopy(best), quality
+        blobs = _residual_of(best, image_path, render_path)
+        blobs = [b for b in blobs if b["area_pct"] >= _RESIDUAL_MIN_PCT]
+        # The residual GUIDES the VLM; it must not GATE it. On a text-dominated cover the
+        # blob finder is blind by construction (thin type survives no morphological opening),
+        # so "no blobs" on the FIRST round would skip the pass that adds the text — capa2
+        # lost its whole VLM contribution that way (0.3457 → 0.3352). From round 2 on, an
+        # empty residual is the honest stop signal.
+        if not blobs and rnd > 0:
+            _log(f"  [residuo] rodada {rnd+1}: nenhuma mancha relevante — capa considerada pronta")
+            break
+        _log(f"  [residuo] rodada {rnd+1}: {len(blobs)} mancha(s)"
+             + ("  (resíduo cego aqui — texto fino; seguindo mesmo assim)" if not blobs else ""))
+        for b in blobs:
+            _log(f"    {b['area_pct']:>5.2f}% em {b['bbox_cm']}  "
+                 f"{b['orig_hex']} -> {b['render_hex']}")
+
+        if cached_rounds is not None and rnd < len(cached_rounds):
+            edits = cached_rounds[rnd]
+        elif cached_rounds is not None:
+            break                                   # cache exhausted, don't spend API
+        else:
+            _log("  [VLM] chamando Gemini (visao)...")
+            edits = vp.propose(best, image_path, render_path,
+                               zones=vp.zones_for(image_path, render_path), blobs=blobs)
+            _log(f"  [VLM] Gemini propos {len(edits)} edits")
+        if not edits:
+            break
+
+        edits = eg.snap_text_adds(edits, image_path, canvas)          # ink-snap positions
+        edits = eg.snap_region_colors(edits, image_path, canvas,
+                                      best.get("colors", []))         # measure the fill
+        best, quality, log = eg.run_gate(best, edits, score_fn)
+        best = eg.dedup_text(best)
+        for e in log:
+            _log(f"    {e['verdict']:16} {e['op']:14} {e['info']}")
+        rounds_out.append(edits)
+        if not any(e["verdict"].startswith("✓") for e in log):
+            _log("  [residuo] rodada sem nenhum edit aceito — parando")
+            break
+
+    # Round-level safety net. It must NOT be a raw-Score hill-climb: the Score is blind to
+    # thin type, so a round that correctly ADDS text always costs ~0.005 and a naive revert
+    # throws that text away (measured: capa6 lost all three of its approved blocks). The
+    # honest discriminator is text_match — adding text raises it, DUPLICATING text lowers it
+    # (precision drops). So revert only when the Score fell materially AND text got no better.
+    final_q = score_fn(best) or quality
+    ds = (kept_q or {}).get("score", -1) - (final_q or {}).get("score", -1)
+    t_keep, t_final = (kept_q or {}).get("text_match"), (final_q or {}).get("text_match")
+    text_worse = (t_final is not None and t_keep is not None and t_final < t_keep - 1e-4)
+    if kept is not None and ds > _RESIDUAL_GUARD and (text_worse or t_final is None):
+        _log(f"  [residuo] rodadas pioraram "
+             f"({(final_q or {}).get('score', 0):.4f} < {(kept_q or {}).get('score', 0):.4f}, "
+             f"texto {t_keep}→{t_final}) — voltando ao melhor")
+        best, quality = kept, kept_q
+        score_fn(best)                              # re-render the kept state as deliverable
     else:
-        _log("  [VLM] chamando Gemini (visao)...")
-        zones = vp.zones_for(image_path, render_path)
-        edits = vp.propose(analysis, image_path, render_path, zones=zones)
-        cache.write_text(json.dumps(edits, ensure_ascii=False, indent=2), encoding="utf-8")
-        _log(f"  [VLM] Gemini propos {len(edits)} edits (cacheados em {cache.name})")
-    edits = eg.snap_text_adds(edits, image_path, analysis.get("canvas", {}))  # ink-snap positions
-    edits = eg.snap_region_colors(edits, image_path, analysis.get("canvas", {}),
-                                  analysis.get("colors", []))   # measure the fill, don't guess
-    best, quality, log = eg.run_gate(analysis, edits, score_fn)
-    best = eg.dedup_text(best)   # drop OCR misreads a VLM text.add supersedes (e.g. huge "Welter Knol")
-    for e in log:
-        _log(f"    {e['verdict']:16} {e['op']:14} {e['info']}")
+        quality = final_q
+
+    if cached_rounds is None and rounds_out:
+        cache.write_text(json.dumps({"rounds": rounds_out}, ensure_ascii=False, indent=2),
+                         encoding="utf-8")
+        _log(f"  [VLM] {len(rounds_out)} rodada(s) cacheadas em {cache.name}")
     n_gap = eg.persist_vocab_gaps(best, cover_dir.name)
     if n_gap:
         _log(f"  [VLM] {n_gap} vocab.gap -> output/vocab_gaps.jsonl (fila do dev)")

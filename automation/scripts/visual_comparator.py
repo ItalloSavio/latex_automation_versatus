@@ -25,6 +25,7 @@ Returned dict keys:
 """
 
 import math
+import os
 from pathlib import Path
 
 _OUTPUT_DIR    = Path(__file__).resolve().parent.parent / "output"
@@ -111,7 +112,7 @@ def _run_compare(
     # ── 1b. Content metrics (SSIM is area-weighted, so a large matching
     #        background inflates it while missing foreground — circles, text —
     #        barely moves it. These score ONLY the non-background pixels.) ─────
-    content_match, content_iou = _content_metrics(orig, result)
+    content_match, content_iou, content_match_tol = _content_metrics(orig, result)
 
     # ── 2. Color Distance ─────────────────────────────────────────────────
     palette_orig   = _extract_palette(orig,   _N_PALETTE)
@@ -155,6 +156,7 @@ def _run_compare(
         "ssim_pass":         ssim_val >= thresh,
         "ssim_threshold":    thresh,
         "content_match":     round(content_match, 4),
+        "content_match_tol": round(content_match_tol, 4),   # ±px-tolerant (see the constant)
         "content_iou":       round(content_iou, 4),
         "text_match":        round(tmatch, 4) if tmatch is not None else None,
         "text_box_scores":   tbox_scores,
@@ -171,6 +173,20 @@ def _run_compare(
 _CONTENT_BG_DIST = 60    # a pixel this far from the background colour is "content"
 _CONTENT_MATCH_D = 60    # render vs original within this RGB dist = a match
 
+# SPATIAL TOLERANCE (2026-08-06). content_match is POINTWISE, so it has no tolerance for
+# sub-pixel raster differences — and comparing rasterised vector art against a photo/scan
+# always produces them along every edge. Thin strokes and CURVES are all edge, so they are
+# punished hardest: capa3's faithful circle lattice scored 0.611 while a structurally WRONG
+# grid of bars scored 0.747, purely because straight edges land on the pixel grid. This
+# variant accepts a content pixel when the render carries its colour anywhere within
+# ±_CONTENT_TOL_PX. Measured on the 7 covers it removes the inversion where two APPROVED
+# covers ranked below two work-in-progress ones. Reported ALONGSIDE for now — the Score
+# still uses the pointwise value until the weights are recalibrated against the eye.
+# OPT-IN: it costs 0.2–1.0s per compare and the Score does not use it yet, so leaving it on
+# would burn tens of seconds per cover in the gate's hot loop for a number nobody reads.
+# Turn it on for metric-calibration work: set SWISS_TOL_METRIC=1 (or the constant, in-process).
+_CONTENT_TOL_PX  = 2 if os.environ.get("SWISS_TOL_METRIC") else 0
+
 # Text-aware metric (Fase 5): content_match is nearly BLIND to thin type (capa2 = 0.03
 # even when it looks fine) because a 1px stroke offset zeroes the exact-pixel match. The
 # text gate for the VLM measures ink OVERLAP inside the OCR boxes, TOLERANT of small
@@ -181,7 +197,7 @@ _TEXT_INK_DIST  = 55     # pixel this far from the box's local background = ink
 _TEXT_DILATE_PX = 3      # misalignment tolerance (px) — dilate ink before matching
 
 
-def _content_metrics(orig: "np.ndarray", result: "np.ndarray") -> "tuple[float, float]":
+def _content_metrics(orig: "np.ndarray", result: "np.ndarray") -> "tuple[float, float, float]":
     """
     Score only where the content is, so a big matching background can't inflate it.
 
@@ -208,7 +224,77 @@ def _content_metrics(orig: "np.ndarray", result: "np.ndarray") -> "tuple[float, 
     match = float(np.mean(np.sqrt(((o[fg] - r[fg]) ** 2).sum(1)) < _CONTENT_MATCH_D))
     union = (fg_o | fg_r).sum()
     iou   = float((fg_o & fg_r).sum() / union) if union else 1.0
-    return match, iou
+
+    # Misalignment-tolerant variant: matched if the render carries this colour anywhere in a
+    # small neighbourhood. Evaluated only on the content pixels, so it costs one pass per
+    # shift over |fg| rather than over the whole frame.
+    k = _CONTENT_TOL_PX
+    if k <= 0:                                   # opt-in; identical to `match` when off
+        return match, iou, match
+    ofg = o[fg]
+    matched = np.sqrt(((ofg - r[fg]) ** 2).sum(1)) < _CONTENT_MATCH_D
+    for dy in range(-k, k + 1):
+        for dx in range(-k, k + 1):
+            if dx == 0 and dy == 0:
+                continue
+            if matched.all():
+                break
+            rs = np.roll(np.roll(r, dy, axis=0), dx, axis=1)
+            matched |= np.sqrt(((ofg - rs[fg]) ** 2).sum(1)) < _CONTENT_MATCH_D
+    match_tol = float(matched.mean())
+    return match, iou, match_tol
+
+
+def residual_blobs(
+    orig_path, result_path, canvas: dict, top: int = 6,
+    dist: int = 70, min_area_frac: float = 0.0008,
+) -> list:
+    """Where does the render DISAGREE with the original, as ranked contiguous blobs?
+
+    This is the system's own eye on its own output. Until now a human read the diff map,
+    decided what each smudge was, and wrote a detector — that is the manual loop. Handing
+    the ranked blobs to the VLM turns "the dev notices" into "the system notices".
+
+    Returns, worst first: {bbox_cm, area_px, area_pct, orig_hex, render_hex}.
+    """
+    import numpy as np                    # noqa: PLC0415
+    from PIL import Image                 # noqa: PLC0415
+    from scipy import ndimage             # noqa: PLC0415
+
+    o_img = Image.open(orig_path).convert("RGB")
+    r_img = Image.open(result_path).convert("RGB").resize(o_img.size, Image.LANCZOS)
+    O, R = np.asarray(o_img).astype(int), np.asarray(r_img).astype(int)
+    h_px, w_px = O.shape[:2]
+    W = canvas.get("width_cm", 21.0); H = canvas.get("height_cm", 29.7)
+
+    bad = np.sqrt(((O - R) ** 2).sum(2)) > dist
+    # open it up so anti-alias fringes along every edge don't register as "a blob"
+    bad = ndimage.binary_opening(bad, np.ones((5, 5)))
+    lbl, k = ndimage.label(bad)
+    if not k:
+        return []
+    sizes = ndimage.sum(bad, lbl, range(1, k + 1))
+    out = []
+    for idx in np.argsort(-sizes)[:top]:
+        n_px = int(sizes[idx])
+        if n_px < min_area_frac * h_px * w_px:
+            break
+        m = lbl == int(idx) + 1
+        ys, xs = np.where(m)
+        x0, x1, y0, y1 = int(xs.min()), int(xs.max()), int(ys.min()), int(ys.max())
+        co = O[m].mean(0).round().astype(int)
+        cr = R[m].mean(0).round().astype(int)
+        out.append({
+            "bbox_cm": {"x": round(x0 / w_px * W, 2),
+                        "y": round((h_px - y1) / h_px * H, 2),
+                        "w": round((x1 - x0 + 1) / w_px * W, 2),
+                        "h": round((y1 - y0 + 1) / h_px * H, 2)},
+            "area_px": n_px,
+            "area_pct": round(100.0 * n_px / (h_px * w_px), 2),
+            "orig_hex": "#{:02X}{:02X}{:02X}".format(*co),
+            "render_hex": "#{:02X}{:02X}{:02X}".format(*cr),
+        })
+    return out
 
 
 def _background_color(arr: "np.ndarray") -> "np.ndarray":

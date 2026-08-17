@@ -81,6 +81,10 @@ _MOSAIC_MIN_FIT    = 0.55     # share of NON-EMPTY cells that must fit solid-or-
 # coverage one is what keeps this inert on covers with no mosaic/circles (capa4, capa6).
 _GRID_SHADOW_COV   = 0.40     # this share of the block is owned by a measured pass
 _GRID_SHADOW_MATCH = 0.40     # …and it matches the original on less of what still shows
+
+# Photographic paper margin (capa5). Thin on ALL sides and far from the interior colour.
+_MARGIN_MAX_FRAC = 0.03       # a band wider than this is the design's own background
+_MARGIN_MIN_DIST = 100        # RGB distance from what lies just inside the band
 # Hough's Canny runs on luminance, so a high-colour/low-luma edge (red on dark:
 # ΔRGB huge, Δgray only ~95) needs a lower threshold than the default 100 to
 # register. Phantoms this admits are dropped by the non-bg disk filter.
@@ -185,6 +189,8 @@ def analyze_image(
     hatch      = _detect_hatch(arr, colors, w_px, h_px, w_cm, h_cm)
     regions    = _drop_concentric_noise(regions + mosaic + circles + hatch)
     regions    = _drop_shadowed_grid(regions, arr, colors, w_px, h_px, w_cm, h_cm)
+    # The photographed poster's paper surround, drawn LAST so it trims the artwork's edge.
+    regions   += _detect_photo_margin(arr, colors, w_px, h_px, w_cm, h_cm)
     # Op-art circle lattice (tiled circles + accent lenses): when detected it IS the whole
     # cover, so it REPLACES the grid/circle guesses. Conservative trigger (see the detector)
     # → fires only on a genuine text-less lattice, so the other 6 covers are untouched.
@@ -682,6 +688,64 @@ def _mosaic_cells(arr, pal, colors, bg_i, discs, covered, P, phx, phy,
             cells[(i, j)] = ("diag", halves)
 
     return cells
+
+
+def _detect_photo_margin(
+    arr: "np.ndarray", colors: list,
+    w_px: int, h_px: int, w_cm: float, h_cm: float,
+) -> list:
+    """The pale surround of a PHOTOGRAPHED poster (capa5) → four thin frame rectangles.
+
+    The North Star is "identical to the IMAGE", and capa5's image is a photo whose paper
+    margin shows on all four sides — we were painting artwork out to the edge instead, the
+    single biggest error left on that cover. Signature that separates a real margin from a
+    design that simply bleeds off: the band is THIN on ALL FOUR sides and CONTRASTS hard
+    with what lies inside. A bled design either reports a wide "margin" (that is just its
+    background) or a small distance (it is continuous with the interior) — measured on all
+    7 covers, only capa5 satisfies both, and each of the other six fails on one edge or more.
+    """
+    edges = {}
+    for side in ("top", "bottom", "left", "right"):
+        span = h_px if side in ("top", "bottom") else w_px
+        lim = int(_MARGIN_MAX_FRAC * span)
+        if lim < 2:
+            return []
+
+        def line(i):
+            if side == "top":
+                return arr[i, :]
+            if side == "bottom":
+                return arr[h_px - 1 - i, :]
+            if side == "left":
+                return arr[:, i]
+            return arr[:, w_px - 1 - i]
+
+        ref = line(0).astype(float).mean(0)
+        width = 1
+        for i in range(1, lim + 1):
+            ln = line(i).astype(float)
+            if (float(np.sqrt(((ln.mean(0) - ref) ** 2).sum())) > 30
+                    or float(ln.std(0).mean()) > 45):
+                break
+            width = i + 1
+        inner = line(min(width + 3, span - 1)).astype(float).mean(0)
+        if width > lim or float(np.sqrt(((ref - inner) ** 2).sum())) < _MARGIN_MIN_DIST:
+            return []                       # this edge is the design itself, not a margin
+        edges[side] = (width, ref)
+
+    out = []
+    for side, (width, ref) in edges.items():
+        hexc = _snap_to_palette(ref.astype(int), colors)
+        if side in ("top", "bottom"):
+            b = {"x": 0.0, "y": (h_cm - width / h_px * h_cm) if side == "top" else 0.0,
+                 "w": w_cm, "h": round(width / h_px * h_cm, 3)}
+        else:
+            b = {"x": 0.0 if side == "left" else round(w_cm - width / w_px * w_cm, 3),
+                 "y": 0.0, "w": round(width / w_px * w_cm, 3), "h": h_cm}
+        b = {k: round(v, 3) for k, v in b.items()}
+        out.append({"color_hex": hexc, "shape_type": "rectangle", "bbox_cm": b,
+                    "area_pct": round(b["w"] * b["h"] / (w_cm * h_cm), 4), "source": "margin"})
+    return out
 
 
 def _drop_shadowed_grid(

@@ -4,8 +4,9 @@
 > **como ele se corrige sozinho**, **como medimos**, e **onde estão os limites reais**.
 > Escrito para quem quer entender o projeto de ponta a ponta, não só rodar.
 >
-> Última reescrita: 2026-08-06. Substitui a versão de julho, que descrevia o SSIM como
-> juiz — isso deixou de valer quando o **Score** entrou.
+> Última reescrita: **2026-08-18** (branch `new_covers`). A versão anterior descrevia o
+> sistema antes da **Fase 6** — um detector por forma e um juiz cego a texto. As duas coisas
+> mudaram; ver §3 e §4.
 
 ---
 
@@ -58,26 +59,47 @@ Duas regras governam o loop inteiro:
 
 ```
 imagem
-  → ocr_extractor.py     EasyOCR + medição de TINTA: bbox, baseline, tamanho, peso, cor.
-                         Roda PRIMEIRO — entrega as caixas de texto ao mapa de layout.
-  → image_analyzer.py    CV: paleta k-means, grade (Sobel + snap de cor), diagonais,
-                         círculos (Hough), setores de coroa, mosaico, margem de foto.
-                         A grade MASCARA as caixas do OCR antes da projeção Sobel, senão
-                         letra grande no meio da arte vira linha de grade falsa.
-  → pattern_detector.py  repetição/simetria → \foreach
-  → font_matcher.py      família/peso (peso vem do stroke_ratio medido)
-  → cover_assembler.py   ORQUESTRA a ordem (OCR→CV) e junta tudo → analysis.json
-  → tikz_generator.py    JSON → TikZ determinístico (sem LLM)
-  → replicate_cover.py   LuaLaTeX ×2 → PDF → PNG → compara → LOOP de correção
-  → visual_comparator.py métricas + mapa de diff + manchas de resíduo
-  → calibrator.py        mede a tinta do render vs original → correção por elemento
+  → ocr_extractor.py       EasyOCR + medição de TINTA: bbox, baseline, tamanho, peso, cor.
+                           Roda PRIMEIRO — entrega as caixas de texto a todo o resto.
+  → structural_reader.py   O LEITOR GENÉRICO (Fase 6). Quantiza na paleta → componentes
+                           conexos por cor → escolhe o primitivo que melhor EXPLICA os
+                           pixels (IoU) → separa blobs que nenhum primitivo explica.
+  → image_analyzer.py      Os DETECTORES (grade, círculos, lattice, mosaico, margem).
+                           Continuam vivos: o portão do estágio 7 escolhe quem entrega.
+  → pattern_detector.py    repetição/simetria → \foreach
+  → font_matcher.py        família/peso (peso vem do stroke_ratio medido)
+  → cover_assembler.py     ORQUESTRA a ordem (OCR→CV) e junta tudo → analysis.json
+  → tikz_generator.py      JSON → TikZ determinístico (sem LLM)
+  → replicate_cover.py     LuaLaTeX ×2 → PDF → PNG → compara → LOOP de correção
+  → visual_comparator.py   métricas + mapa de diff + manchas de resíduo
+  → calibrator.py          mede a tinta do render vs original → correção por elemento
 ```
 
-### Seleção de camadas (confiança MEDIDA)
+### O leitor genérico (Fase 6 — a mudança que mais importou)
 
-Cada detector propõe uma **camada**. Em vez de confiar nele, o sistema **mede**: derruba a
-camada e só mantém a queda se o Score melhorar sem ela. É assim que uma capa sem grade real
-(capa7) se livra da grade que o detector impôs.
+Até 2026-08-16 cada forma tinha seu detector, e cada um foi calibrado até as 7 capas
+originais pararem de regredir. Quando o conjunto foi para 20, **metade das novas falhou**:
+uma grade de quadrados colapsou, um mosaico de triângulos não disparou, uma malha de losangos
+sumiu. Era overfitting num conjunto de treino de 7.
+
+O leitor faz o mesmo trabalho **medindo**: os componentes conexos de cada cor **são** o
+ladrilhamento, seja ele grade, mosaico ou lattice; e para cada um o sistema rasteriza
+retângulo, círculo, elipse, retângulo arredondado e o contorno traçado, ficando com o de
+**maior IoU**. O IoU do vencedor é a confiança, de graça.
+
+Ele não sabe o que é uma grade. Periodicidade e ritmo caem fora dos próprios componentes.
+
+Duas coisas que os pixels sozinhos erram, ambas tratadas: as caixas do OCR são **mascaradas**
+antes de traçar (senão as letras voltam como poliguinhos debaixo das próprias palavras), e
+formas que se **tocam** são separadas por distance transform + watershed.
+
+### Seleção de camadas e de leitor (confiança MEDIDA)
+
+O leitor entra **ao lado** dos detectores, nunca no lugar: o estágio 7 renderiza os dois e
+fica com o melhor (`_select_reader`). Depois, cada camada de detector é derrubada em turno e
+só some se o Score melhorar sem ela (`_select_layers`). É assim que uma capa sem grade real
+(capa7) se livra da grade imposta, e como a capa4 mantém os detectores que ainda a servem
+melhor. **16 de 19 capas passaram a preferir o leitor.**
 
 ---
 
@@ -87,7 +109,8 @@ Autoridade: `visual_comparator.py`.
 
 | métrica | o que é | meta |
 |---|---|---|
-| **`score`** | **`0.30·SSIM + 0.50·content_match + 0.20·content_iou` — o que o loop otimiza** | ≥ 0.95 |
+| **`score`** | **`0.30·SSIM + 0.50·content_effective + 0.20·content_iou` — o que o loop otimiza** | ≥ 0.95 |
+| **`content_effective`** | **o termo de conteúdo: TIPO pelo `text_match` tolerante, o resto pelo casamento estrito, misturados pela fatia de cada parte NO CONTEÚDO** | → 1.0 |
 | `ssim_global` | SSIM skimage | ≥ 0.95 |
 | `content_match` | qualidade SÓ nos pixels de conteúdo (não-fundo) | → 1.0 |
 | `content_iou` | sobreposição das máscaras de conteúdo | → 1.0 |
@@ -99,22 +122,37 @@ Autoridade: `visual_comparator.py`.
 SSIM é ponderado por ÁREA. Uma capa com fundo grande ganha SSIM alto só acertando o fundo.
 capa2 tem SSIM 0.94 e `content_match` 0.03. **Sempre olhe os dois juntos.**
 
-### ⚠️ O ponto cego que NÃO conseguimos fechar
+### O juiz foi medido contra o olho — e ele está melhor do que se pensava
 
-`content_match` é **pontual**: compara pixel com pixel, sem tolerância espacial. Como
-comparamos arte vetorial rasterizada contra foto/scan, toda borda diverge no sub-pixel.
-Traço fino e **curva** são só borda, então são punidos.
+Existe um **banco de provas** (`scratchpad/judge_bench.py`) com os casos em que o usuário deu
+veredicto: vetorizador × detector nas capas 1/3/5, e a capa11 com figura e fundo trocados.
+Uma métrica passa quando ordena o par como a pessoa ordenou.
 
-Consequência medida: na capa3, uma **grade de barras estruturalmente errada** pontuou 0.747
-enquanto o `circle_lattice` **fiel** pontuou 0.611. A métrica premiou o errado.
+| | `score` | `ssim` | `content_match` | casamento de formas |
+|---|---|---|---|---|
+| concordância | **4/4** | 3/4 | 3/4 | 3/4 |
 
-Tentamos três correções e **nenhuma resolveu**:
-- tolerância espacial ±1..3px → continua preferindo a aproximação poligonal;
-- comparação multi-escala → piora (capa3 cai);
-- F1 de posição de borda → também prefere o polígono.
+O Score **acerta os quatro**. O caso que por muito tempo foi citado como prova de juiz
+quebrado — "o lattice fiel da capa3 perde para a grade de barras errada" — era sobre um render
+que o leitor da Fase 6 substituiu; a discordância evaporou junto. **Medição envelhece: re-meça
+antes de argumentar com um número antigo.**
 
-**Regra prática:** onde há curva ou tipo fino, o **olho** é o desempate; o número não é.
-Não gaste outra rodada tentando consertar isso com mais uma métrica de pixel.
+### O defeito que era real: o juiz não via TEXTO
+
+`text_match` — a métrica de tinta tolerante a desalinhamento — era calculada, reportada e
+tinha **peso zero** no Score. Numa capa cujo texto está todo certo ela lia 0.82 enquanto o
+`content_match` lia 0.157.
+
+Ponderar por ÁREA de texto **não** resolve: nessa mesma capa as caixas de texto ocupam 2% da
+página e o tipo é o design inteiro. O que entrou (`_content_split`) pondera pela fatia do
+**conteúdo**: os pixels de conteúdo dentro das caixas vão para a métrica tolerante, o resto
+fica no casamento estrito.
+
+Prova de que não é leniência disfarçada: as capas **sem texto ficaram idênticas ao dígito**, e
+o banco de provas seguiu em 4/4.
+
+⚠️ **Todo mundo subiu de nota, e isso não quer dizer que as capas melhoraram** — o número
+passou a enxergar algo que antes era invisível. Metas antigas precisam ser relidas na escala nova.
 
 ---
 
@@ -122,10 +160,18 @@ Não gaste outra rodada tentando consertar isso com mais uma métrica de pixel.
 
 Tudo é **dado** no `analysis.json`; o renderizador é determinístico.
 
+**Todo primitivo é AUTO-SUFICIENTE: desenha-se a partir dos próprios campos.** Parece óbvio e
+não era: o `triangle` só sabia sua orientação através de uma região PARCEIRA, então um
+triângulo solto caía num canto chutado. Isso sozinho segurava o leitor inteiro — ele
+encontrava os 86 triângulos de um mosaico corretamente e o render saía com metade espelhada.
+
 | primitivo | onde nasceu | observação |
 |---|---|---|
 | retângulo / grade | capa4 | a base |
-| triângulo (diagonal de célula) | capa4 | par de meias-células |
+| **retângulo arredondado** | capa10 | `radius_cm`; raio = metade do lado curto vira um stadium |
+| **elipse** | Fase 6 | o `circle` usava `min(w,h)` e encolhia bbox oblonga em silêncio |
+| triângulo | capa4 | carrega `points_cm` (3 vértices) ou `orientation`; o par de meias-células continua como caminho legado |
+| **texto rotacionado** | capa14 | `rotation_deg` no elemento de texto |
 | círculo / anéis radiais | capa1, capa7 | Hough + bandas de cor |
 | **`annulus_sector`** | capa1 | cunha de coroa. `r_in=0` degenera em fatia de pizza — **o mesmo comando desenha disco, quarto, meio e coroa** |
 | **`circle_lattice`** | capa3 | op-art: círculos em checkerboard + lentes vesica |

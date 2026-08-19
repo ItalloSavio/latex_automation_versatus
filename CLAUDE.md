@@ -3,7 +3,8 @@
 ## Objetivo único (North Star)
 
 **Entrada:** uma imagem de capa (estilo Swiss design — GENÉRICO: qualquer pôster
-Swiss, não só as da Versatus. As 7 capas de teste valem igual.).
+Swiss, não só as da Versatus. As **20** capas de teste valem igual — eram 7 até
+2026-08-16, quando o usuário somou `capa_teste8..20`; **a capa8 ainda não rodou**.)
 **Saída:** um PDF LaTeX/TikZ **visualmente idêntico** à imagem.
 **Autonomia:** o sistema deve iterar sozinho — medir, corrigir, re-renderizar — até
 que a comparação máquina-a-máquina considere original e render idênticos.
@@ -43,17 +44,76 @@ FASE 3  ✅ EXPLORADA — Features/padrões: hachura (bloco sólido) e corte-h c
 FASE 4  ✅ EM USO — Mapa de layout (texto→grade, pad da caixa) + `zone_board.py`
         (de-average do Score: mede erro×área por zona). Relação texto×círculo tentada,
         revertida (teto de renderização de texto).
-FASE 5  ← ATUAL — VLM como PROPONENTE de edits no loop (NÃO protagonista). Detalhe
-        completo em "## VLM — integração (FASE 5)". Fase determinística ESGOTADA
-        e medida: todo gargalo restante (capa1/2/6/7) é o teto de TEXTO → o VLM.
+FASE 5  ✅ FEITO — VLM como PROPONENTE de edits no loop (NÃO protagonista). Detalhe
+        completo em "## VLM — integração (FASE 5)".
+FASE 6  ✅ FEITO (branch `new_covers`, 2026-08-16/18) — a REESCRITA DO LEITOR, forçada
+        pelas 13 capas novas. Detalhe em "## FASE 6". Em 4 passos aprovados pelo usuário:
+        (1) primitivos AUTO-SUFICIENTES, (2) `structural_reader.py` no lugar de um
+        detector por forma, (3) VLM tipografia-primeiro, (4) o juiz passa a enxergar texto.
 ```
 
-**Ranking real por Score (capa a capa, o que priorizar):** capa4 0.956 ✅ | capa6
-0.926 ✅ | capa7 0.874 ✅ | capa3 0.747 | capa5 0.662 (c/ VLM) | capa1 0.434 | capa2 0.315.
-(capa2 tinha SSIM 0.937 mas Score 0.315 — era só fundo; o Score conta a verdade.)
+**⚠️ A FASE 3 dizia que o teto era "alta-frequência". Estava ERRADO** e a Fase 6 provou:
+o mosaico da capa18 e a malha da capa16 são alta-frequência e renderizam bem. O teto era
+o `triangle` não conseguir carregar a própria orientação. Ver "## FASE 6".
 
-**Régua de "pronto":** content_match ≥ 0.85 E o olho aprova no `review_board.py`.
-O olho é reforço/desempate; content_match é o juiz primário (determinístico).
+**Ranking por Score (2026-08-18, escala NOVA — ver "O juiz"):** capa6 0.943 | capa7 0.925 |
+capa4 0.968 | capa12 0.935 | capa9 0.930 | capa13 0.916 | capa11 0.907 | capa16 0.890 |
+capa19 0.870 | capa17 0.840 | capa1 0.817 | capa20 0.818 | capa5 0.777 | capa3 0.715 |
+capa10 0.792 | capa18 0.694 | capa14 0.595 | capa15 0.581 | capa2 0.566.
+
+**Régua de "pronto":** content ≥ 0.85 E o olho aprova no `review_board.py`.
+O olho é reforço/desempate; a métrica é o juiz primário (determinístico).
+
+## FASE 6 — o leitor genérico (a mudança mais importante do projeto)
+
+**O que forçou:** o usuário somou 13 capas. Na 1ª rodada **6 das 12 falharam por PRODUÇÃO**
+(o desenho já saía errado, antes de qualquer medição): capa13 é uma grade de quadrados e
+colapsou, capa18 é mosaico de triângulos e o `_detect_mosaic` **nem disparou**, capa16 são
+losangos e nada pegou. Diagnóstico: **os detectores estavam overfitados nas 7 originais** —
+guardas conservadoras calibradas pra não regredir as antigas barravam os casos novos legítimos.
+
+**A prova que fechou o diagnóstico (capa13):** medi a estrutura verdadeira com componentes
+conexos (~15 linhas) e mandei pro MESMO renderizador, MESMO vocabulário, MESMO texto do OCR.
+**0.490 → 0.890.** O renderizador não era o gargalo; o vocabulário não era o gargalo; **o
+leitor era.** A causa exata na capa13: a projeção Sobel achou 5 das 8 bordas verticais
+(perdeu as bordas ESQUERDAS dos quadrados 2-4) → cada célula ficava montada sobre um vão → a
+cor mediana virava CINZA; e o corte `h_px*0.73` cortava a fileira de baixo. De quebra, os
+cinzas inventados eram **acrescentados ao `colors`** com coverage 0.0 — a análise envenenava
+a própria paleta.
+
+**Passo 1 — primitivos AUTO-SUFICIENTES (`tikz_generator`).** Um `triangle` agora carrega
+`points_cm` (3 vértices) ou `orientation` (ul/ur/bl/lr), e é EXCLUÍDO do pareamento (senão
+seria desenhado 2×: sozinho e pelo par). Novos: `ellipse` (o `circle` usava `min(w,h)` e
+encolhia bbox oblonga), `rounded_rect` (+`radius_cm`), e `rotation_deg` no texto (o guard de
+overflow é pulado pra texto rotacionado — ele mede contra a borda direita, que só limita
+texto horizontal). **Aditivo: 25/25 saídas TikZ byte-idênticas.**
+⚠️ **Este era o bloqueio real.** O triângulo solto caía num canto CHUTADO: o leitor achava
+os 86 triângulos da capa18 CORRETAMENTE e o render dava 0.217, metade espelhados.
+
+**Passo 2 — `structural_reader.py`: UM leitor no lugar de um detector por forma.**
+```
+quantiza na paleta medida
+  → componentes conexos por cor        (isso JÁ É o ladrilhamento, seja qual for a forma)
+  → para cada componente, o primitivo que melhor EXPLICA os pixels (IoU): rasteriza
+    retângulo/círculo/elipse/rounded_rect/contorno traçado e mede
+  → separa (distance transform + watershed) o blob que NENHUM primitivo explica (IoU<0.90),
+    e só mantém a separação se as partes explicam melhor
+```
+Medir vence a assinatura de preenchimento que substituiu: 0.5 podia ser triângulo ou meia-lua,
+0.785 podia ser círculo ou quadrado arredondado. **O IoU do vencedor É a confiança.**
+Duas coisas que os pixels sozinhos erram, ambas tratadas: **TEXTO** (as caixas do OCR são
+mascaradas antes de traçar, senão as letras voltam como poliguinhos DEBAIXO das palavras que a
+camada de texto desenha) e **formas que se TOCAM** (os círculos brancos da capa11).
+Fiado como `_select_reader` no estágio 7 do `replicate_cover`, **AO LADO** dos detectores:
+renderiza os dois e fica com o melhor. **16 de 19 melhoraram; nas outras 3 o portão mantém
+os detectores.** Média de Score 0.654 → 0.755.
+
+**Passo 3 — VLM tipografia-primeiro.** Ops novos `text.rotate` e `text.weight` (o prompt
+mandava julgar PESO e não existia op pra isso), ambos julgados **pela caixa que mudou** — o
+mesmo roteamento que já foi necessário 4×. `region.add` valida a forma contra `_ADD_SHAPES`.
+Prompt reenquadrado: o leitor cuida da geometria, então pese TIPO primeiro.
+
+**Passo 4 — o juiz passa a enxergar texto. E aqui eu estava ERRADO, ver "O juiz".**
 
 ## Pipeline
 
@@ -61,6 +121,8 @@ O olho é reforço/desempate; content_match é o juiz primário (determinístico
 imagem
   → ocr_extractor.py     EasyOCR + medição de TINTA: bbox, baseline, tamanho, peso, cor
                          (roda PRIMEIRO — dá as caixas de texto ao MAPA DE LAYOUT)
+  → structural_reader.py LEITOR GENÉRICO (Fase 6) — componentes conexos → primitivo por IoU.
+                         Roda AO LADO do image_analyzer; o portão medido escolhe (estágio 7)
   → image_analyzer.py    CV: paleta k-means, grade (Sobel + snap de cor), diagonais,
                          círculos (Hough). A grade MASCARA as caixas de texto do OCR
                          antes da projeção Sobel → letras não viram linhas de grade.
@@ -355,11 +417,45 @@ mede) e mantém se melhor. Ressalva dura: identificar ≠ ter o ARQUIVO — só 
 se a fonte estiver instalada/licenciada; senão, substituto CASADO (não o default cego) +
 um `font.gap` pro dev instalar a real. Mesmo padrão propor→gatear→fila. NÃO implementado.
 
+## O juiz — e a hipótese que NÃO sobreviveu à medição (2026-08-18)
+
+Eu afirmei que o juiz estava quebrado e ia trocar o `content_match` por casamento de formas.
+Construí um **banco de provas** (`scratchpad/judge_bench.py`) com os casos em que o usuário
+já deu veredicto — vetorizador × detector em capa1/3/5, e capa11 com figura/fundo trocados:
+
+| | `score` | `ssim` | `content_match` | `structural` (a proposta) |
+|---|---|---|---|---|
+| concordância com o olho | **4/4** | 3/4 | 3/4 | 3/4 |
+
+**O Score atual acerta 4/4. NÃO reescrever o `content_match`.** A evidência que eu vinha
+citando — "o lattice fiel da capa3 dá 0.611 e a grade de barras errada dá 0.747" — era sobre
+um render que **não existe mais**: o leitor da Fase 6 levou a capa3 a 0.715 e a discordância
+evaporou. **Medição velha VENCE; re-medir antes de argumentar.**
+
+**O defeito real, esse sim medido:** `text_match` era calculado, reportado e tinha **peso
+ZERO** no Score. Na capa2 ele vale **0.82** enquanto o `content_match` vale 0.157.
+
+**E a correção óbvia NÃO funciona — também medida:** ponderar `text_match` pela ÁREA de texto
+falha justo onde é preciso — as caixas da capa2 são **2.0% da página** (capa10 30.5%, capa15
+26.3%) e o tipo é o design inteiro dela.
+
+**O que entrou (`_content_split`):** os pixels de CONTEÚDO dentro das caixas de texto vão pro
+`text_match` tolerante, o resto fica no casamento estrito, misturados pela fatia de cada parte
+**no conteúdo** (nunca na página). Critério de aceite cumprido: o banco de provas **manteve
+4/4**. As duas capas SEM texto (capa3, capa11) ficaram **exatamente idênticas** — prova de que
+não é leniência global. Média 0.767 → 0.813.
+⚠️ **Todo mundo subiu, e isso NÃO quer dizer que as capas melhoraram** — o número passou a
+enxergar fidelidade tipográfica, que era invisível. A meta de 0.90 tem que ser lida na escala nova.
+⚠️ **Dívida criada:** `_TEXT_ADD_SCORE_TOL = 0.02` existe pela justificativa "o Score cego cai
+~0.005 mesmo em texto bem posto". O Score **não é mais cego**, então essa folga ficou frouxa e
+deve ser reapertada (é outra medição, não mexer no escuro).
+
 ## Métricas (autoridade: `visual_comparator.py`)
 
 | Métrica | O que é | Meta |
 |---|---|---|
-| **`score`** | **`0.30·SSIM + 0.50·content_match + 0.20·content_iou` — o que o LOOP otimiza** | ≥ 0.95 |
+| **`score`** | **`0.30·SSIM + 0.50·content_effective + 0.20·content_iou` — o que o LOOP otimiza** | ≥ 0.95 |
+| **`content_effective`** | **o termo de conteúdo do Score: TIPO medido pelo `text_match` tolerante, o RESTO pelo casamento estrito, misturados pela fatia de cada parte NO CONTEÚDO (`_content_split`)** | → 1.0 |
 | `ssim_global` | SSIM skimage, `channel_axis=2, data_range=255` | ≥ 0.95 |
 | `content_match` | qualidade SÓ nos pixels de conteúdo (não-fundo) | → 1.0 |
 | `content_iou` | sobreposição das máscaras de conteúdo (original vs render) | → 1.0 |
@@ -385,17 +481,31 @@ Diagnóstico (ad-hoc): **SSIM por zona** — gráfica (acima de y=8.63cm) vs tex
 **Teto realista do SSIM:** ~0.95. Acima disso é ruído de sub-pixel (vetor rasterizado
 vs foto). Mas o SSIM alto NÃO garante fidelidade — cruzar sempre com o content_match.
 
-## Estado atual das 7 capas (SSIM / content_match)
+## Estado atual das 20 capas
 
-| capa | SSIM | content | situação |
-|---|---|---|---|
-| capa4 | 0.924 | 0.965 | ✅ referência (grade+diagonais+texto) |
-| capa7 | 0.925 | 0.848 | ✅ traffic-light de círculos (era 0.872/0.536 — bug do \foreach) |
-| capa6 | 0.890 | 0.913 | ✅ APROVADA — os 4 blocos de texto entraram via `snap_text_adds` (era 0.897/0.920) |
-| capa3 | 0.472 | 0.609 | ✅ OP-ART REAL (círculos+lentes) via `circle_lattice`; olho > métrica (a grade de barras dava 0.747 mas ERRADA) |
-| capa5 | 0.610 | 0.615 | ⏳ Score 0.662 c/ VLM (triângulos+"grafik"); hachura fina = teto (revertida) |
-| capa2 | 0.936 | 0.027 | ⚠️ VLM reconstruiu o texto (4 text.add + 5 string); Score cego (fundo 98%) |
-| capa1 | 0.749 | 0.26  | ⏳ DIREITA limpa (Versatus Logo + título + rodapé, cirurgia manual); mosaico ESQ = teto (deferido, isolado). Aberto: tamanhos/alinhamentos do texto (ver fidelidade>conteúdo) |
+⚠️ Score na escala NOVA (pós-`_content_split`, ver "O juiz"). **capa8 nunca rodou.**
+
+| capa | Score | situação |
+|---|---|---|
+| capa4 | 0.968 | ✅ referência (grade+diagonais+texto). É a única onde os DETECTORES ainda ganham do leitor |
+| capa6 | 0.943 | ✅ leitor + 3 blocos de texto do VLM |
+| capa12 | 0.935 | ✅ círculos sobrepostos (a transparência sai chapada e mesmo assim casa) |
+| capa9 | 0.930 | ✅ array de bolinhas com raio em rampa — o leitor pega sem detector novo |
+| capa7 | 0.925 | ✅ (era 0.864 antes da Fase 6) |
+| capa13 | 0.916 | ✅ grade 4×4 + círculo. **0.490 antes da Fase 6** |
+| capa11 | 0.907 | ✅ lattice de círculos; a INVERSÃO figura/fundo sumiu |
+| capa16 | 0.890 | ✅ malha de losangos. **0.406 antes da Fase 6** |
+| capa19 | 0.870 | ✅ polígono + tipografia; `text.weight` entrou aqui (box 0.810→0.914) |
+| capa17 | 0.840 | ⏳ "1950" ainda sai truncado; Hough alucina anéis sobre a tipografia |
+| capa20 | 0.818 | ⏳ quartos de disco fragmentados |
+| capa1 | 0.817 | ⏳ anel + mosaico ok. **NUNCA rodar `plain`** (sobrescreve a cirurgia manual: 0.796→0.603) |
+| capa10 | 0.792 | ⏳ barras-ANEL viram tiras serrilhadas — ver Reversões, o conserto é JUNTAR AS TIRAS |
+| capa5 | 0.777 | ⏳ hachura = teto de contraste (medido 2×) |
+| capa3 | 0.715 | ✅ op-art real; sem texto, então o juiz novo não a moveu |
+| capa18 | 0.694 | ⏳ mosaico de triângulos REAL (era 0.411); resta um borrão rosa |
+| capa14 | 0.595 | ❌ tipografia VERTICAL ausente — o VLM propõe `logo.mark` em vez de `text.rotate` |
+| capa15 | 0.581 | ❌ todas as palavras certas, TAMANHOS errados (92% do conteúdo é texto) |
+| capa2 | 0.566 | ⏳ texto reconstruído pelo VLM; 38% do conteúdo é texto |
 
 **Falta na capa7 (0.874→0.95):** o falso "alvo" de círculos concêntricos sobre o
 texto "BRAUN" (Hough alucina anéis na tipografia), o círculo escuro grande do topo-
@@ -627,9 +737,19 @@ bloquear. Ferramenta em `scratchpad/vectorize.py` + `render_analysis.py`.
   tentei um dedup "descartar célula de grid sob círculo de mesma cor" — REGREDIU
   (0.668→0.515), e o render regredido expôs que os círculos iam pro lugar errado → o
   culpado não era o grid, era o `\foreach`. A reversão apontou o bug real.
+- **Preencher OCLUSÃO no leitor (capa10, 2026-08-17):** o laranja da capa10 é um ANEL em
+  volta do vermelho (fill 0.68 do bbox), então chega como tiras laterais que nenhum primitivo
+  descreve e renderiza serrilhado. Hipótese: preencher o buraco quando outra COR o ocupa
+  (≠ quando é o FUNDO, aí é anel de verdade) e deixar o vermelho repintar por cima. **Não
+  alcançou a capa10** — as tiras são componentes SEPARADOS, não anel fechado, não há buraco —
+  e custou capa16 0.879→0.870 e capa18 0.682→0.662 (juntou peças que devem ficar separadas).
+  Revertido, com a nota no `structural_reader`. **O conserto tem que JUNTAR AS TIRAS.**
+  `rounded_rect` está fiado no leitor e hoje é INERTE (nenhuma capa o escolhe).
 - **Mosaico fino de triângulos (capa1):** detector funcionava mas REGREDIU o SSIM
   (alta-frequência pune desalinhamento sub-pixel, igual texto pequeno). Revertido.
-  → VLM ou teto aceito, não reconstrução determinística.
+  ⚠️ **A LIÇÃO ENVELHECEU:** a Fase 6 mostrou que alta-frequência NÃO era o teto — o mosaico
+  da capa18 (86 triângulos) e a malha da capa16 renderizam bem quando o primitivo carrega a
+  própria orientação. O que travava era expressividade, não frequência.
 - **Blend fallback (média chapada p/ hachura/mosaico, primitivo NOVO `shape=blend`):**
   a hipótese era que um campo de alta-freq. mal-renderizado ficaria melhor como sua MÉDIA
   medida (retângulo sólido, cor medida do original → registrada na paleta, sem penalidade
@@ -721,6 +841,16 @@ causa de "está estranho" sem chutar), `render_analysis.py` (renderiza+mede qual
 com a máquina real), `vectorize.py` (o vetorizador rejeitado, guardado como rede de segurança)
 e **`merge_capa1.py`, que é NECESSÁRIO para regenerar a capa1** — ela renderiza de cache
 porque o OCR dela é não-determinístico, e sem esse script ela não é reproduzível.
+
+**`run_batch.py` — rodar várias capas com PROGRESSO VISÍVEL.** Uma rodada leva dezenas de
+minutos e era invisível até terminar. Ele escreve `output/replicated/_run_status.md` a cada
+capa (barra, fila, tempo, ETA, média parcial) — dá pra deixar aberto no editor:
+```bash
+python automation/tools/run_batch.py refresh=5,7 vlm=1,2,6 plain=3,9,10
+#   plain = só determinístico · vlm = reusa o cache (sem API) · refresh = chama o Gemini
+```
+Ele **RECUSA rodar a capa1 em `plain`** — foi o erro que derrubou o entregável dela de
+0.796 pra 0.603.
 
 **`content_match_tol` é OPT-IN** (`SWISS_TOL_METRIC=1`): custa 0.2–1.0s por comparação e o
 Score ainda não a consome, então ligada por padrão seria desperdício puro no loop do gate.

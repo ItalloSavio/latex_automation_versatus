@@ -34,8 +34,12 @@ _GROUND_COLOR_TOL = 70       # a proposed hex must be within this RGB dist of th
 _ACCEPT_EPS       = 1e-3     # primary metric must rise by at least this to accept
 _GUARD_EPS        = 5e-3     # a guarded metric may not fall by more than this
 _PT_PER_CM        = 72.0 / 2.54                 # points per cm (for text.add font size)
-_TEXT_OPS = {"text.string", "text.move", "text.hscale", "text.add", "text.remove", "text.size"}
+_TEXT_OPS = {"text.string", "text.move", "text.hscale", "text.add", "text.remove", "text.size",
+             "text.rotate", "text.weight"}
+_TEXT_WEIGHTS = ("regular", "bold")
 _TEXT_PT_RANGE = (4.0, 200.0)   # a font outside this isn't type, it's a mis-measurement
+# Shapes region.add may name. Each one draws itself from its own fields (see tikz_generator).
+_ADD_SHAPES = {"polygon", "triangle", "rectangle", "rounded_rect", "circle", "ellipse", "hatch"}
 
 # Em ratios for sizing a font from MEASURED ink height (same model as ocr_extractor):
 # ascender→baseline ≈ 0.735·em; ascender→descender ≈ 0.945·em. Which one applies is decided
@@ -490,17 +494,31 @@ def ground_edit(analysis: dict, edit: dict) -> "tuple[bool, str]":
             v = edit.get("value")
             if not isinstance(v, (int, float)) or not (_TEXT_PT_RANGE[0] <= v <= _TEXT_PT_RANGE[1]):
                 return False, f"font_size_pt fora de {_TEXT_PT_RANGE}"
+        if op == "text.rotate":
+            v = edit.get("value")
+            if not isinstance(v, (int, float)) or not (-180.0 <= v <= 180.0):
+                return False, "rotation_deg fora de [-180, 180]"
+        if op == "text.weight" and edit.get("value") not in _TEXT_WEIGHTS:
+            return False, f"weight fora de {_TEXT_WEIGHTS}"
         return True, "ok"
 
     if op == "region.add":
         if not _color_near_palette(edit.get("hex", ""), analysis):
             return False, f"cor {edit.get('hex')} fora da paleta"
-        if edit.get("shape") == "polygon":
+        shape = edit.get("shape", "polygon")
+        if shape not in _ADD_SHAPES:
+            return False, f"forma '{shape}' fora do vocabulario"
+        if shape in ("polygon", "triangle"):
             pts = edit.get("points_cm", [])
-            if len(pts) < 3:
-                return False, "polígono < 3 vértices"
+            need = 3 if shape == "triangle" else 3
+            if len(pts) < need:
+                return False, f"{shape} com {len(pts)} vertices (< {need})"
+            if shape == "triangle" and len(pts) != 3:
+                return False, "triangulo precisa de exatamente 3 vertices"
             if any(not (0 <= x <= W and 0 <= y <= H) for x, y in pts):
                 return False, "vértice fora do canvas"
+        if shape in ("rectangle", "rounded_rect", "circle", "ellipse") and not edit.get("bbox_cm"):
+            return False, f"{shape} sem bbox_cm"
         if edit.get("shape") == "hatch":
             bh = edit.get("base_hex")
             if bh and not _color_near_palette(bh, analysis):
@@ -634,6 +652,16 @@ def apply_edit(analysis: dict, edit: dict) -> "dict | None":
             # out absurd (capa1's title arrived as ONE 126pt element, "versatus" at 72pt).
             # The VLM can SEE the right size; before this it could only move or restring.
             el["font_size_pt"] = float(edit["value"])
+        elif op == "text.weight":
+            # Weight is measured from stroke thickness, which small or condensed type fools.
+            # Swiss layouts lean on weight contrast (bold header, regular body), so getting it
+            # wrong reads as a different design even when every word is right.
+            el["weight_hint"] = edit["value"]
+        elif op == "text.rotate":
+            # Vertical/angled type (capa14's "SWISS ... POSTERS" runs bottom-to-top). The OCR
+            # reads horizontally, so rotated type either arrives garbled or not at all; the
+            # renderer has carried `rotation_deg` since the primitives were made self-contained.
+            el["rotation_deg"] = float(edit["value"])
         return a
 
     regions = a.get("regions", [])
@@ -661,7 +689,8 @@ def apply_edit(analysis: dict, edit: dict) -> "dict | None":
                "source": "vlm", "_id": f"v{len(regions)}", "bbox_cm": bbox}
         if pts:
             new["points_cm"] = pts
-        for k in ("base_hex", "period_cm", "line_width_pt", "direction"):  # hatch params
+        for k in ("base_hex", "period_cm", "line_width_pt", "direction",   # hatch params
+                  "radius_cm", "orientation"):        # rounded_rect corner / triangle corner
             if k in edit:
                 new[k] = edit[k]
         regions.append(new)
@@ -730,7 +759,7 @@ def _improved(before: dict, after: dict, op: str) -> "tuple[bool, str]":
         ok = local >= _TEXT_ADD_MIN and sa >= sb - _TEXT_ADD_SCORE_TOL
         return ok, f"box_local {local:.3f} x{n_added} (score {sb:.4f}->{sa:.4f})"
 
-    if op == "text.size":
+    if op in ("text.size", "text.rotate", "text.weight"):
         # Judge it on the box that actually CHANGED, not on the mean. text_match averages
         # every OCR box, so resizing one element barely moves it (measured on capa1: seven
         # proposals, all reported 0.6132→0.6132 and all rejected) — the same dilution that

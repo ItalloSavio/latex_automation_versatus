@@ -262,6 +262,7 @@ def replicate(
     # keep it dropped only if the Score improves without it. This is how a cover
     # with no real grid (capa7) can shed the grid the detector wrongly imposed.
     _step(7, "Selecao de camadas (mede a contribuicao de cada detector)")
+    analysis = _select_reader(analysis, image_path, _score_of)
     analysis = _select_layers(analysis, _score_of)
 
     # ── Stages 8–11: self-correcting loop ─────────────────────────────────
@@ -522,6 +523,39 @@ def _write_tex_wrapper(
         r"\end{document}" + "\n"
     )
     tex_path.write_text(content, encoding="utf-8")
+
+
+def _select_reader(analysis: dict, image_path, score_fn) -> dict:
+    """Choose between the detector stack and the generic structural reader — by MEASURING.
+
+    Same discipline as _select_layers, and the same reason: a detector can be confidently
+    wrong but a render cannot lie. The reader is offered BESIDE the detectors, never in
+    place of them, so a cover the detectors already nail (capa4) keeps what works.
+
+    The reader replaces only the SHAPES. Text stays exactly as the OCR read it, which is
+    also why the reader masks the OCR boxes before tracing — otherwise letterforms come
+    back as little polygons underneath the very words the text layer draws on top.
+    """
+    try:
+        reader = _load("structural_reader")
+        regions = reader.read(image_path, analysis)
+    except Exception as exc:                       # a reader failure must never break a run
+        _log(f"  leitor estrutural indisponivel ({type(exc).__name__}: {exc})")
+        return analysis
+    if not regions:
+        _log("  leitor estrutural: recusou (imagem nao decompoe) → detectores")
+        return analysis
+
+    base = score_fn(analysis)
+    cand = score_fn({**analysis, "regions": regions})
+    s_det = base["score"] if base else -1.0
+    s_rd  = cand["score"] if cand else -1.0
+    if s_rd > s_det + 1e-3:
+        _log(f"  leitor estrutural={s_rd:.4f} > detectores={s_det:.4f} → LEITOR "
+             f"({len(regions)} pecas)")
+        return {**analysis, "regions": regions}
+    _log(f"  leitor estrutural={s_rd:.4f} <= detectores={s_det:.4f} → detectores")
+    return analysis
 
 
 def _select_layers(analysis: dict, score_fn) -> dict:

@@ -7,10 +7,22 @@ LuaLaTeX-ready \\newcommand{\\RenderDynamicCover}{...} block with no LLM
 involvement. Every coordinate and color comes from the JSON measurements.
 
 Shape dispatch:
-  rectangle → \\fill[c] (x,y) rectangle (x+w,y+h)
-  circle    → \\fill[c] (cx,cy) circle (r)
-  triangle  → \\filldraw with 3 corner points (orientation heuristic)
-  polygon   → rectangle fallback (bbox approximation)
+  rectangle      → \\fill[c] (x,y) rectangle (x+w,y+h)
+  rounded_rect   → same, with `rounded corners=radius_cm`
+  circle         → \\fill[c] (cx,cy) circle (r)   [r = min(w,h)/2]
+  ellipse        → \\fill[c] (cx,cy) ellipse (w/2 and h/2)
+  triangle       → three vertices from `points_cm`, or the bbox corner named by
+                   `orientation` (ul/ur/bl/lr); a triangle carrying NEITHER is a grid
+                   diagonal CELL and takes its orientation from its partner half
+  polygon        → `points_cm` vertices; bbox rectangle only when no vertices given
+  annulus_sector → ring wedge (r_in=0 degenerates to a pie slice)
+  circle_lattice → tiled op-art circles + accent lenses
+  hatch          → optional base fill + \\foreach of parallel lines
+
+Text carries `rotation_deg` for vertical/angled type.
+
+Every shape above is SELF-CONTAINED: it draws from its own fields alone. The one
+exception is the unoriented triangle, kept for the grid's paired diagonal cells.
 
 Pattern dispatch:
   regions tagged with pattern=grid/v_stripes → \\foreach loop
@@ -289,9 +301,13 @@ def _build_regions(
         consumed.update(idxs)
 
     # ── Pass 2: detect overlapping triangle pairs ───────────────────────────
+    # A SELF-CONTAINED triangle (explicit vertices, or a named corner of its own bbox) is
+    # excluded from pairing: it already knows its orientation, so letting it be someone's
+    # partner would draw it twice — once by itself, once by the pair.
     tri_indices = [
         i for i, r in enumerate(regions)
         if r.get("shape_type") == "triangle" and i not in consumed
+        and not _tri_self_described(r)
     ]
     tri_pairs: dict[int, int] = {}  # index → partner index
     for i in range(len(tri_indices)):
@@ -319,6 +335,12 @@ def _build_regions(
         elif shape == "circle":
             lines.append(_cmd_circle(col_name, bx))
 
+        elif shape == "ellipse":
+            lines.append(_cmd_ellipse(col_name, bx))
+
+        elif shape == "rounded_rect":
+            lines.append(_cmd_rounded_rect(col_name, bx, r.get("radius_cm", 0.0)))
+
         elif shape == "annulus_sector":      # one coloured wedge of a ring (see _cmd_*)
             cx = bx["x"] + bx["w"] / 2
             cy = bx["y"] + bx["h"] / 2
@@ -341,6 +363,17 @@ def _build_regions(
                                     r.get("line_width_pt", 0.8), r.get("direction", "v")))
 
         elif shape == "triangle":
+            # Self-contained first: a triangle that carries its own vertices or corner name
+            # draws itself. The paired path below exists for the grid's diagonal CELLS, which
+            # only know their orientation from the partner half — that dependency is why a
+            # lone triangle used to land on a guessed corner (capa18: 86 of them, half mirrored).
+            if _tri_self_described(r):
+                pts = r.get("points_cm")
+                if pts and len(pts) == 3:
+                    lines.append(_cmd_polygon(col_name, pts))
+                else:
+                    lines.append(_TRI_CMD[r["orientation"]](col_name, bx))
+                continue
             if i in tri_done:
                 continue
             partner = tri_pairs.get(i)
@@ -500,6 +533,40 @@ def _cmd_triangle_bl(color: str, b: dict) -> str:
     )
 
 
+# The four right triangles of a box, named by the corner they FILL (TikZ y-up).
+_TRI_CMD = {
+    "ul": _cmd_triangle_ul,
+    "lr": _cmd_triangle_lr,
+    "ur": _cmd_triangle_ur,
+    "bl": _cmd_triangle_bl,
+}
+
+
+def _tri_self_described(r: dict) -> bool:
+    """True when a triangle carries everything needed to draw it — three explicit vertices,
+    or the name of the bbox corner it fills. Such a triangle never needs a partner region."""
+    pts = r.get("points_cm")
+    return bool((pts and len(pts) == 3) or r.get("orientation") in _TRI_CMD)
+
+
+def _cmd_ellipse(color: str, b: dict) -> str:
+    """Ellipse inscribed in the bbox. `circle` uses min(w,h), so an oblong bbox silently
+    shrank to the shorter axis; an ellipse keeps both."""
+    cx, cy = _f(b["x"] + b["w"] / 2), _f(b["y"] + b["h"] / 2)
+    return (f"  \\fill[{_fill_opts(color)}] ({cx},{cy}) "
+            f"ellipse ({_f(b['w']/2)}cm and {_f(b['h']/2)}cm);")
+
+
+def _cmd_rounded_rect(color: str, b: dict, radius_cm: float) -> str:
+    """Rounded-corner / stadium rectangle (capa10's bars). The radius is clamped to half the
+    short side, where the shape degenerates into a stadium."""
+    r = max(0.0, min(float(radius_cm), min(b["w"], b["h"]) / 2))
+    x1, y1 = _f(b["x"]), _f(b["y"])
+    x2, y2 = _f(b["x"] + b["w"]), _f(b["y"] + b["h"])
+    return (f"  \\fill[{_fill_opts(color)}, rounded corners={_f(r)}cm] "
+            f"({x1},{y1}) rectangle ({x2},{y2});")
+
+
 # ─── Text nodes ───────────────────────────────────────────────────────────────
 
 # Two lines only count as "overlapping" (and get pushed apart) when they share
@@ -573,7 +640,10 @@ def _build_text_nodes(texts: list, color_map: dict, bg_hex: str = "FFFFFF",
         _hs   = el.get("hscale", _TEXT_HSCALE)
         _avail = max(0.5, (W - bx["x"]) * 0.99)
         _estw  = len(_raw) * pt * 0.52 / _PT_PER_CM * _hs
-        if _estw > _avail:
+        rot   = float(el.get("rotation_deg", 0.0) or 0.0)
+        # the guard measures against the canvas RIGHT edge, which only bounds horizontal
+        # text — rotated text runs down the other axis and must not be shrunk by it
+        if _estw > _avail and abs(rot) < 1e-6:
             pt = max(6.0, round(pt * _avail / _estw, 1))
         leading = _f(round(pt * 1.2, 1))
         pt_str  = _f(pt)
@@ -615,8 +685,9 @@ def _build_text_nodes(texts: list, color_map: dict, bg_hex: str = "FFFFFF",
         bold = r"\bfseries " if weight == "bold" else " "
 
         hscale = _f(round(hscale_el, 4))
+        rot_opt = f"rotate={_f(rot)}, " if abs(rot) > 1e-6 else ""
         lines.append(
-            f"  \\node[anchor={anchor}, {inner}text={col}] at ({x},{y})"
+            f"  \\node[anchor={anchor}, {rot_opt}{inner}text={col}] at ({x},{y})"
             f"{{\\scalebox{{{hscale}}}[1.0]{{{{\\fontsize{{{pt_str}pt}}{{{leading}pt}}"
             f"\\selectfont{cmd}{bold}{text}}}}}}};"
         )

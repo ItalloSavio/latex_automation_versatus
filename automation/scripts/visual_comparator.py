@@ -138,16 +138,28 @@ def _run_compare(
     # ── 5. Patch hints (failed regions) ──────────────────────────────────
     patch_hints = _build_patch_hints(region_scores)
 
-    score = (_SCORE_W["ssim"]          * ssim_val
-             + _SCORE_W["content_match"] * content_match
-             + _SCORE_W["content_iou"]   * content_iou)
-
     # text_match: the Fase-5 text gate (None when the cover has no text boxes).
     tboxes = _text_boxes_from_analysis(analysis, W, H, orig.shape)
     tmatch = text_match(orig, result, tboxes)
     # per-box ink F1 (aligned with text_elements order) — a text.add is judged on the box
     # it appended (the last one), which the diluted mean can't show.
     tbox_scores = [round(_text_box_f1(orig, result, b), 4) for b in tboxes]
+
+    # The content term scores TYPE with the tolerant metric and everything else strictly,
+    # mixed by each part's share of the CONTENT (see _content_split). Before this the Score
+    # graded type pixel-to-pixel and text_match — which grades it properly — was computed,
+    # reported, and given zero weight.
+    content_eff = content_match
+    if tmatch is not None and tboxes:
+        nontext, tshare = _content_split(orig, result, tboxes)
+        if nontext is None:                      # the design is type all the way through
+            content_eff = tmatch if tshare > 0 else content_match
+        elif tshare > 0:
+            content_eff = (1.0 - tshare) * nontext + tshare * tmatch
+
+    score = (_SCORE_W["ssim"]            * ssim_val
+             + _SCORE_W["content_match"] * content_eff
+             + _SCORE_W["content_iou"]   * content_iou)
 
     return {
         "score":             round(score, 4),
@@ -156,6 +168,7 @@ def _run_compare(
         "ssim_pass":         ssim_val >= thresh,
         "ssim_threshold":    thresh,
         "content_match":     round(content_match, 4),
+        "content_effective": round(content_eff, 4),   # what the Score actually uses
         "content_match_tol": round(content_match_tol, 4),   # ±px-tolerant (see the constant)
         "content_iou":       round(content_iou, 4),
         "text_match":        round(tmatch, 4) if tmatch is not None else None,
@@ -303,6 +316,47 @@ def _background_color(arr: "np.ndarray") -> "np.ndarray":
     q = (arr // 16).reshape(-1, 3)
     vals, counts = np.unique(q, axis=0, return_counts=True)
     return vals[counts.argmax()] * 16 + 8
+
+
+def _content_split(
+    orig: "np.ndarray", result: "np.ndarray",
+    text_boxes_px: "list[tuple[int,int,int,int]]",
+) -> "tuple[float | None, float]":
+    """Split the content pixels into TYPE and everything else.
+
+    `content_match` compares pixel to pixel. That is the right test for a flat shape and the
+    wrong one for type: a glyph is nearly all edge, so a sub-pixel offset zeroes it even when
+    the words, the size and the position are right — capa2 renders its text correctly and
+    still scores 0.157. `text_match` already measures type properly (0.82 on the same cover)
+    and carried NO weight in the Score.
+
+    Returns the strict match over NON-text content, plus what share of the content is type,
+    so the caller can score the type part with the tolerant metric and the rest strictly.
+    Weighting is by share of CONTENT, never of the page: capa2's text boxes cover 2% of the
+    page while being essentially the whole design, so page-area weighting would miss exactly
+    the cover that needs this.
+    """
+    import numpy as np  # noqa: PLC0415
+
+    o, r = orig.astype(int), result.astype(int)
+    bg   = _background_color(orig)
+    fg = ((np.sqrt(((o - bg) ** 2).sum(2)) > _CONTENT_BG_DIST)
+          | (np.sqrt(((r - bg) ** 2).sum(2)) > _CONTENT_BG_DIST))
+    n_fg = int(fg.sum())
+    if not n_fg:
+        return None, 0.0
+
+    H, W = fg.shape
+    txt = np.zeros(fg.shape, bool)
+    for (x0, y0, x1, y1) in text_boxes_px or []:
+        txt[max(0, y0):min(H, y1), max(0, x0):min(W, x1)] = True
+
+    share = float((fg & txt).sum()) / n_fg
+    rest  = fg & ~txt
+    if not rest.any():                       # the whole design is type
+        return None, share
+    m = float(np.mean(np.sqrt(((o[rest] - r[rest]) ** 2).sum(1)) < _CONTENT_MATCH_D))
+    return m, share
 
 
 def _text_boxes_from_analysis(

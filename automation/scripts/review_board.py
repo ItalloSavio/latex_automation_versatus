@@ -58,8 +58,14 @@ def _build(nums: "list[int]") -> None:
         )
 
 
-def _metrics(orig, rend) -> "tuple[float, float, float]":
-    """Score + SSIM + content_match via the comparator's own funcs (single source)."""
+def _metrics(orig, rend, analysis=None) -> "tuple[float, float, float]":
+    """Score + SSIM + the content term via the comparator's own funcs (single source).
+
+    `analysis` supplies the OCR text boxes so the content term is the one the Score really
+    uses (`content_effective`: type by the tolerant metric, the rest strict). Without it the
+    board printed the raw pointwise `content_match` and disagreed with the pipeline's own
+    number on every cover that has text — capa8 read 0.889 on the board and 0.9095 in the run.
+    """
     import importlib.util
     import numpy as np
     from skimage.metrics import structural_similarity as ssim
@@ -72,9 +78,21 @@ def _metrics(orig, rend) -> "tuple[float, float, float]":
     r = np.asarray(rend)
     ss     = float(ssim(o, r, channel_axis=2, data_range=255))
     cm, iou, _tol = vc._content_metrics(o, r)
+    ce = cm
+    if analysis:
+        cv = analysis.get("canvas", {})
+        tb = vc._text_boxes_from_analysis(analysis, cv.get("width_cm", 21.0),
+                                          cv.get("height_cm", 29.7), o.shape)
+        tm = vc.text_match(o, r, tb)
+        if tm is not None and tb:
+            nt, share = vc._content_split(o, r, tb)
+            if nt is None:
+                ce = tm if share > 0 else cm
+            elif share > 0:
+                ce = (1.0 - share) * nt + share * tm
     w      = vc._SCORE_W
-    score  = w["ssim"] * ss + w["content_match"] * cm + w["content_iou"] * iou
-    return score, ss, cm
+    score  = w["ssim"] * ss + w["content_match"] * ce + w["content_iou"] * iou
+    return score, ss, ce
 
 
 def build_board(nums: "list[int]") -> "Path | None":
@@ -90,8 +108,16 @@ def build_board(nums: "list[int]") -> "Path | None":
 
         orig = Image.open(orig_p).convert("RGB")
         rend = Image.open(rend_p).convert("RGB").resize(orig.size, Image.LANCZOS)
+        an_p = _OUT / f"capa_teste{n}" / "analysis.json"
+        an = None
+        if an_p.exists():
+            import json
+            try:
+                an = json.loads(an_p.read_text(encoding="utf-8"))
+            except Exception:
+                an = None
         try:
-            score, ss, cm = _metrics(orig, rend)
+            score, ss, cm = _metrics(orig, rend, an)
             label  = f"capa{n}  Score {score:.3f}  SSIM {ss:.3f}  content {cm:.3f}"
             flag   = (0, 200, 0) if cm >= 0.7 else (230, 180, 0) if cm >= 0.4 else (230, 60, 60)
         except Exception as exc:                       # metrics optional

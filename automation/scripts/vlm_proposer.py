@@ -43,6 +43,17 @@ Each edit is one JSON object. Allowed ops and fields (reference elements by thei
                                                                #   arrives absurd (126pt, 72pt).
                                                                #   Compare against the ORIGINAL
                                                                #   and give the real size.
+  {"op":"text.weight",  "id":"t0", "value":"bold"}             # "bold" or "regular". Weight is
+                                                               #   guessed from stroke width and
+                                                               #   small/condensed type fools it;
+                                                               #   Swiss layouts lean on weight
+                                                               #   contrast, so it matters.
+  {"op":"text.rotate",  "id":"t0", "value":90.0}               # ROTATE type (deg, CCW). Swiss
+                                                               #   posters run headlines
+                                                               #   vertically; the OCR reads
+                                                               #   horizontally, so rotated type
+                                                               #   arrives garbled or flat. 90 =
+                                                               #   reads bottom-to-top.
   {"op":"text.remove",  "id":"t3"}                             # DELETE text the OCR invented:
                                                                #   a graphic misread as a glyph
                                                                #   (a ring read as "6"), or a
@@ -54,6 +65,13 @@ Each edit is one JSON object. Allowed ops and fields (reference elements by thei
   {"op":"region.remove","id":"r8"}                             # drop a false shape
   {"op":"region.add",   "shape":"polygon", "hex":"#EF5623",
                         "points_cm":[[x,y],...]}               # a shape we're missing
+  {"op":"region.add",   "shape":"triangle", "hex":"#EF5623",   # a lone triangle — give all
+                        "points_cm":[[x,y],[x,y],[x,y]]}       #   THREE corners
+  {"op":"region.add",   "shape":"rounded_rect", "hex":"#E4342B",# a bar with rounded ends;
+                        "bbox_cm":{..}, "radius_cm":0.9}       #   radius = half the short side
+                                                               #   makes a stadium/pill
+  {"op":"region.add",   "shape":"ellipse", "hex":"#1B4C8C",    # an oval (use "circle" only
+                        "bbox_cm":{..}}                        #   when it is truly round)
   {"op":"region.add",   "shape":"hatch", "hex":"#000000",     # a PARALLEL-LINE hatch field:
                         "base_hex":"#E4342B", "bbox_cm":{..},  #   line colour + base colour,
                         "period_cm":0.15, "line_width_pt":1.0, #   line spacing (cm) + width,
@@ -72,7 +90,13 @@ _SYSTEM = (
     "You compare the ORIGINAL cover image against the current RENDER and propose small, "
     "TYPED EDITS to our structured description (analysis.json) that raise fidelity. You do "
     "NOT redraw or write code — you emit edits as data. Prefer the fewest edits that fix "
-    "the biggest errors. Focus on the worst zones first. For TEXT the OCR missed, USE "
+    "the biggest errors. Focus on the worst zones first.\n"
+    "A generic structural reader now traces the SHAPES from the pixels, so plain geometry is "
+    "usually already close. TYPOGRAPHY is where the render still departs from the original, "
+    "and it is what a reader cannot measure — so weigh it first. Judge type the way a "
+    "designer would, comparing it side by side with the ORIGINAL: is each block the right "
+    "SIZE, WEIGHT, ALIGNMENT and ANGLE? Text that merely says the right words but sits at the "
+    "wrong size or angle is still wrong. For TEXT the OCR missed, USE "
     "text.add (you can read it) — do not flag text as a gap. For a field of parallel lines "
     "USE region.add shape=hatch. For a graphic brand LOGO (a logomark like BRAUN, or the "
     "versatus 'v'), USE logo.mark with the brand NAME — NEVER reconstruct it, redraw its "

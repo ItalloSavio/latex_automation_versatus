@@ -499,7 +499,7 @@ vs foto). Mas o SSIM alto NÃO garante fidelidade — cruzar sempre com o conten
 | capa17 | 0.840 | ⏳ "1950" ainda sai truncado; Hough alucina anéis sobre a tipografia |
 | capa20 | 0.818 | ⏳ quartos de disco fragmentados |
 | capa1 | 0.817 | ⏳ anel + mosaico ok. **NUNCA rodar `plain`** (sobrescreve a cirurgia manual: 0.796→0.603) |
-| capa10 | 0.792 | ⏳ barras-ANEL viram tiras serrilhadas — ver Reversões, o conserto é JUNTAR AS TIRAS |
+| capa10 | 0.792 | ⏳ **é TEXTO, não as barras** — medido 2026-08-18: 22.0% do erro dela está DENTRO das caixas de texto (que cobrem 30% da página) e só 4.4% nas barras. As tiras serrilhadas são reais mas são 1/5 do problema |
 | capa5 | 0.777 | ⏳ hachura = teto de contraste (medido 2×) |
 | capa3 | 0.715 | ✅ op-art real; sem texto, então o juiz novo não a moveu |
 | capa18 | 0.694 | ⏳ mosaico de triângulos REAL (era 0.411); resta um borrão rosa |
@@ -726,6 +726,36 @@ mancha do resíduo, traçar o contorno DAQUELA mancha. A lacuna de vocabulário 
 bloquear. Ferramenta em `scratchpad/vectorize.py` + `render_analysis.py`.
 
 ## Lições / tentativas REVERTIDAS (não repetir do mesmo jeito)
+
+- **CALIBRADOR: a alavanca era a ERRADA (achado + fix 2026-08-18).** Ele nasceu com um único
+  controle de tamanho, `hscale`, que estica o tipo de LADO. Quando o texto está simplesmente
+  pequeno/grande demais ele "conserta" achatando lateralmente até o teto 1.4 — e o
+  hill-climbing REJEITA, corretamente, o tipo distorcido. Por isso a calibração nunca aparecia
+  no Score. ⚠️ Em 06/08 eu vi isso na capa2, diagnostiquei como "medição suja" e pus o guard de
+  `clipped`. **Era sintoma; a causa era a alavanca.** Agora o tamanho vem de `font_size_pt`
+  dirigido pela **ALTURA** — o eixo que não depende da STRING (e a string pode divergir: o
+  produto traz o próprio texto, só o tipo precisa bater). `hscale` só entra DEPOIS que a altura
+  está certa, onde um resíduo de largura é tracking de verdade. Duas peças de medição
+  acompanharam: `_row_band` (mede na banda da própria linha — a vizinha vira outra banda em vez
+  de contaminação) e `_MARGIN_Y_CM` 0.10→0.30 (a bbox vem DA tinta, então o próprio glifo
+  encostava na borda e era descartado). Medições utilizáveis 10/54 → 43/79.
+  Medido: capa10 0.7916→**0.8017**, capa8 0.9173→**0.9205**, capa13 0.9159→**0.9183**;
+  capa4/6/7 idênticas. **Teto restante: capa15 e capa19 ficam 0 medições mesmo com 1cm de
+  folga** — o tipo é enorme (caixas 2.3–2.7cm) com entrelinha apertada, os glifos SE TOCAM e
+  tudo vira uma banda só. Margem proporcional foi testada (frac 0.15/0.25/0.40) e não move.
+
+- **Transação no portão (hipótese MORTA, medida 2026-08-18):** eu ia agrupar edits para o gate
+  poder atravessar um vale (remover glifo traçado + inserir texto só funciona em PAR). Medi a
+  classe antes de escrever: regiões traçadas pelo leitor que caem DENTRO de caixas de texto
+  existem em **3 de 20 capas** (5, 14, 17), cobrindo 2–9% de cada uma → ganho médio estimado
+  ~0.01 nas 20. **Não vale mudança arquitetural.** A peça fica descrita aqui caso a classe
+  cresça; o número é o portão.
+- **⚠️ ONDE ESTÁ O ERRO, medido nas 20 de uma vez (2026-08-18) — fazer ISTO antes de escolher
+  trabalho.** Somando a discordância de pixels das 20 e partindo por dentro/fora das caixas de
+  OCR: **TEXTO 49%, FORMA 51%**. O texto concentra em 7 capas (10, 15, 17, 14, 19, 8, 13 = 59
+  dos 76 pontos). Foi essa medição que provou que a capa10 é texto e não barras — uma
+  suposição minha que já estava escrita como fato nesta doc. **Medir a distribuição do erro é
+  barato e derruba palpite; fazer antes de escolher o que atacar.**
 
 - **Bug do `\foreach` desenhando círculo como retângulo (capa7, +0.21 Score):** o
   atalho de padrão em `tikz_generator` (Pass 1) emitia `rectangle` INCONDICIONALMENTE,

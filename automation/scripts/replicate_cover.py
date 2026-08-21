@@ -377,6 +377,15 @@ def replicate(
             json.dumps(best_analysis, ensure_ascii=False, indent=2), encoding="utf-8")
         _log(f"  [VLM] deliverable atualizado -> Score {best_score:.4f}")
 
+    # Persist the analysis that actually WON. This used to happen only inside the loop, just
+    # before proposing another pass, so a run that exited early (plateau, PASS, or nothing
+    # left to correct) left analysis.json holding the assembler's stage-1 output — the
+    # version from BEFORE the reader/layer gates chose. The render was right and the JSON
+    # that generates it was not: capa11 reported 0.9070 while its stored analysis rendered
+    # 0.7618. The analysis IS the product, so it is written unconditionally here.
+    analysis_path.write_text(
+        json.dumps(analysis, ensure_ascii=False, indent=2), encoding="utf-8")
+
     _banner(f"DONE ({pass_count} pass(es))")
     if quality:
         _log(f"  Score final   : {quality.get('score', 0):.4f}  "
@@ -538,24 +547,29 @@ def _select_reader(analysis: dict, image_path, score_fn) -> dict:
     """
     try:
         reader = _load("structural_reader")
-        regions = reader.read(image_path, analysis)
+        # two readings: keeping every palette entry, and discarding the anti-alias films
+        # between colours. Neither wins everywhere, so both are offered and MEASURED.
+        variants = [("leitor", reader.read(image_path, analysis)),
+                    ("leitor/sem-film", reader.read(image_path, analysis, drop_films=True))]
     except Exception as exc:                       # a reader failure must never break a run
         _log(f"  leitor estrutural indisponivel ({type(exc).__name__}: {exc})")
         return analysis
-    if not regions:
+    variants = [(k, v) for k, v in variants if v]
+    if not variants:
         _log("  leitor estrutural: recusou (imagem nao decompoe) → detectores")
         return analysis
 
-    base = score_fn(analysis)
-    cand = score_fn({**analysis, "regions": regions})
-    s_det = base["score"] if base else -1.0
-    s_rd  = cand["score"] if cand else -1.0
-    if s_rd > s_det + 1e-3:
-        _log(f"  leitor estrutural={s_rd:.4f} > detectores={s_det:.4f} → LEITOR "
-             f"({len(regions)} pecas)")
-        return {**analysis, "regions": regions}
-    _log(f"  leitor estrutural={s_rd:.4f} <= detectores={s_det:.4f} → detectores")
-    return analysis
+    base  = score_fn(analysis)
+    best  = ("detectores", None, base["score"] if base else -1.0)
+    for name, regions in variants:
+        q = score_fn({**analysis, "regions": regions})
+        s = q["score"] if q else -1.0
+        _log(f"  {name}={s:.4f} ({len(regions)} pecas)")
+        if s > best[2] + 1e-3:
+            best = (name, regions, s)
+    _log(f"  detectores={base['score'] if base else -1.0:.4f} → ESCOLHIDO: {best[0]} "
+         f"({best[2]:.4f})")
+    return analysis if best[1] is None else {**analysis, "regions": best[1]}
 
 
 def _select_layers(analysis: dict, score_fn) -> dict:

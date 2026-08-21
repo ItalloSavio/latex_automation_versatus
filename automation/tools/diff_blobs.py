@@ -14,7 +14,13 @@ o = Image.open(fr"{ROOT}\capas_teste\capa_teste{n}.png").convert("RGB")
 r = Image.open(fr"{ROOT}\automation\output\replicated\capa_teste{n}\render.png").convert("RGB").resize(o.size, Image.LANCZOS)
 O, R = np.asarray(o).astype(int), np.asarray(r).astype(int)
 hpx, wpx = O.shape[:2]
-an = json.load(open(fr"{ROOT}\automation\output\replicated\capa_teste{n}\vlm_analysis.json", encoding="utf-8"))
+# analysis.json IS the deliverable (stage 13 writes the adopted VLM analysis back into it),
+# and most covers have no VLM cache at all — so prefer it and keep vlm_analysis as fallback
+_d = _P(ROOT) / "automation" / "output" / "replicated" / f"capa_teste{n}"
+_an_p = next((p for p in (_d / "analysis.json", _d / "vlm_analysis.json") if p.exists()), None)
+if _an_p is None:
+    sys.exit(f"capa{n}: nenhum analysis.json em {_d}")
+an = json.loads(_an_p.read_text(encoding="utf-8"))
 W, H = an["canvas"]["width_cm"], an["canvas"]["height_cm"]
 
 d = np.sqrt(((O - R) ** 2).sum(2))

@@ -660,7 +660,20 @@ def _build_text_nodes(texts: list, color_map: dict, bg_hex: str = "FFFFFF",
         # it (inner sep=0pt, no padding). Without ink metrics fall back to the
         # loose box bottom, lifted to compensate for node depth + inner sep.
         baseline = el.get("baseline_y_cm")
-        if baseline is not None:
+        if abs(rot) > 1e-6:
+            # TikZ spins the node about its ANCHOR, so a rotation applied to an anchor that
+            # was placed for horizontal type swings the whole block out of its box — which is
+            # why the gate kept rejecting correct rotations. Re-anchor from the box instead.
+            # At +90 (CCW, reading bottom-to-top) the text runs up (+y) and the ascenders
+            # point at -x, so the baseline is the box's RIGHT edge; at -90 it mirrors.
+            anchor = "base west"
+            inner  = "inner sep=0pt, "
+            if rot > 0:
+                ax, ay = bx["x"] + bx["w"], bx["y"]
+            else:
+                ax, ay = bx["x"], bx["y"] + bx["h"]
+            x, y = _f(round(ax + dx_cm, 3)), _f(round(ay + dy_cm, 3))
+        elif baseline is not None:
             anchor = "base west"
             inner  = "inner sep=0pt, "
             x_sb   = bx["x"] - _TEXT_XSB_EM * (pt / _PT_PER_CM) * hscale_el

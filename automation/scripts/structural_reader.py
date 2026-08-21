@@ -43,6 +43,9 @@ except ImportError:                                   # pragma: no cover
 # A colour must cover this much of the page to be worth tracing. Below it we are chasing
 # antialias fringes and JPEG mush, not design.
 _MIN_COVERAGE = 0.002
+# Share of a colour's pixels that must survive a 1px erosion for it to count as a real
+# design colour rather than the anti-alias film between two others (see _solid_colors).
+_SOLID_MIN = 0.10
 # A piece smaller than this fraction of the page is a speck.
 _MIN_AREA_FRAC = 0.0006
 # Below this IoU no single primitive explains the component, so try splitting it.
@@ -88,6 +91,30 @@ def _text_mask(analysis: dict, w: int, h: int, sx: float, sy: float, H: float) -
 # ring, so there is no hole to fill — and it cost capa16 (0.879→0.870) and capa18
 # (0.682→0.662), where filling merged pieces that belong apart. capa10's scalloped bars are
 # still open; the fix has to join the strips, not close a hole.
+
+
+def _solid_colors(idx: np.ndarray, n: int) -> "list[int]":
+    """Keep the colours that form SOLID areas; drop the anti-alias films between them.
+
+    A coverage threshold alone is not enough. A mosaic has thousands of triangle edges, so
+    the blend between two design colours accumulates plenty of pixels and gets traced as if
+    it were real — capa18 painted big pale-pink shapes (#F2C7AD) where the original is
+    orange. Erosion separates the two cleanly because a design colour has interior and a
+    boundary film does not: measured on capa18, the three real colours survive a 1px erosion
+    at 66–73% and all five blend colours at 0.0%.
+
+    Dropped pixels are not lost — re-quantising sends them to the nearest surviving colour,
+    which for a blend is one of the two sides it came from.
+    """
+    out = []
+    for i in range(n):
+        m = idx == i
+        px = int(m.sum())
+        if not px:
+            continue
+        if ndimage.binary_erosion(m, np.ones((3, 3))).sum() / px >= _SOLID_MIN:
+            out.append(i)
+    return out
 
 
 def _rrect(bh: int, bw: int, r: float) -> np.ndarray:
@@ -173,9 +200,16 @@ def _split(m: np.ndarray) -> "list[np.ndarray]":
     return out if len(out) > 1 else []
 
 
-def read(image_path, analysis: dict) -> "list | None":
+def read(image_path, analysis: dict, drop_films: bool = False) -> "list | None":
     """Read the cover's shapes straight from its pixels. Returns regions, or None when the
-    image does not decompose into a sane number of pieces (the caller keeps the detectors)."""
+    image does not decompose into a sane number of pieces (the caller keeps the detectors).
+
+    `drop_films` discards palette entries that are only anti-alias boundary film (see
+    `_solid_colors`). It is NOT a global win and must be chosen by measurement: it removes
+    capa18's phantom pink shapes but also flattens that mosaic's gradient tiles into one mass
+    (0.694→0.643), while capa3 gains 0.056 and capa20 0.021. `_select_reader` renders both and
+    keeps the better — the same discipline as every other optional piece here.
+    """
     if not _CV:
         return None
     colors = [c for c in analysis.get("colors", [])
@@ -192,6 +226,13 @@ def read(image_path, analysis: dict) -> "list | None":
 
     pal = np.array([_hex_to_rgb(c["hex"]) for c in colors], np.float32)
     idx = np.argmin(((a[:, :, None, :] - pal[None, None]) ** 2).sum(3), 2)
+
+    if drop_films:
+        keep = _solid_colors(idx, len(pal))
+        if 2 <= len(keep) < len(pal):
+            colors = [colors[i] for i in keep]
+            pal = pal[keep]
+            idx = np.argmin(((a[:, :, None, :] - pal[None, None]) ** 2).sum(3), 2)
 
     bgi = int(np.bincount(idx.ravel(), minlength=len(pal)).argmax())
     txt = _text_mask(analysis, w, h, sx, sy, H)

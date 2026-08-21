@@ -32,7 +32,11 @@ from pathlib import Path
 # lines sit only ~0.2cm apart — a wider window would swallow the neighbouring
 # line and produce nonsense (a full line-height of spurious dy, a doubled height).
 _MARGIN_X_CM = 0.25
-_MARGIN_Y_CM = 0.10
+_MARGIN_Y_CM = 0.30   # widened once _row_band separated neighbouring lines: the bbox is
+                      # derived FROM the ink, so at 0.10 the element's OWN glyphs touched
+                      # the window edge and were discarded as 'clipped'. Measured over 10
+                      # covers, usable measurements went 25/79 → 43/79 and the median
+                      # height ratio stayed 1.000 (the band is picking the right line).
 
 # A pixel counts as ink when it differs from the window's background by more than
 # this RGB distance. The background is the window's median (text is the minority).
@@ -162,11 +166,22 @@ def _measure_ink(
     mask = dist > _INK_RGB_DIST
 
     rows = np.where(mask.any(axis=1))[0]
-    cols = np.where(mask.any(axis=0))[0]
-    if rows.size == 0 or cols.size == 0:
+    if rows.size == 0:
         return None
 
-    ink_r0, ink_r1 = int(rows[0]), int(rows[-1]) + 1
+    # Measure THIS element's own line, not everything the window caught. The window is the
+    # bbox plus a small margin, and cover text is set tight, so a neighbouring line is almost
+    # always inside it — taking the full ink extent then measures the neighbour and the
+    # `clipped` guard throws the whole measurement away. Measured across the seven
+    # text-heavy covers, that discarded 44 of 54 elements, which left the calibrator
+    # effectively switched off exactly where text is the problem. Splitting the window into
+    # contiguous inked ROW BANDS and keeping the one at the element's own height separates
+    # the two: a neighbour becomes a different band instead of contamination.
+    ink_r0, ink_r1 = _row_band(mask, rows)
+    band = mask[ink_r0:ink_r1]
+    cols = np.where(band.any(axis=0))[0]
+    if cols.size == 0:
+        return None
     ink_c0, ink_c1 = int(cols[0]), int(cols[-1]) + 1
 
     return {
@@ -176,8 +191,30 @@ def _measure_ink(
         "h": (ink_r1 - ink_r0) / h_px * H_cm,
         # only the VERTICAL edges matter: a long string legitimately fills the box
         # sideways, but cover lines sit ~0.2cm apart, so top/bottom contact = a neighbour.
+        # With banding this now means the element's OWN band runs off the window — the
+        # measurement really is truncated — rather than merely "a neighbour is in frame".
         "clipped": ink_r0 == 0 or ink_r1 == mask.shape[0],
     }
+
+
+def _row_band(mask, rows) -> "tuple[int, int]":
+    """The contiguous inked row-run holding this element's line: the run nearest the window's
+    vertical centre, since the window is built around the element's own bbox."""
+    import numpy as np  # noqa: PLC0415
+
+    runs, start = [], int(rows[0])
+    prev = start
+    for r in rows[1:]:
+        r = int(r)
+        if r > prev + 1:                       # a blank row ends the run
+            runs.append((start, prev + 1))
+            start = r
+        prev = r
+    runs.append((start, prev + 1))
+    if len(runs) == 1:
+        return runs[0]
+    mid = mask.shape[0] / 2.0
+    return min(runs, key=lambda t: abs((t[0] + t[1]) / 2.0 - mid))
 
 
 # ─── Correction ───────────────────────────────────────────────────────────────
@@ -189,16 +226,34 @@ def _apply_correction(el: dict, want: dict, got: dict) -> bool:
     """
     changed = False
 
-    # ── Width → horizontal scale ──────────────────────────────────────────────
-    if got["w"] > 1e-6:
-        ratio = want["w"] / got["w"]
-        if abs(ratio - 1.0) > _MIN_SCALE_ADJ:
-            cur   = el.get("hscale", 1.0)
-            new_s = cur * (1.0 + _DAMP * (ratio - 1.0))
-            new_s = min(max(new_s, _MAX_SCALE[0]), _MAX_SCALE[1])
-            if abs(new_s - cur) > 1e-6:
-                el["hscale"] = round(new_s, 4)
-                changed = True
+    rh = want["h"] / got["h"] if got["h"] > 1e-6 else 1.0
+    rw = want["w"] / got["w"] if got["w"] > 1e-6 else 1.0
+
+    # ── SIZE → font size, driven by HEIGHT ────────────────────────────────────
+    # This used to have ONE size lever, hscale, so a type that was simply too small got
+    # "fixed" by stretching it sideways until it hit the 1.4 ceiling — capa2's overlapping
+    # text and capa13's distorted headline both came from that, and the hill-climb rightly
+    # rejected the result, which is why calibration never showed up in the Score.
+    # HEIGHT is the axis to size from: it does not depend on the STRING, and the string is
+    # allowed to differ here (the product supplies its own copy, only the type must match).
+    if abs(rh - 1.0) > _MIN_SCALE_ADJ:
+        cur_pt = float(el.get("font_size_pt", 10.0) or 10.0)
+        new_pt = cur_pt * (1.0 + _DAMP * (rh - 1.0))
+        new_pt = min(max(new_pt, 4.0), 200.0)
+        if abs(new_pt - cur_pt) > 0.05:
+            el["font_size_pt"] = round(new_pt, 2)
+            changed = True
+
+    # ── Residual WIDTH → horizontal scale ─────────────────────────────────────
+    # Only once the height is right: a leftover width error at the correct size is genuine
+    # tracking/condensation, which is what hscale is for.
+    elif got["w"] > 1e-6 and abs(rw - 1.0) > _MIN_SCALE_ADJ:
+        cur   = el.get("hscale", 1.0)
+        new_s = cur * (1.0 + _DAMP * (rw - 1.0))
+        new_s = min(max(new_s, _MAX_SCALE[0]), _MAX_SCALE[1])
+        if abs(new_s - cur) > 1e-6:
+            el["hscale"] = round(new_s, 4)
+            changed = True
 
     # ── Left edge → x shift ───────────────────────────────────────────────────
     dx = want["x"] - got["x"]

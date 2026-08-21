@@ -101,7 +101,13 @@ _SYSTEM = (
     "USE region.add shape=hatch. For a graphic brand LOGO (a logomark like BRAUN, or the "
     "versatus 'v'), USE logo.mark with the brand NAME — NEVER reconstruct it, redraw its "
     "shapes, or add it as plain text; we render '<Name> (Logo)' as a placeholder and insert "
-    "the real logo later. Reserve vocab.gap for patterns you STILL can't express (dense "
+    "the real logo later.\n"
+    "TELL TYPE FROM A LOGO CAREFULLY. A logo is a graphic MARK — a symbol, emblem or "
+    "monogram. Readable WORDS set in a typeface are TEXT, and they stay text no matter how "
+    "large, how bold, how condensed, or at what ANGLE they are set. Swiss posters routinely "
+    "run a headline sideways: that is text.rotate (90 = reading bottom-to-top, -90 = "
+    "top-to-bottom), never logo.mark. Calling rotated type a logo throws the words away.\n"
+    "Reserve vocab.gap for patterns you STILL can't express (dense "
     "mosaics); never for text, hatching, or logos.\n\n" + _SCHEMA_DOC
 )
 

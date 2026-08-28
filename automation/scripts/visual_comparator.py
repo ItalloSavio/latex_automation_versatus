@@ -37,6 +37,32 @@ _N_PALETTE     = 8      # K-means clusters for palette comparison
 # weighted (a big matching background inflates it), so content_match / content_iou
 # — which score only the foreground — carry most of the weight. This is what stops
 # the loop from "improving the background while wrecking the content".
+# Calibrated against the USER'S OWN classification of all 20 covers (Boas / Ok / Pessimas,
+# 2026-08-19), scored by pairwise concordance over the 123 cross-class pairs:
+#     ssim 80.5% · structural 76.4% · content_match 71.5% · content_iou 67.5%
+#     text_match 51.2% (chance — it carries NO information about the human verdict)
+#     the previous 0.30/0.50/0.20 composite: 71.5%
+# Every weighting with ssim >= 0.8 beats that by 8+ points, so the DIRECTION is solid even
+# though the exact split is not identifiable from only 20 covers. `structural` is kept because
+# it adds 2.4pp over ssim alone AND because it inherits content_match's protective job: SSIM is
+# area-weighted, so a mostly-background cover could climb by perfecting the background, and a
+# render with no shapes to match scores ~0 on structural.
+# ⚠️ The old doctrine "SSIM alone misleads" was TRUE when covers were background with the
+# content missing entirely. With structure largely right it aged out, and had never been
+# re-measured. Re-measure a doctrine before building on it.
+# ⚠️ REVERTED 2026-08-19, and the lesson is worth more than the weights.
+# These were briefly 0.75 ssim / 0.25 structural, calibrated so the metric ORDERS the 20
+# covers the way the user does (71.5% → 82.9% pairwise concordance, adversarial bench 4/4).
+# It passed that test and STILL had to be reverted: once the LOOP optimised it, four covers
+# got visibly worse (capa2 and capa15 lost text blocks, capa10 lost its 102pt title,
+# capa5 went flat). Mechanism: neither ssim nor structural notices MISSING TEXT — ssim barely
+# reacts to thin type and structural matches coloured blobs — so DELETING text became free and
+# the loop deleted it. `_select_text` removing capa10's fake "UUU" was the same bug showing its
+# good half.
+# **A metric can be a good RANKER and a bad OPTIMISATION TARGET.** Ranking agreement is not a
+# sufficient acceptance test: run the loop with the candidate and look at the renders too.
+# structural_match() is kept and REPORTED — it is a genuinely good signal (76.4% on its own)
+# and belongs in a future Score that also carries a content/text-presence term.
 _SCORE_W = {"ssim": 0.30, "content_match": 0.50, "content_iou": 0.20}
 
 
@@ -157,6 +183,7 @@ def _run_compare(
         elif tshare > 0:
             content_eff = (1.0 - tshare) * nontext + tshare * tmatch
 
+    struct_val = structural_match(orig, result)      # reported, not scored (see _SCORE_W)
     score = (_SCORE_W["ssim"]            * ssim_val
              + _SCORE_W["content_match"] * content_eff
              + _SCORE_W["content_iou"]   * content_iou)
@@ -167,6 +194,7 @@ def _run_compare(
         "ssim_global":       round(ssim_val, 4),
         "ssim_pass":         ssim_val >= thresh,
         "ssim_threshold":    thresh,
+        "structural_match":  round(struct_val, 4),
         "content_match":     round(content_match, 4),
         "content_effective": round(content_eff, 4),   # what the Score actually uses
         "content_match_tol": round(content_match_tol, 4),   # ±px-tolerant (see the constant)
@@ -421,6 +449,63 @@ def text_match(
     recall = rec_n / rec_d if rec_d else 1.0
     prec   = prec_n / prec_d if prec_d else 1.0
     return 0.0 if (prec + recall) == 0 else 2 * prec * recall / (prec + recall)
+
+
+
+def structural_match(orig, result) -> float:
+    """How much of the ORIGINAL's shape mass the render reproduces, matched as SHAPES.
+
+    Blobs on both sides are matched one-to-one (Hungarian) on colour, area and centroid, so a
+    shape a couple of pixels off still matches and the sub-pixel penalty that punishes every
+    curve and every thin stroke disappears. Swapping figure and ground leaves nothing to
+    match — the failure the pointwise metric waved through at 0.762.
+
+    76.4% pairwise concordance with the user's labels on its own; it lifts SSIM 80.5% -> 82.9%.
+    """
+    import numpy as np
+    from scipy import ndimage
+    from scipy.optimize import linear_sum_assignment
+
+    o, r = np.asarray(orig), np.asarray(result)
+
+    def _pal(a, k=8):
+        q = (a // 32).reshape(-1, 3)
+        uq, cnt = np.unique(q, axis=0, return_counts=True)
+        return (uq[np.argsort(-cnt)[:k]] * 32 + 16).astype(np.float32)
+
+    def _comps(a, pal, min_frac=0.0006):
+        h, w = a.shape[:2]
+        idx = np.argmin(((a[:, :, None, :].astype(np.float32) - pal[None, None]) ** 2).sum(3), 2)
+        out = []
+        for ci in range(len(pal)):
+            lab, _n = ndimage.label(idx == ci)
+            for k, sl in enumerate(ndimage.find_objects(lab), start=1):
+                if sl is None:
+                    continue
+                m = (lab[sl] == k)
+                ar = int(m.sum())
+                if ar < min_frac * w * h:
+                    continue
+                ys, xs = np.nonzero(m)
+                out.append((ci, ar / (w * h),
+                            (sl[0].start + ys.mean()) / h, (sl[1].start + xs.mean()) / w))
+        return out
+
+    pal = _pal(o)
+    A, B = _comps(o, pal), _comps(r, pal)
+    if not A:
+        return 1.0 if not B else 0.0
+    if not B:
+        return 0.0
+    C = np.full((len(A), len(B)), 10.0, np.float32)
+    for i, (ci, ai, yi, xi) in enumerate(A):
+        for j, (cj, aj, yj, xj) in enumerate(B):
+            if ci == cj:
+                C[i, j] = float(np.hypot(yi - yj, xi - xj)) + (1.0 - min(ai, aj) / max(ai, aj))
+    ri, cj = linear_sum_assignment(C)
+    got = sum(min(A[i][1], B[j][1]) * max(0.0, 1.0 - C[i, j])
+              for i, j in zip(ri, cj) if C[i, j] < 10.0)
+    return float(got / sum(a[1] for a in A))
 
 
 def _text_box_f1(orig, result, box, ink_dist=_TEXT_INK_DIST, dilate=_TEXT_DILATE_PX) -> float:

@@ -62,7 +62,9 @@ def _load(name: str):
 
 # ─── Public API ───────────────────────────────────────────────────────────────
 
-_RESIDUAL_ROUNDS  = 3       # how many residual→propose→gate cycles to run at most
+_RESIDUAL_ROUNDS  = int(os.environ.get("SWISS_VLM_ROUNDS", "3"))   # residual→propose→gate
+                          # cycles. Each round is one Gemini call per cover, so this is the
+                          # API budget knob: SWISS_VLM_ROUNDS=1 for a single cheap pass.
 _RESIDUAL_MIN_PCT = 0.15    # a blob under this share of the cover isn't worth a round
 _RESIDUAL_GUARD   = 0.005   # Score may dip this much across rounds before the net trips
 
@@ -264,6 +266,7 @@ def replicate(
     _step(7, "Selecao de camadas (mede a contribuicao de cada detector)")
     analysis = _select_reader(analysis, image_path, _score_of)
     analysis = _select_layers(analysis, _score_of)
+    analysis = _select_text(analysis, _score_of)
 
     # ── Stages 8–11: self-correcting loop ─────────────────────────────────
     # Hill climbing on the SCORE: a pass is only kept when the Score improved
@@ -359,15 +362,19 @@ def replicate(
     if vlm and best_analysis is not None and not (best_quality or {}).get("score_pass"):
         _step(13, "VLM (Gemini) proponente de edits no PLATO")
         vlm_cache = cover_dir / "vlm_analysis.json"
-        if vlm_cache.exists() and not vlm_refresh:
-            best_analysis = json.loads(vlm_cache.read_text(encoding="utf-8"))
-            _log(f"  [VLM] analysis ADOTADO do cache ({vlm_cache.name}; --vlm-refresh p/ refazer)")
-        else:
-            _score_of(best_analysis)   # current BEST render for the VLM to see
-            best_analysis, _ = _vlm_pass(
-                best_analysis, image_path, render_path, cover_dir, _score_of, vlm_refresh)
-            vlm_cache.write_text(
-                json.dumps(best_analysis, ensure_ascii=False, indent=2), encoding="utf-8")
+        # There are two caches here and only ONE of them is safe. `vlm_edits.json` holds the
+        # PROPOSALS and is reused by _vlm_pass, so a re-run spends no API and every edit is
+        # re-judged by the gate. `vlm_analysis.json` used to be read back as the finished
+        # deliverable — which threw away everything the pipeline had just computed on this
+        # run: the structural reader's choice, the layer selection, the calibration. Nine
+        # covers were frozen in an old snapshot that way; bypassing it moved capa19
+        # 0.8698 → 0.9194 and capa17 0.8396 → 0.8416. It is still WRITTEN, as a record and a
+        # restore point, but never read back as the answer.
+        _score_of(best_analysis)   # current BEST render for the VLM to see
+        best_analysis, _ = _vlm_pass(
+            best_analysis, image_path, render_path, cover_dir, _score_of, vlm_refresh)
+        vlm_cache.write_text(
+            json.dumps(best_analysis, ensure_ascii=False, indent=2), encoding="utf-8")
         # Render + persist the VLM result AS THE DELIVERABLE (the missing link before).
         best_quality = _score_of(best_analysis) or best_quality
         best_score   = (best_quality or {}).get("score", best_score)
@@ -376,6 +383,18 @@ def replicate(
         analysis_path.write_text(
             json.dumps(best_analysis, ensure_ascii=False, indent=2), encoding="utf-8")
         _log(f"  [VLM] deliverable atualizado -> Score {best_score:.4f}")
+
+    # Re-render from the analysis we are about to persist, so every artefact on disk agrees
+    # with it. Some exit paths (the plateau branch) revert `analysis` to the best candidate
+    # WITHOUT re-rendering, which leaves cover.tikz / cover.pdf / render.png holding a trial
+    # that was REJECTED — an audit of all 20 covers found three whose delivered render could
+    # not be reproduced from any stored analysis, and whose reported score was the stale one
+    # (capa18 read 0.6935 while its own analysis renders 0.6592). The reported quality is
+    # taken from THIS render, so the number and the file are the same thing.
+    _final_q = _score_of(analysis)
+    if _final_q:
+        quality = _final_q
+        _rename_diff(cover_dir, diff_path)
 
     # Persist the analysis that actually WON. This used to happen only inside the loop, just
     # before proposing another pass, so a run that exited early (plateau, PASS, or nothing
@@ -532,6 +551,57 @@ def _write_tex_wrapper(
         r"\end{document}" + "\n"
     )
     tex_path.write_text(content, encoding="utf-8")
+
+
+_TEXT_TRIAL_MIN_FRAC = 0.01   # only elements big enough to matter are worth a render
+
+
+def _select_text(analysis: dict, score_fn) -> dict:
+    """Drop an OCR text element only when REMOVING it measurably improves the render.
+
+    An OCR reading is a HYPOTHESIS, exactly like a detector's layer, and it can be
+    confidently wrong: EasyOCR reads capa10's three hot-dog bars as the letters "UUU" at
+    351pt (confidence 0.65 — HIGHER than two real captions on the same cover) and capa1's
+    ring as a "6" at 411pt. No cheap signal separates those from real type; both hypotheses
+    tried here were killed by measurement across the 20 covers:
+      · "glyphs shatter into many components" — backwards. Real text is usually ONE merged
+        blob at the original's resolution, and the fake "UUU" has five components.
+      · "a picture is covered by traced shapes" — also backwards. Legitimate headlines that
+        sit on a coloured field ('rancid', 'grafik', 'theshining') score 1.000 coverage,
+        while the fake "UUU" scores 0.113.
+    So no heuristic — the same measured gate the detector layers already use. Only elements
+    covering at least `_TEXT_TRIAL_MIN_FRAC` of the page are tried, which keeps this to a
+    couple of renders per cover.
+    """
+    texts = analysis.get("text_elements", [])
+    if not texts:
+        return analysis
+    cv = analysis.get("canvas", {})
+    page = cv.get("width_cm", 21.0) * cv.get("height_cm", 29.7)
+    big = [i for i, t in enumerate(texts)
+           if (t.get("bbox_cm") or {}).get("w", 0) * (t.get("bbox_cm") or {}).get("h", 0)
+           >= _TEXT_TRIAL_MIN_FRAC * page]
+    if not big:
+        return analysis
+
+    base = score_fn(analysis)
+    if base is None:
+        return analysis
+    best_score, kept = base["score"], list(texts)
+    for i in sorted(big, key=lambda k: -(texts[k].get("bbox_cm") or {}).get("w", 0)):
+        el = texts[i]
+        if el not in kept:
+            continue
+        trial = [t for t in kept if t is not el]
+        q = score_fn({**analysis, "text_elements": trial})
+        s2 = q["score"] if q else -1.0
+        if s2 > best_score + 1e-3:
+            _log(f"  texto {el.get('text','')[:18]!r} ({el.get('font_size_pt',0):.0f}pt): "
+                 f"SEM={s2:.4f} > COM={best_score:.4f} → REMOVIDO (nao era texto)")
+            best_score, kept = s2, trial
+        else:
+            _log(f"  texto {el.get('text','')[:18]!r}: SEM={s2:.4f} <= COM={best_score:.4f} → mantido")
+    return {**analysis, "text_elements": kept}
 
 
 def _select_reader(analysis: dict, image_path, score_fn) -> dict:

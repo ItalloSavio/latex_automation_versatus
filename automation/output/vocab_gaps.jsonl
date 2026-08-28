@@ -30,3 +30,7 @@
 {"cover": "capa_teste7", "op": "vocab.gap", "bbox_cm": {"x": -0.04, "y": 15.0, "w": 5.0, "h": 5.0}, "describe": "faint dark circle (#1F1B18)"}
 {"cover": "capa_teste1", "op": "vocab.gap", "bbox_cm": {"x": 0, "y": 0, "w": 8.9, "h": 31.3}, "describe": "complex geometric mosaic of triangles, circles and quadrants"}
 {"cover": "capa_teste5", "op": "vocab.gap", "bbox_cm": {"x": 10.5, "y": 0, "w": 10.5, "h": 29.4}, "describe": "tapered vertical hatching"}
+{"cover": "capa_teste1", "op": "vocab.gap", "bbox_cm": {"x": 0, "y": 0, "w": 8.9, "h": 31.3}, "describe": "complex geometric mosaic of triangles, circles and quadrants"}
+{"cover": "capa_teste5", "op": "vocab.gap", "bbox_cm": {"x": 10.5, "y": 0, "w": 10.5, "h": 29.4}, "describe": "tapered vertical hatching"}
+{"cover": "capa_teste1", "op": "vocab.gap", "bbox_cm": {"x": 0, "y": 0, "w": 8.9, "h": 31.3}, "describe": "complex geometric mosaic of triangles, circles and quadrants"}
+{"cover": "capa_teste5", "op": "vocab.gap", "bbox_cm": {"x": 10.5, "y": 0, "w": 10.5, "h": 29.4}, "describe": "tapered vertical hatching"}

@@ -46,6 +46,14 @@ _MIN_COVERAGE = 0.002
 # Share of a colour's pixels that must survive a 1px erosion for it to count as a real
 # design colour rather than the anti-alias film between two others (see _solid_colors).
 _SOLID_MIN = 0.10
+# A traced outline may use this many vertices. The old cap was 12, which forced every CURVE
+# through at most 12 chords: measured on a 100px disc that is 7.6px of deviation and IoU
+# 0.906, and it is exactly the faceting that showed up wherever circles touch or overlap
+# (capa3/12/17 emitted ZERO circles and only polygons, while capa7/9 — whose circles are
+# isolated — emitted clean ones). At 32 vertices the deviation is 0.5px.
+_MAX_POLY_PTS = 64
+# How much better a TRACE must be before it beats a named primitive (circle/ellipse/rect).
+_PARAM_BONUS = 0.03
 # A piece smaller than this fraction of the page is a speck.
 _MIN_AREA_FRAC = 0.0006
 # Below this IoU no single primitive explains the component, so try splitting it.
@@ -163,17 +171,31 @@ def _best_primitive(m: np.ndarray) -> "tuple[dict, float]":
     cnts, _ = cv2.findContours(m.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if cnts:
         big = max(cnts, key=cv2.contourArea)
-        for eps in (0.02, 0.01, 0.005):
+        for eps in (0.02, 0.01, 0.005, 0.002, 0.001):
             ap = cv2.approxPolyDP(big, eps * cv2.arcLength(big, True), True).reshape(-1, 2)
-            if not (3 <= len(ap) <= 12):
+            if not (3 <= len(ap) <= _MAX_POLY_PTS):
                 continue
             ras = np.zeros_like(m, np.uint8)
             cv2.fillPoly(ras, [ap.astype(np.int32)], 1)
             kind = "triangle" if len(ap) == 3 else "polygon"
             cands.append((_iou(m, ras.astype(bool)), {"shape_type": kind, "_pts_px": ap}))
 
-    score, best = max(cands, key=lambda t: t[0])
-    return best, score
+    # Prefer a NAMED shape over a trace of the same thing. Without this the fine traces added
+    # above would beat `circle` on its own circles (a 32-gon reaches IoU 0.996 where the
+    # circle itself sits at ~0.99) and every disc in the set would silently become a polygon —
+    # visually the same, structurally worse. A partially covered circle still loses: as a
+    # circle it scores far below the bonus, so the trace wins as it should.
+    score, best = max(cands, key=lambda t: t[0] + (_PARAM_BONUS if "_pts_px" not in t[1] else 0.0))
+    return best, _iou_of(cands, best)
+
+
+def _iou_of(cands, best) -> float:
+    """The winner's own IoU, unbiased by the preference bonus — this is the confidence the
+    caller uses to decide whether the blob needs splitting."""
+    for sc, c in cands:
+        if c is best:
+            return sc
+    return 0.0
 
 
 def _split(m: np.ndarray) -> "list[np.ndarray]":
@@ -251,7 +273,11 @@ def read(image_path, analysis: dict, drop_films: bool = False) -> "list | None":
             if sl is None:
                 continue
             m = (lab[sl] == k)
-            if m.sum() < min_area or m.shape[0] < 4 or m.shape[1] < 4:
+            # A RULE is thin on one axis and long on the other, and Swiss layouts are full
+            # of them. Requiring 4px on BOTH axes threw every one away: capa10 kept only the
+            # 0.60cm-thick footer bar and lost the two hairline separators. Judge by AREA
+            # (a long rule has plenty) and reject only what is small in every direction.
+            if m.sum() < min_area or min(m.shape) < 2 or max(m.shape) < 4:
                 continue
             blobs = [(m, sl)]
             best, sc = _best_primitive(m)

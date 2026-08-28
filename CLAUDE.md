@@ -56,10 +56,17 @@ FASE 6  ✅ FEITO (branch `new_covers`, 2026-08-16/18) — a REESCRITA DO LEITOR
 o mosaico da capa18 e a malha da capa16 são alta-frequência e renderizam bem. O teto era
 o `triangle` não conseguir carregar a própria orientação. Ver "## FASE 6".
 
-**Ranking por Score (2026-08-18, escala NOVA — ver "O juiz"):** capa6 0.943 | capa7 0.925 |
-capa4 0.968 | capa12 0.935 | capa9 0.930 | capa13 0.916 | capa11 0.907 | capa16 0.890 |
-capa19 0.870 | capa17 0.840 | capa1 0.817 | capa20 0.818 | capa5 0.777 | capa3 0.715 |
-capa10 0.792 | capa18 0.694 | capa14 0.595 | capa15 0.581 | capa2 0.566.
+**Ranking por Score (2026-08-19):** capa4 0.968 | capa6 0.950 | capa12 0.948 | capa11 0.946 |
+capa9 0.937 | capa8 0.932 | capa7 0.924 | capa19 0.919 | capa13 0.919 | capa16 0.910 |
+capa20 0.880 | capa17 0.865 | capa1 0.817 | capa10 0.807 | capa3 0.799 | capa5 0.774 |
+capa18 0.769 | capa14 0.615 | capa15 0.581 | capa2 0.581. **Média 0.842, dez em ≥0.90.**
+
+⚠️ **O NÚMERO NÃO SEPARA AS CLASSES DO OLHO (medido 2026-08-19, LER ANTES DE PRIORIZAR).**
+O usuário classificou as 20 em BOAS (1,2,4,6,7,12,13,16), OK (3,8,9,11,15,17,18,19,20) e
+PÉSSIMAS (5,10,14). Cruzando com o Score da época: BOAS iam de **0.581 a 0.968**, PÉSSIMAS de
+**0.615 a 0.802** — sobreposição quase total. capa2 é BOA com 0.581; capa15 é OK com 0.581
+idêntico; capa10 e capa5 (PÉSSIMAS) pontuavam ACIMA de capa3, capa18 e capa2. **Priorizar
+pelo Score levaria a trabalhar na capa2, que já está aprovada, e adiar as duas piores.**
 
 **Régua de "pronto":** content ≥ 0.85 E o olho aprova no `review_board.py`.
 O olho é reforço/desempate; a métrica é o juiz primário (determinístico).
@@ -417,6 +424,90 @@ mede) e mantém se melhor. Ressalva dura: identificar ≠ ter o ARQUIVO — só 
 se a fonte estiver instalada/licenciada; senão, substituto CASADO (não o default cego) +
 um `font.gap` pro dev instalar a real. Mesmo padrão propor→gatear→fila. NÃO implementado.
 
+## ⚠️ O JUIZ — TROCADO E REVERTIDO NO MESMO DIA (2026-08-19). A LIÇÃO É O ATIVO.
+
+**Uma métrica pode ser um bom RANKEADOR e um péssimo ALVO DE OTIMIZAÇÃO.** Concordância de
+ordenação NÃO é teste de aceite suficiente. O teste tem que incluir: **rode o loop com ela e
+OLHE os renders.**
+
+Troquei `_SCORE_W` para `{ssim: 0.75, structural: 0.25}` porque ele ordenava as 20 capas como
+o usuário (71.5% → **82.9%**) e mantinha 4/4 no banco adversarial. Passou nos dois testes que
+eu tinha. Rodei as 20 e o usuário reportou **quatro regressões visíveis**: capa2 e capa15
+perderam blocos de texto, capa10 perdeu o título de 102pt, capa5 virou "um grande borrão
+sólido".
+
+**Mecanismo (medido, não suposto):** nem `ssim` nem `structural` percebem TEXTO FALTANDO — o
+ssim mal reage a tipo fino e o structural casa blobs coloridos. Ao tirar `content_match` e
+`text_match` do Score, **APAGAR TEXTO virou de graça** e o loop apagou. O `_select_text`
+removendo o "UUU" falso da capa10 (que eu comemorei) era o mesmo bug mostrando a metade boa:
+ele levou o título junto.
+
+**Revertido para `{ssim: 0.30, content_match: 0.50, content_iou: 0.20}`.** O
+`structural_match()` FICA no código, calculado e reportado: é sinal genuinamente bom (76.4%
+sozinho) e pertence a um Score futuro que também carregue um termo de PRESENÇA de conteúdo.
+
+⚠️ **Qualquer Score futuro precisa dos dois:** algo que ordene como o olho (ssim/structural)
+E algo que puna conteúdo ausente. Só o primeiro degenera; só o segundo é o que tínhamos.
+
+### O que a calibração ensinou e continua valendo
+Sobre os 123 pares de classes diferentes (BOAS 1,2,4,6,7,12,13,16 · OK 3,8,9,11,15,17,18,19,20
+· PÉSSIMAS 5,10,14): `ssim` 80.5% · `structural` 76.4% · Score atual 71.5% · `content_match`
+71.5% · `content_iou` 67.5% · **`text_match` 51.2% (acaso puro)**.
+⚠️ **O Score atual NÃO separa as classes do olho** — BOAS iam de 0.581 a 0.968 e PÉSSIMAS de
+0.615 a 0.802. Priorizar por ele levaria a trabalhar na capa2 (aprovada) e adiar as piores.
+**Use a classificação do usuário para priorizar, não o número.**
+
+## (histórico) O juiz — recalibração de 2026-08-19, revertida acima
+
+O usuário classificou as 20 em **BOAS** (1,2,4,6,7,12,13,16), **OK** (3,8,9,11,15,17,18,19,20)
+e **PÉSSIMAS** (5,10,14). Isso virou o alvo: sobre os **123 pares de classes diferentes**,
+com que frequência a métrica ordena como ele ordenou? (acaso = 50%)
+
+| sinal | concordância |
+|---|---|
+| **`ssim` sozinho** | **80.5%** |
+| `structural` (casa formas por cor/área/centroide, Hungarian) | 76.4% |
+| `score` ANTIGO (0.30/0.50/0.20) | 71.5% |
+| `content_match` | 71.5% |
+| `content_iou` | 67.5% |
+| **`text_match`** | **51.2% — ACASO PURO** |
+
+**`_SCORE_W = {"ssim": 0.75, "structural": 0.25}`** → **82.9%**, e o banco adversarial antigo
+seguiu **4/4** (proteção contra sobreajuste: são casos que o usuário julgou antes e que não
+entraram na calibração). `content_match`/`content_iou`/`text_match` continuam CALCULADOS e
+reportados — viram diagnóstico, param de decidir.
+
+⚠️ **A doutrina "SSIM SOZINHO ENGANA" ENVELHECEU.** Ela era verdadeira quando as capas eram
+fundo e faltava conteúdo inteiro — o SSIM premiava acertar o fundo. Depois que o leitor
+estrutural passou a acertar a estrutura, deixou de valer, e eu construí em cima dela por
+semanas sem re-medir. É o MESMO erro do lattice da capa3 (citei como "prova de juiz quebrado"
+falando de um render que não existia mais). **Medição envelhece: re-meça antes de construir.**
+
+⚠️ **`text_match` foi posto no Score em 18/08 e TIRADO em 19/08.** Eu o adicionei argumentando
+que "o juiz não via texto". Ele não vê porque **o usuário não julga por isso** — ele mesmo
+disse depois: *"sobre o conteúdo do texto, meio que foda-se"*. Construí sobre uma premissa que
+nunca verifiquei com ele. O `_content_split` subia as notas sem melhorar a ORDENAÇÃO.
+
+⚠️ **Por que `structural` fica junto do SSIM, e não SSIM puro (80.5%):** ele soma 2.4pp E
+herda o papel protetor do `content_match` — o SSIM é ponderado por ÁREA, então uma capa
+majoritariamente fundo poderia subir só perfeiçoando o fundo; um render sem formas para casar
+tira ~0 no `structural`.
+
+⚠️ **Os pesos exatos NÃO são identificáveis** com 20 capas: só 3 combinações ficam a 2pp do
+topo (superfície PICUDA). O que é robusto é a DIREÇÃO — toda combinação com ssim ≥ 0.8 bate o
+antigo por 8+ pontos. Não refinar pesos sem mais capas rotuladas.
+
+⚠️ **Custo:** o `structural_match` roda componentes conexos + Hungarian a cada comparação e o
+loop compara dezenas de vezes → **3–5× mais lento** (capa14 levou 19min). Aceitável no regime
+de uso, mas é de onde vem a lentidão.
+
+**Ainda discorda em:** capa1 (BOA, 0.697) e capa14 (PÉSSIMA, 0.819) são as maiores fontes dos
+21 pares invertidos que sobraram.
+
+**GANHO DE GRAÇA:** o `_select_text` (portão medido que remove texto que o OCR inventou)
+estava BLOQUEADO — com o juiz velho, remover o "UUU" da capa10 PIORAVA o Score. Com o juiz
+novo ele removeu sozinho, no primeiro re-run, **sem uma linha de código nova**.
+
 ## O juiz — e a hipótese que NÃO sobreviveu à medição (2026-08-18)
 
 Eu afirmei que o juiz estava quebrado e ia trocar o `content_match` por casamento de formas.
@@ -727,6 +818,42 @@ bloquear. Ferramenta em `scratchpad/vectorize.py` + `render_analysis.py`.
 
 ## Lições / tentativas REVERTIDAS (não repetir do mesmo jeito)
 
+- **⚠️ A FAMÍLIA DE BUG MAIS CARA DO PROJETO: "o pipeline calcula certo e o entregável não
+  recebe" (três casos em três dias, 2026-08-19).** Nenhum foi achado olhando capa; os três
+  vieram de conferir se o que SAI é o que foi DECIDIDO. Juntos valeram mais que qualquer
+  feature da semana (capa11 +0.145, capa19 +0.050, capa14 +0.026, capa2 +0.015, capa6 +0.008).
+  1. A análise vencedora só era gravada DENTRO do laço, antes de propor outro passe — quem
+     saía cedo (platô/PASS/sem correção) deixava o `analysis.json` do estágio 1.
+  2. `vlm_analysis.json` era lido de volta como ENTREGÁVEL PRONTO (ver acima).
+  3. O ramo de PLATÔ faz `analysis = best_analysis` e quebra **sem re-renderizar** — então
+     `cover.tikz`/`cover.pdf`/`render.png` podiam ser de um candidato REJEITADO enquanto o
+     JSON guardava outro. Em capa3/16/18 **nenhum arquivo em disco reproduzia o render
+     entregue**. Fix: re-renderizar a partir da análise que vai ser persistida, e tirar a
+     `quality` reportada DESSE render.
+  **Ferramenta de auditoria** (`scratchpad/audit.py`): para cada capa, compara o Score do
+  `render.png` em disco com o Score de um render fresco do `analysis.json`. Delta ≠ 0 = bug
+  desta família. Hoje: **20/20 idênticas**. ⚠️ **Rodar isto depois de mexer no orquestrador** —
+  a classe é silenciosa por construção: o número sobe, o arquivo mente, ninguém percebe.
+  ⚠️ Eu li a 1ª divergência ao contrário ("o número mentia para cima"); era o JSON que guardava
+  a versão pior. **A auditoria diz que DIVERGE, não qual lado está certo** — re-rodar para saber.
+
+- **⚠️ O CACHE DO VLM ERA BUG, NÃO DÍVIDA (2026-08-19).** O estágio 13 lia `vlm_analysis.json`
+  de volta COMO ENTREGÁVEL PRONTO quando existia. O pipeline rodava inteiro — leitor
+  estrutural, seleção de camadas, calibração — e no fim **descartava tudo** e carregava um
+  retrato antigo. **Nove capas ficaram congeladas assim** (1, 2, 5, 6, 7, 14, 15, 17, 19).
+  Eu tinha registrado isso aqui em 18/08 como "cache obsoleto, recomputar custa API" — leitura
+  errada: não era dívida, era curto-circuito. Mesma família do bug de persistência do A0.
+  **Fix:** `_vlm_pass` sempre roda; ele reusa `vlm_edits.json` (as PROPOSTAS — zero API) e
+  re-julga cada edit contra a análise fresca. O `vlm_analysis.json` continua sendo ESCRITO
+  como registro/restauração, nunca lido como resposta.
+  Medido: capa19 0.8698→**0.9194**, capa14 0.5890→**0.6150**, capa2 0.5661→**0.5806**,
+  capa6 0.9425→**0.9500**, capa17 0.8396→0.8416; capa5/7/15 estáveis.
+  **Custo:** ~2min → 10–14min por capa (re-render por edit). Aceitável no regime de uso
+  (1–2 capas por rodada, computação livre).
+  ⚠️ **capa1 é a exceção e foi RESTAURADA à mão:** o entregável dela é cirurgia manual, e sem
+  o curto-circuito ela cai 0.8168 → **0.7342** (o OCR volta a ler o anel como "6"). O número
+  AUTOMÁTICO honesto da capa1 é 0.7342; o 0.8168 é manual e está marcado como tal.
+
 - **CALIBRADOR: a alavanca era a ERRADA (achado + fix 2026-08-18).** Ele nasceu com um único
   controle de tamanho, `hscale`, que estica o tipo de LADO. Quando o texto está simplesmente
   pequeno/grande demais ele "conserta" achatando lateralmente até o teto 1.4 — e o
@@ -744,6 +871,17 @@ bloquear. Ferramenta em `scratchpad/vectorize.py` + `render_analysis.py`.
   folga** — o tipo é enorme (caixas 2.3–2.7cm) com entrelinha apertada, os glifos SE TOCAM e
   tudo vira uma banda só. Margem proporcional foi testada (frac 0.15/0.25/0.40) e não move.
 
+- **Transação no portão — MORTA DUAS VEZES, a segunda com o caso ideal (2026-08-19).**
+  Na 1ª rodada de VLM da capa3 (juiz novo, 1 rodada), o Gemini propôs **6 `region.remove` +
+  6 `region.add ellipse`** — semanticamente CERTO: capa3 é op-art de círculos e os blobs
+  traçados deveriam ser elipses; é o defeito que o usuário chamou de "parece um borrão". O
+  portão rejeitou tudo, um a um, e eu ia usar isso como a prova de que faltava transação
+  (remover sozinho piora, adicionar sozinho piora, só o PAR ganha). **Medi antes de construir:
+  aplicando os 12 juntos, capa3 vai de 0.6146 para 0.3887.** As elipses propostas não batem
+  com o lattice (uma começa em x=-0.5, fora da página). A proposta era boa em INTENÇÃO e
+  ruim em GEOMETRIA, e o portão por-edit chegou na resposta certa.
+  **Não construir transação sem antes aplicar o grupo e medir** — a história é convincente e
+  a medição a derruba.
 - **Transação no portão (hipótese MORTA, medida 2026-08-18):** eu ia agrupar edits para o gate
   poder atravessar um vale (remover glifo traçado + inserir texto só funciona em PAR). Medi a
   classe antes de escrever: regiões traçadas pelo leitor que caem DENTRO de caixas de texto
@@ -884,6 +1022,53 @@ Ele **RECUSA rodar a capa1 em `plain`** — foi o erro que derrubou o entregáve
 
 **`content_match_tol` é OPT-IN** (`SWISS_TOL_METRIC=1`): custa 0.2–1.0s por comparação e o
 Score ainda não a consome, então ligada por padrão seria desperdício puro no loop do gate.
+
+## Método: o USUÁRIO narra, eu acho no código (2026-08-19, funciona — usar isto)
+
+O usuário descreve o que vê de errado numa capa; eu localizo a causa NO CÓDIGO, meço, e
+fecho. Provado: ele perguntou *"um círculo é um círculo, por que numa fica bom e noutra
+ruim?"* → causa exata (`_MAX_POLY_PTS` era 12, o que dá 7.6px de desvio num disco de r=100)
+→ correção → **5 capas subiram, 0 caíram**. Foi o ganho mais limpo da semana.
+
+**A regra que faltou e custou uma rodada:** quando a narração revela VÁRIOS defeitos, fechar
+os de causa conhecida e correção barata ANTES de atacar o difícil. Na capa10 saíram 4
+defeitos, eu fui direto no mais difícil (o "UUU") e fechei ZERO. Um defeito por vez, até o fim.
+
+**Estados legítimos:** ABERTO · FECHADO (com a medição) · **BLOQUEADO por X** (resposta
+válida — registra o motivo e libera o próximo) · **NÃO É CLASSE** (a medição mostrou que o
+defeito é local, não geral, e não vale mudança global).
+
+### Registro de defeitos — capa10 (a primeira rodada do método)
+- **D1 "UUU" — o OCR lê o GRÁFICO como texto.** EasyOCR lê os 3 hot dogs como as letras
+  "UUU" a **351pt**, conf 0.65 — MAIOR que a de duas legendas reais da mesma capa (0.62).
+  Mesma falha do "6" a 411pt da capa1. Construí `_select_text` (portão medido: remove o
+  elemento, renderiza, mantém a remoção só se o Score sobe — mesmo padrão do `_select_layers`).
+  Funcionou e **decidiu MANTER**: sem o UUU o Score CAI 0.7979→0.7565, porque preto-onde-é-
+  vermelho-escuro erra menos que bege-onde-é-vermelho-escuro. **BLOQUEADO pelo juiz.** A peça
+  fica: é a máquina certa, hoje inerte, e passa a agir sozinha quando o juiz melhorar.
+  ⚠️ **Duas hipóteses de heurística foram MEDIDAS e MORTAS nas 20** — não repetir:
+  (a) "glifos estilhaçam em muitos componentes" → INVERTIDO (texto real vira UM blob na
+  resolução do original; o UUU falso tem 5); (b) "gráfico está coberto por formas traçadas"
+  → INVERTIDO ('rancid'/'grafik'/'theshining' dão cobertura 1.000; o UUU dá 0.113).
+- **D2 régua fina descartada. FECHADO — e o ganho foi MUITO maior que a capa10.**
+  `m.shape[0] < 4 or m.shape[1] < 4` no leitor exigia 4px nos DOIS eixos, então descartava
+  todo componente FINO de TODAS as capas — não só os separadores da capa10. Uma régua é fina
+  num eixo e longa no outro, e design suíço vive delas. Fix: julgar por ÁREA e rejeitar só o
+  que é pequeno em todas as direções (`min<2 or max<4`).
+  Medido nas 11 determinísticas, **zero regressões**: capa18 0.6935→**0.7687** (+0.075),
+  capa20 0.8387→**0.8801**, capa11 0.9070→**0.9457**, capa16 0.8904→**0.9096**,
+  capa8 →0.9318. Média das 20 **0.833→0.842**, capas ≥0.90 de 9 para **10**.
+  ⚠️ A capa10 — que motivou a busca — ganhou ~zero. **O defeito era geral e a capa que o
+  revelou não era a que mais sofria dele.** É o argumento a favor de medir nas 20 sempre.
+- **D3 3ª tira com laranja divergente. NÃO É CLASSE.** Medi o par de cores mais próximo nas 20
+  paletas: capa10 dá **69.6**, uma das MAIS separadas (mediana 36.4; capa15 6.4, capa20 12.1).
+  Fundir cores próximas por limiar mexeria em 11 capas pra consertar uma tira. Não entra.
+- **D4 anel vira tiras laterais** — ABERTO (ver Reversões: preencher oclusão foi revertido).
+
+⚠️ **USO DO VLM (2026-08-19):** só 9 das 20 capas JÁ TIVERAM um passe (1,2,5,6,7,14,15,17,19).
+**Onze nunca viram o VLM** (3,4,8,9,10,11,12,13,16,18,20). E as 9 foram propostas contra
+renders que não existem mais (pré-leitor-estrutural). Os edits cacheados são re-julgados, mas
+a PROPOSTA é velha. Re-propor custa API — priorizar por capa, nunca em lote.
 
 ## Protocolo de trabalho (SEMPRE seguir)
 

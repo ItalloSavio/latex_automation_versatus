@@ -90,8 +90,11 @@ def _metrics(orig, rend, analysis=None) -> "tuple[float, float, float]":
                 ce = tm if share > 0 else cm
             elif share > 0:
                 ce = (1.0 - share) * nt + share * tm
-    w      = vc._SCORE_W
-    score  = w["ssim"] * ss + w["content_match"] * ce + w["content_iou"] * iou
+    # The Score is now ssim + structural (calibrated against the user's own labels); the
+    # content terms stayed as diagnostics. Read the weights from the comparator so the board
+    # can never drift from what the pipeline actually optimises.
+    w = vc._SCORE_W
+    score = w["ssim"] * ss + w["content_match"] * ce + w["content_iou"] * iou
     return score, ss, ce
 
 

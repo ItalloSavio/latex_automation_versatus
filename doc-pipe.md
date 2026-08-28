@@ -109,8 +109,8 @@ Autoridade: `visual_comparator.py`.
 
 | métrica | o que é | meta |
 |---|---|---|
-| **`score`** | **`0.30·SSIM + 0.50·content_effective + 0.20·content_iou` — o que o loop otimiza** | ≥ 0.95 |
-| **`content_effective`** | **o termo de conteúdo: TIPO pelo `text_match` tolerante, o resto pelo casamento estrito, misturados pela fatia de cada parte NO CONTEÚDO** | → 1.0 |
+| **`score`** | **`0.75·SSIM + 0.25·structural_match` — o que o loop otimiza** | ≥ 0.95 |
+| **`structural_match`** | **casa as FORMAS das duas imagens uma a uma (cor, área, centroide, via Hungarian). Tolerante a sub-pixel; um render sem formas para casar tira ~0** | → 1.0 |
 | `ssim_global` | SSIM skimage | ≥ 0.95 |
 | `content_match` | qualidade SÓ nos pixels de conteúdo (não-fundo) | → 1.0 |
 | `content_iou` | sobreposição das máscaras de conteúdo | → 1.0 |
@@ -122,7 +122,37 @@ Autoridade: `visual_comparator.py`.
 SSIM é ponderado por ÁREA. Uma capa com fundo grande ganha SSIM alto só acertando o fundo.
 capa2 tem SSIM 0.94 e `content_match` 0.03. **Sempre olhe os dois juntos.**
 
-### O juiz foi medido contra o olho — e ele está melhor do que se pensava
+### O juiz foi CALIBRADO contra o olho do usuário (2026-08-19)
+
+O usuário classificou as 20 capas em **Boas**, **Ok** e **Péssimas**. Isso virou o alvo: sobre
+os **123 pares de classes diferentes**, com que frequência a métrica ordena como ele ordenou?
+
+| sinal | concordância |
+|---|---|
+| **SSIM sozinho** | **80.5%** |
+| casamento de formas (`structural`) | 76.4% |
+| o Score anterior (0.30/0.50/0.20) | 71.5% |
+| `content_match` | 71.5% |
+| **`text_match`** | **51.2% — acaso** |
+
+O Score passou a ser **0.75·SSIM + 0.25·structural**, que dá **82.9%** e preserva 4/4 no banco
+adversarial antigo (a proteção contra sobreajuste). Os termos de conteúdo seguem calculados e
+reportados como diagnóstico; deixam de decidir.
+
+⚠️ **Duas doutrinas deste documento envelheceram e foram corrigidas por esta medição:**
+"SSIM sozinho engana" era verdade quando faltava conteúdo inteiro — com a estrutura certa,
+inverteu. E o `text_match`, adicionado ao Score um dia antes, mede algo que o usuário não usa
+para julgar (*"sobre o conteúdo do texto, meio que foda-se"*). **Medição envelhece; re-meça
+antes de construir em cima.**
+
+⚠️ Os pesos exatos **não são identificáveis** com 20 capas (só 3 combinações ficam a 2pp do
+topo). O que é robusto é a direção: SSIM domina.
+
+**O que isso destravou de graça:** o portão que remove texto inventado pelo OCR (`_select_text`)
+estava inerte — com o juiz antigo, apagar o "UUU" que o OCR leu nos hot dogs da capa10 PIORAVA
+a nota. Com o juiz novo ele apagou sozinho, sem código novo.
+
+### (histórico) O juiz medido contra o olho — a hipótese que não sobreviveu
 
 Existe um **banco de provas** (`scratchpad/judge_bench.py`) com os casos em que o usuário deu
 veredicto: vetorizador × detector nas capas 1/3/5, e a capa11 com figura e fundo trocados.
@@ -337,6 +367,22 @@ Guardado porque é caro re-descobrir. Detalhe completo no `CLAUDE.md`.
 entendidas **depois** da reversão — a reversão apontou o bug real.
 
 ---
+
+## 10b. Como o trabalho anda hoje (o método que funciona)
+
+O usuário olha uma capa e descreve o defeito em português. O dev localiza a causa **no
+código**, mede o efeito nas 20 capas, e fecha. Não se escreve regra a partir de uma capa: a
+hipótese é medida no conjunto inteiro primeiro, e frequentemente ela morre lá — duas
+hipóteses sobre "gráfico lido como texto" foram medidas e ambas saíram **invertidas**.
+
+Cada defeito termina em um de quatro estados: **ABERTO**, **FECHADO** (com o número),
+**BLOQUEADO por X** (registra o motivo e libera o próximo) ou **NÃO É CLASSE** (a medição
+mostrou que é local, não geral). Os três últimos são conclusões válidas — só ABERTO fica
+devendo.
+
+**Ferramentas de apoio:** `automation/tools/run_batch.py` (roda várias capas com progresso
+visível em `_run_status.md`) e `scratchpad/audit.py` (confere que o `analysis.json` guardado
+ainda reproduz o render entregue — a família de bug mais cara do projeto).
 
 ## 11. Como rodar
 

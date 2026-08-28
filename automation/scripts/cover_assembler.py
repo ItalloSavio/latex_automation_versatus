@@ -96,13 +96,14 @@ def assemble(
     else:
         print("         (sem regioes para analisar)")
 
-    # Drop OCR hits that land inside a detected circle: a circular graphic (e.g.
-    # a concentric ring motif) is otherwise misread as a glyph ("6"), stamping
-    # phantom text over the shape. The circle already reproduces that pixel area.
-    n_before      = len(text_elements)
-    text_elements = _suppress_text_in_shapes(text_elements, regions)
-    if len(text_elements) < n_before:
-        print(f"         {n_before - len(text_elements)} texto(s) descartado(s) dentro de circulos")
+    # (removed 2026-08-19: _suppress_text_in_shapes, a blanket "drop every text whose centre
+    # falls inside a detected circle". It was written for capa1's ring being read as a "6",
+    # but text set inside a circle is a standard Swiss device, and the rule measured nothing:
+    # capa11's "THE MOST / SPECIAL / YOU" arrived at confidence 0.86-1.00 with 0.385cm of ink,
+    # cleared every filter, and was deleted anyway — leaving that cover with NO text at all.
+    # `replicate_cover._select_text` asks the same question by MEASURING: drop the element,
+    # render, and keep the removal only when the Score improves. The blind rule became
+    # redundant the day that gate existed. The function is kept below, unused, for the record.)
 
     # ── Stage 4: Font matching ────────────────────────────────────────────────
     print("  [4/4] Estimativa de fontes…")

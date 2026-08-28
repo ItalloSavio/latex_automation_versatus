@@ -105,8 +105,19 @@ def dedup_text(analysis: dict) -> dict:
         if t.get("source") == "vlm" or not t.get("bbox_cm"):
             kept.append(t); continue
         b = t["bbox_cm"]; cx = b["x"] + b["w"] / 2; cy = b["y"] + b["h"] / 2
+        word = "".join(ch for ch in t.get("text", "").casefold() if ch.isalnum())
+
+        # The VLM block must SUPERSEDE this reading, i.e. say the same words. Position alone
+        # is not enough: on capa17 the VLM added "SWISS" with a box 16.8 x 4.5cm spanning BOTH
+        # headline lines, and this rule then deleted "STYLE" — read at confidence 1.00 — for
+        # merely sitting under it. A different word is different text and must survive.
+        def _same(v):
+            vw = "".join(ch for ch in v.get("text", "").casefold() if ch.isalnum())
+            return bool(word) and bool(vw) and (word in vw or vw in word)
+
         covered = any(v["bbox_cm"]["x"] - 0.5 <= cx <= v["bbox_cm"]["x"] + v["bbox_cm"]["w"] + 0.5
                       and v["bbox_cm"]["y"] - 1.0 <= cy <= v["bbox_cm"]["y"] + v["bbox_cm"]["h"] + 1.0
+                      and _same(v)
                       for v in vlm)
         if not covered:
             kept.append(t)

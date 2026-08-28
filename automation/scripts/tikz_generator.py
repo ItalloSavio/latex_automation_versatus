@@ -47,7 +47,13 @@ _COLOR_MATCH_DIST = 35.0
 # bleeding through the seam. Stroking every fill with its OWN colour by this
 # width makes neighbours overlap by half of it, closing the seam. Kept small
 # (well under 1px at 150 dpi ≈ 0.48pt) so block sizes shift imperceptibly.
-_SEAM_BLEED_PT = 0.5
+_SEAM_BLEED_PT = 1.0   # was 0.5 (~1px at 150dpi), too narrow to close the hairline the
+                       # quantiser leaves between neighbouring shapes: the two traced
+                       # contours stop 1-3px apart and the BACKGROUND shows through, which
+                       # is what reads as 'circles with a white border' / 'picotado'.
+                       # Swept 0.5/1.0/1.5/2.0: 1.0 is where capa13 peaks (0.919->0.930)
+                       # while capa4 barely moves (-0.001); past it shapes start to swell
+                       # and both controls fall away.
 
 
 def _fill_opts(color: str) -> str:

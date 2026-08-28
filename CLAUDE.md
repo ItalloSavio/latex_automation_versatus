@@ -1038,6 +1038,43 @@ defeitos, eu fui direto no mais difícil (o "UUU") e fechei ZERO. Um defeito por
 válida — registra o motivo e libera o próximo) · **NÃO É CLASSE** (a medição mostrou que o
 defeito é local, não geral, e não vale mudança global).
 
+### Registro de defeitos — rodada das 20 (narração do usuário, 2026-08-19)
+
+- **A3 costura branca entre formas (capa8/11/12, "círculo picotado"). FECHADO.** O leitor
+  traça cada cor separadamente, e os pixels de anti-alias da fronteira ficam FORA dos dois
+  contornos → o FUNDO aparece numa fresta de 1–3px. Medido: fundo invadindo 8.47% da página
+  na capa3, 2.42% capa13, 2.13% capa8, 1.63% capa12. `_SEAM_BLEED_PT` 0.5→**1.0pt** (varredura
+  0.5/1.0/1.5/2.0: em 1.0 a capa13 tem seu máximo 0.919→0.930 e a capa4 quase não sente;
+  acima disso as formas incham e os dois controles caem). Medido nas 10 determinísticas:
+  capa18 +0.016, capa13 +0.010, capa20 +0.010, capa16 +0.008, **saldo +0.044, zero regressão
+  real.** ⚠️ Na capa3 a sangria só tira 8.47%→7.99% — lá o buraco **não é costura**, é
+  conteúdo faltando (ver A2).
+- **A1/A5 texto sumindo — DUAS causas, ambas regras CEGAS, ambas removidas.**
+  1. **FECHADO.** `cover_assembler._suppress_text_in_shapes` descartava TODO texto cujo centro
+     caísse dentro de um círculo detectado. Nasceu do anel da capa1 lido como "6". Mas texto dentro
+     de círculo é recurso suíço padrão: a capa11 perdeu "THE MOST / SPECIAL / YOU" — conf
+     0.86–1.00, tinta 0.385cm, passando por TODOS os filtros — e ficou com **zero textos**.
+     **Removida**: o `_select_text` faz a mesma pergunta MEDINDO (remove → renderiza → só
+     mantém a remoção se o Score sobe). A regra cega virou redundante no dia em que a medida
+     existiu, e ninguém percebeu.
+  2. `edit_gate.dedup_text` removia leitura do OCR por VIZINHANÇA. Na capa17 o VLM adicionou
+     "SWISS" com caixa de 16.8×4.5cm cobrindo as DUAS linhas do título, e o "STYLE" — lido
+     com **confiança 1.00** — morreu por estar embaixo. Agora exige as **mesmas palavras**:
+     o dedup existe para remover a leitura que o VLM SUBSTITUIU; palavra diferente é texto
+     diferente.
+- **⚠️ O QUE A TROCA "regra cega → portão medido" COMPROU E O QUE NÃO (medido 2026-08-19).**
+  Removida a regra do círculo: **capa11 recuperou os 3 textos** ('THE MOST'/'SPECIAL'/'YOU')
+  e subiu 0.9438→**0.9463**; capa7 0.9237→0.9273; capa1 fica em **0.7346 com ou sem** a regra.
+  **MAS o `_select_text` NÃO reproduz o acerto dela:** o "6" da capa1 É testado (13.6% da
+  página, 411pt) e o portão decide **MANTER** — remover baixa o Score, o mesmo ponto cego do
+  "UUU" da capa10 (glifo falso escuro sobre área escura erra menos que expor o fundo).
+  Saldo: a regra cega custava uma capa inteira e não comprava nada mensurável → removida.
+  O "6" só sai quando o juiz melhorar; a máquina certa já está no lugar, inerte.
+- **A4 capa19 "the shining atrás do retângulo". NÃO é ordem de desenho** — texto sempre sai
+  depois das regiões (tikz_generator L161 vs L168). No original **"the" é BRANCO** (sobre a
+  forma preta) e **"shining" é ESCURO** (sobre o amarelo); o OCR entrega UM elemento com UMA
+  cor, então metade some. Precisa de cor por trecho. ABERTO.
+
 ### Registro de defeitos — capa10 (a primeira rodada do método)
 - **D1 "UUU" — o OCR lê o GRÁFICO como texto.** EasyOCR lê os 3 hot dogs como as letras
   "UUU" a **351pt**, conf 0.65 — MAIOR que a de duas legendas reais da mesma capa (0.62).

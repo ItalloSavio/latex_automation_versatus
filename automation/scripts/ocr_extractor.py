@@ -31,7 +31,16 @@ from pathlib import Path
 # reliably score ≥ 0.5 while noise scores far lower. 0.50 (vs the old 0.60)
 # recovers real secondary lines that EasyOCR rates just under 0.60 — e.g. a
 # date/time footer line at ~0.59 — without admitting spurious detections.
-_MIN_CONFIDENCE = 0.50   # drop detections below this threshold
+_MIN_CONFIDENCE = 0.50   # a reading at or above this is kept outright
+# Below it, keep a reading only when it is LONG. Measured over the eight text-heavy covers,
+# confidence alone does not separate real captions from noise, but confidence + LENGTH does:
+# between 0.20 and 0.45 everything real is long ('brooklyn tne shirts' 0.40, 'september 12 13,
+# 74, 1975' 0.28, '315 bowery' 0.24, 'Material tecnico de formacso' 0.30) and everything
+# spurious is 1-3 characters ('9' 0.39, '222' 0.23, '8' 0.21). Under 0.20 the noise gets long
+# again — capa14's rotated type produces 20-30 character gibberish at 0.00-0.04 — so the floor
+# stays. This recovers 8 real captions and admits none of the junk.
+_WEAK_CONFIDENCE = 0.20  # nothing under this, at any length
+_WEAK_MIN_CHARS  = 8     # alphanumeric characters required between _WEAK_ and _MIN_
 _MIN_HEIGHT_CM  = 0.15   # drop sub-millimeter boxes (sensor noise / artifacts)
 _CM_TO_PT       = 28.35  # typographic conversion
 
@@ -113,8 +122,12 @@ def _run_ocr(path: Path, width_cm: float, height_cm: float) -> "list[dict]":
     # EasyOCR result format: [(quad, text, confidence), ...]
     for quad, text, conf in result:
         text = text.strip()
-        if conf < _MIN_CONFIDENCE or not text:
+        if not text:
             continue
+        if conf < _MIN_CONFIDENCE:
+            n_alnum = sum(ch.isalnum() for ch in text)
+            if conf < _WEAK_CONFIDENCE or n_alnum < _WEAK_MIN_CHARS:
+                continue
 
         # Convert 4-corner quad to axis-aligned pixel bbox
         xs = [p[0] for p in quad]

@@ -54,8 +54,15 @@ _SOLID_MIN = 0.10
 _MAX_POLY_PTS = 64
 # How much better a TRACE must be before it beats a named primitive (circle/ellipse/rect).
 _PARAM_BONUS = 0.03
-# A piece smaller than this fraction of the page is a speck.
-_MIN_AREA_FRAC = 0.0006
+# A piece smaller than this fraction of the page is a speck. Lowered 0.0006 -> 0.00015 after
+# measuring what the old floor threw away: capa18 lost 10.56% of its page and capa20 6.02%, in
+# components just under the line. Swept 0.0006/0.0003/0.00015 through the real renderer —
+# monotonic gains where content was missing (capa18 0.7876->0.8072, capa20 0.8898->**0.9003**,
+# crossing 0.90) with the controls flat (capa13 -0.001, capa4 identical), and no cover came
+# near _MAX_PIECES. ⚠️ capa3 is NOT helped by this: lowering the floor 4x adds ZERO pieces
+# there, because its 9.76% of lost area is 1px-THIN film caught by the min(shape) test, not by
+# area — that cover's problem is shapes not meeting, not shapes missing.
+_MIN_AREA_FRAC = 0.00015
 # Below this IoU no single primitive explains the component, so try splitting it.
 _SPLIT_MIN = 0.90
 # A split is kept only if it explains this much more of the blob than the single shape did.

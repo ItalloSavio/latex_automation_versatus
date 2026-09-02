@@ -767,6 +767,42 @@ def _render_pdf(pdf_path: Path, png_path: Path, dpi: int) -> "Path | None":
 
 # ─── Patch Engine ─────────────────────────────────────────────────────────────
 
+
+_PATCH_SNAP_TOL = 90.0    # RGB distance beyond which a measured colour is genuinely new
+
+
+def _snap_to_palette(hex_: str, analysis: dict) -> str:
+    """Pull a patch's measured colour onto the nearest REAL palette entry.
+
+    The patch engine measures the mean colour inside a region's bbox. For a triangle that
+    bbox also covers half the neighbour, so the "measured" colour is a blend that exists
+    nowhere in the design — capa18 accumulated **38 single-use colours** that way (46 entries
+    for a 3-colour poster) and its tiles came out each a slightly different shade, which is
+    what a reader sees as "identical shapes in different colours".
+
+    Snapping costs nothing and buys back the flat-colour discipline the style is built on:
+    measured on capa18, re-snapping all 40 affected pieces moved the Score by 0.0001.
+    A colour genuinely far from every palette entry (> _PATCH_SNAP_TOL) is still allowed
+    through — that is a real colour the palette missed, not a bbox blend.
+    """
+    try:
+        rgb = tuple(int(hex_.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+    except Exception:
+        return hex_
+    best, best_d = hex_, float("inf")
+    for c in analysis.get("colors", []):
+        if c.get("coverage", 0) < 0.002:          # invented entries don't attract others
+            continue
+        try:
+            prgb = tuple(int(c["hex"].lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+        except Exception:
+            continue
+        d = sum((a - b) ** 2 for a, b in zip(rgb, prgb)) ** 0.5
+        if d < best_d:
+            best, best_d = c["hex"], d
+    return best if best_d <= _PATCH_SNAP_TOL else hex_
+
+
 def _apply_patches(analysis: dict, patch_hints: list) -> dict:
     """
     Apply color correction patches to the analysis dict.
@@ -787,8 +823,10 @@ def _apply_patches(analysis: dict, patch_hints: list) -> dict:
 
         if 0 <= idx < len(regions):
             old = regions[idx].get("color_hex", "")
-            regions[idx]["color_hex"] = hint["expected_hex"]
-            _log(f"    Patch region_{idx}: {old} → {hint['expected_hex']}")
+            new_hex = _snap_to_palette(hint["expected_hex"], patched)
+            regions[idx]["color_hex"] = new_hex
+            _log(f"    Patch region_{idx}: {old} → {new_hex}"
+                 + ("" if new_hex == hint["expected_hex"] else f" (medido {hint['expected_hex']})"))
 
     # Also update the colors array to include any newly patched hexes
     existing_hexes = {c["hex"].upper() for c in patched.get("colors", [])}

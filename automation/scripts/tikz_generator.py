@@ -165,7 +165,7 @@ def _build_tikz(doc: dict) -> str:
     # Text elements
     if texts:
         lines.append("  % Text elements")
-        lines += _build_text_nodes(_resolve_text_overlap(texts), color_map, bg_hex, W)
+        lines += _build_text_nodes(_resolve_text_overlap(texts), color_map, bg_hex, W, regions)
         lines.append("")
 
     lines.append(r"  \end{tikzpicture}%")
@@ -625,7 +625,7 @@ def _resolve_text_overlap(texts: list) -> list:
 
 
 def _build_text_nodes(texts: list, color_map: dict, bg_hex: str = "FFFFFF",
-                      W: float = 21.0) -> "list[str]":
+                      W: float = 21.0, regions: "list | None" = None) -> "list[str]":
     bg_rgb = _hex_to_rgb(bg_hex)
 
     # Pre-build a reverse map: color name → hex, for contrast lookup
@@ -695,8 +695,20 @@ def _build_text_nodes(texts: list, color_map: dict, bg_hex: str = "FFFFFF",
             matched = _nearest_color(col_h, color_map)
             col = matched if matched else best_contrast_name
 
-        # Contrast check: if text color is too close to background, swap to
-        # the most contrasting palette color so the text is always visible.
+        # Contrast check against what is actually UNDER this text, not against the page.
+        # Using the page background let dark type land on a dark SHAPE and vanish: capa19's
+        # "the shining" is dark on a yellow page (so the old guard passed it) and half the
+        # word sits on the black form, which is what read as "the text went behind the
+        # rectangle". Measured across the set, 16 blocks in 8 covers have text within 60 RGB
+        # of the region beneath them.
+        # TRIED AND REVERTED (2026-08-19): flipping against the LOCAL background (the smallest
+        # region under the text CENTRE) instead of the page. It fixed capa2 (+0.070) and broke
+        # capa17 (0.8643 -> 0.7914): that cover's "SWISS" has its centre inside a black bar but
+        # the WORD lies on white, so the guard flipped it to white and it vanished. Sampling
+        # ONE point cannot describe type that spans regions — the real fix is colour per SPAN
+        # (capa19: "the" is white on the black form, "shining" dark on the yellow, and the OCR
+        # hands us ONE element with ONE colour). Left as the page-background check until that
+        # exists.
         resolved_hex = name_to_hex.get(col, col_h)
         if _rgb_dist(_hex_to_rgb(resolved_hex), bg_rgb) < 45:
             col = best_contrast_name
@@ -711,6 +723,32 @@ def _build_text_nodes(texts: list, color_map: dict, bg_hex: str = "FFFFFF",
             f"\\selectfont{cmd}{bold}{text}}}}}}};"
         )
     return lines
+
+
+
+def _local_bg_rgb(bx: dict, regions: "list | None", page_rgb) -> "tuple[int,int,int]":
+    """Colour of whatever sits under this text box: the SMALLEST region containing its
+    centre, falling back to the page background. Smallest wins because regions nest — the
+    page-sized background always contains the centre too."""
+    if not regions:
+        return page_rgb
+    cx = bx.get("x", 0) + bx.get("w", 0) / 2
+    cy = bx.get("y", 0) + bx.get("h", 0) / 2
+    best, best_area = None, float("inf")
+    for r in regions:
+        b = r.get("bbox_cm") or {}
+        if not b:
+            continue
+        if b["x"] <= cx <= b["x"] + b["w"] and b["y"] <= cy <= b["y"] + b["h"]:
+            area = b["w"] * b["h"]
+            if area < best_area:
+                best, best_area = r, area
+    if best is None:
+        return page_rgb
+    try:
+        return _hex_to_rgb(best.get("color_hex", "#FFFFFF").lstrip("#"))
+    except Exception:
+        return page_rgb
 
 
 def _max_contrast_color(bg_rgb: "tuple[int,int,int]", color_map: dict) -> str:

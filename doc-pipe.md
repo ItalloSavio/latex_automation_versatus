@@ -109,8 +109,8 @@ Autoridade: `visual_comparator.py`.
 
 | métrica | o que é | meta |
 |---|---|---|
-| **`score`** | **`0.75·SSIM + 0.25·structural_match` — o que o loop otimiza** | ≥ 0.95 |
-| **`structural_match`** | **casa as FORMAS das duas imagens uma a uma (cor, área, centroide, via Hungarian). Tolerante a sub-pixel; um render sem formas para casar tira ~0** | → 1.0 |
+| **`score`** | **`0.30·SSIM + 0.50·content_effective + 0.20·content_iou` — o que o loop otimiza** | ≥ 0.95 |
+| `structural_match` | casa as FORMAS uma a uma (cor, área, centroide, Hungarian). Calculado e REPORTADO, fora do Score — ver abaixo | diagnóstico |
 | `ssim_global` | SSIM skimage | ≥ 0.95 |
 | `content_match` | qualidade SÓ nos pixels de conteúdo (não-fundo) | → 1.0 |
 | `content_iou` | sobreposição das máscaras de conteúdo | → 1.0 |
@@ -122,7 +122,7 @@ Autoridade: `visual_comparator.py`.
 SSIM é ponderado por ÁREA. Uma capa com fundo grande ganha SSIM alto só acertando o fundo.
 capa2 tem SSIM 0.94 e `content_match` 0.03. **Sempre olhe os dois juntos.**
 
-### O juiz foi CALIBRADO contra o olho do usuário (2026-08-19)
+### O juiz foi calibrado contra o olho — e a troca foi REVERTIDA no mesmo dia (2026-08-19)
 
 O usuário classificou as 20 capas em **Boas**, **Ok** e **Péssimas**. Isso virou o alvo: sobre
 os **123 pares de classes diferentes**, com que frequência a métrica ordena como ele ordenou?
@@ -135,9 +135,18 @@ os **123 pares de classes diferentes**, com que frequência a métrica ordena co
 | `content_match` | 71.5% |
 | **`text_match`** | **51.2% — acaso** |
 
-O Score passou a ser **0.75·SSIM + 0.25·structural**, que dá **82.9%** e preserva 4/4 no banco
-adversarial antigo (a proteção contra sobreajuste). Os termos de conteúdo seguem calculados e
-reportados como diagnóstico; deixam de decidir.
+`0.75·SSIM + 0.25·structural` dá **82.9%** e preserva 4/4 no banco adversarial antigo — passou
+nos dois testes que existiam. **E mesmo assim teve de ser revertido.**
+
+Com o loop otimizando por ele, quatro capas pioraram visivelmente: duas perderam blocos de
+texto, uma perdeu um título de 102pt, outra virou um borrão chapado. **Mecanismo:** nem o SSIM
+nem o `structural` percebem TEXTO FALTANDO — o primeiro mal reage a tipo fino, o segundo casa
+blobs coloridos. Sem nenhum termo de conteúdo, **apagar texto virou de graça** e o loop apagou.
+
+⚠️ **A lição vale mais que os pesos: uma métrica pode ser um bom RANKEADOR e um péssimo ALVO DE
+OTIMIZAÇÃO.** Concordância de ordenação não é teste de aceite suficiente — é preciso rodar o
+loop com a candidata e OLHAR os renders. Qualquer Score futuro precisa das duas coisas: algo
+que ordene como o olho E algo que puna conteúdo ausente.
 
 ⚠️ **Duas doutrinas deste documento envelheceram e foram corrigidas por esta medição:**
 "SSIM sozinho engana" era verdade quando faltava conteúdo inteiro — com a estrutura certa,
@@ -148,7 +157,7 @@ antes de construir em cima.**
 ⚠️ Os pesos exatos **não são identificáveis** com 20 capas (só 3 combinações ficam a 2pp do
 topo). O que é robusto é a direção: SSIM domina.
 
-**O que isso destravou de graça:** o portão que remove texto inventado pelo OCR (`_select_text`)
+**O que a troca chegou a destravar (e foi junto na reversão):** o portão que remove texto inventado pelo OCR (`_select_text`)
 estava inerte — com o juiz antigo, apagar o "UUU" que o OCR leu nos hot dogs da capa10 PIORAVA
 a nota. Com o juiz novo ele apagou sozinho, sem código novo.
 
@@ -383,6 +392,30 @@ devendo.
 **Ferramentas de apoio:** `automation/tools/run_batch.py` (roda várias capas com progresso
 visível em `_run_status.md`) e `scratchpad/audit.py` (confere que o `analysis.json` guardado
 ainda reproduz o render entregue — a família de bug mais cara do projeto).
+
+## 10c. A classe de bug que mais custou: REGRA CEGA
+
+Três defeitos independentes, encontrados pela narração do usuário em dias diferentes, acabaram
+tendo a mesma forma: **uma regra escrita para resolver UM caso, que passa a apagar coisa
+legítima em outras capas, sem medir nada.**
+
+| regra | nasceu para | passou a apagar |
+|---|---|---|
+| `min(m.shape) < 4` no leitor | rejeitar ruído | **toda régua fina** (design suíço vive delas) |
+| `_suppress_text_in_shapes` | o anel da capa1 lido como "6" | **todo texto dentro de círculo** |
+| `dedup_text` por vizinhança | remover a leitura que o VLM substituiu | **texto sob a caixa de outro texto** |
+
+E em dois dos três casos **a versão MEDIDA já existia** (`_select_text`: remove, renderiza,
+mantém a remoção só se o Score sobe). A regra cega tinha virado redundante e ninguém removeu.
+
+⚠️ A troca foi testada nos DOIS sentidos, e o resultado é honesto: a versão medida recuperou o
+que a regra quebrava (capa11 voltou a ter texto) mas **não reproduziu o que ela acertava** — o
+"6" da capa1 é testado pelo portão e MANTIDO, porque a métrica o prefere. A regra saiu porque
+custava uma capa inteira e não comprava nada mensurável; a máquina certa fica no lugar, inerte,
+até o juiz melhorar.
+
+**Varredura:** restam ~19 descartes sem medição no pipeline. `grep -B1 continue` atrás de `if`
+com limiar é o jeito de achá-los.
 
 ## 11. Como rodar
 

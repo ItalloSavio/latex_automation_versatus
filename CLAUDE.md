@@ -12,6 +12,32 @@ Logo: **identificar** se há logo (sim/não), **não** adicionar/reconstruir.
 
 Nada além disso é escopo. Ver "Fora de escopo" no final.
 
+## ✅ TO-DO — fila de defeitos (ATUALIZAR A CADA MUDANÇA)
+
+Fonte: narração do usuário sobre as 20 capas (2026-08-19). Estados: **ABERTO** ·
+**FECHADO** (com a medição) · **BLOQUEADO por X** · **NÃO É CLASSE** (medido: é local, não geral).
+Regra: fechar item ABERTO de causa conhecida e correção barata ANTES de atacar BLOQUEADO.
+
+| # | defeito | capas | estado |
+|---|---|---|---|
+| A1 | texto dentro de círculo era descartado | 11 | ✅ FECHADO — regra cega removida; 3 textos de volta, 0.9438→**0.9463** |
+| A3 | costura branca entre formas ("círculo picotado") | 8, 11, 12 | ✅ FECHADO — `_SEAM_BLEED_PT` 0.5→1.0; **+0.044** em 10 capas |
+| A5 | texto "comendo" elementos | 17 | ✅ FECHADO — `dedup_text` exige as MESMAS palavras; `'STYLE'` de volta |
+| D2 | régua fina descartada | todas | ✅ FECHADO — `min(m.shape)<4` → por ÁREA; capa18 **+0.075** |
+| D1 | "UUU": OCR lê gráfico como texto | 10, 1 | 🚫 BLOQUEADO pelo JUIZ — `_select_text` testa e decide MANTER (remover baixa o Score) |
+| A9 | textos pequenos não localizados | 9 | 🚫 BLOQUEADO por RECALL do EasyOCR — só 3 leituras na imagem inteira; saída é o VLM |
+| A2 | `circle_lattice` perde para o leitor (0.611×0.799) | 3 | ⏸️ DECIDIDO: **portão soberano**. Caso-teste de qualquer juiz futuro |
+| A4 | "the shining" some no preto | 19, 17, 2 | 📋 ABERTO — é **cor por trecho**. Medido: 16 blocos em 8 capas têm texto a <60 RGB da região sob eles. Guard local pelo CENTRO foi TENTADO e REVERTIDO (capa2 +0.070, capa17 **−0.073**): amostrar um ponto não descreve texto que atravessa regiões |
+| A6 | peças iguais com cores diferentes | 18 | 📋 ABERTO |
+| A7 | círculo (ex-"6") torto | 1 | 📋 ABERTO |
+| A10 | "falta desenhar o resto" | 20 | 📋 ABERTO |
+| A11 | alinhamento e escrita ruins | 14, 15 | 📋 ABERTO — teto conhecido: glifos se tocam, banda não mede |
+| D4 | anel vira tiras laterais | 10 | 📋 ABERTO — preencher oclusão foi REVERTIDO; o conserto é JUNTAR AS TIRAS |
+| T1 | **19 descartes sem medição** no pipeline | todas | 📋 ABERTO — `grep -B1 continue` atrás de `if` com limiar. Suspeitos: `conf<0.50` e `h_box_cm<0.15` no OCR, guards de círculo |
+| T2 | `_select_text` sem guard | — | 📋 ABERTO — apagar é destrutivo, deveria exigir evidência forte |
+| T3 | capa1 depende de cache manual | 1 | 📋 ABERTO — automático dá 0.7346 × 0.8154 manual |
+| T4 | 11 capas nunca viram o VLM | 3,4,8,9,11,12,13,16,18,20 | 📋 ABERTO — custa API, priorizar por capa |
+
 ## Direção estratégica (o reframe — LER ISTO)
 
 O gargalo NÃO é mais gerar TikZ nem falta de vocabulário. É **entender a ESTRUTURA
@@ -1039,6 +1065,24 @@ válida — registra o motivo e libera o próximo) · **NÃO É CLASSE** (a medi
 defeito é local, não geral, e não vale mudança global).
 
 ### Registro de defeitos — rodada das 20 (narração do usuário, 2026-08-19)
+
+- **A2 capa3 — o lattice perdeu para o leitor. DECIDIDO: o PORTÃO É SOBERANO.** O
+  `circle_lattice` dispara normalmente (período 5.36cm, raio 3.75cm, 16 lentes medidas) e
+  produz um render visualmente MUITO mais próximo do original — mas perde a votação por 0.19
+  (leitor 0.799 × lattice 0.611). Antes da Fase 6 eu o mantinha à mão, contra a métrica
+  ("mantido pelo OLHO", registrado quando o construí); quando o `_select_reader` virou
+  automático, a métrica ganhou. **O usuário decidiu manter o portão soberano** e procurar uma
+  saída melhor em vez de abrir exceção. Testado e descartado no caminho: raio (0.70·período
+  já é o ótimo; 0.50/0.55/0.60 pioram) e os dois juízes (o novo prefere o leitor por margem
+  AINDA MAIOR). O `structural` é o único sinal que prefere o lattice (0.479 × 0.427).
+  **É o caso-teste de qualquer juiz futuro: acertá-lo sem quebrar as outras 19.**
+- **⚠️ 19 regras de descarte SEM MEDIÇÃO no pipeline (varredura 2026-08-19).** Três já
+  cobraram caro (`min(m.shape)<4` comia toda régua; `_suppress_text_in_shapes` comia texto em
+  círculo; `dedup_text` comia texto por vizinhança) e as três eram a MESMA forma: uma regra
+  escrita para um caso, apagando coisa legítima em outras capas, sem medir nada. As demais
+  candidatas estão em `ocr_extractor` (`conf < 0.50` derrubou 'SWIIS' 0.30 e 'Bi 8' 0.13;
+  `h_box_cm < 0.15`) e nos guards de círculo do `image_analyzer`. **Padrão de busca que
+  funciona: `grep -B1 continue` atrás de `if` com limiar.**
 
 - **A3 costura branca entre formas (capa8/11/12, "círculo picotado"). FECHADO.** O leitor
   traça cada cor separadamente, e os pixels de anti-alias da fronteira ficam FORA dos dois

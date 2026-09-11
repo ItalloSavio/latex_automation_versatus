@@ -98,7 +98,7 @@ def _metrics(orig, rend, analysis=None) -> "tuple[float, float, float]":
     return score, ss, ce
 
 
-def build_board(nums: "list[int]") -> "Path | None":
+def build_board(nums: "list[int]", integrated: bool = False) -> "Path | None":
     from PIL import Image, ImageDraw
 
     cells = []
@@ -131,10 +131,19 @@ def build_board(nums: "list[int]") -> "Path | None":
         o  = orig.resize((wv, _THUMB_H), Image.LANCZOS)
         r  = rend.resize((wv, _THUMB_H), Image.LANCZOS)
 
-        lab = 24
-        cell = Image.new("RGB", (wv, _THUMB_H * 2 + lab + 4), (28, 28, 28))
+        # Phase 7 strip: the same cover with the book's own content in it.
+        integ_p = _OUT / f"capa_teste{n}" / "integrated.png"
+        ig = None
+        if integrated and integ_p.exists():
+            ig = Image.open(integ_p).convert("RGB").resize((wv, _THUMB_H), Image.LANCZOS)
+
+        lab  = 24
+        rows = 3 if ig is not None else 2
+        cell = Image.new("RGB", (wv, _THUMB_H * rows + lab + 4 * (rows - 1)), (28, 28, 28))
         cell.paste(o, (0, lab))
         cell.paste(r, (0, lab + _THUMB_H + 4))
+        if ig is not None:
+            cell.paste(ig, (0, lab + (_THUMB_H + 4) * 2))
         d = ImageDraw.Draw(cell)
         d.rectangle([0, 0, wv, lab], fill=(40, 40, 40))
         d.rectangle([0, 0, 6, lab], fill=flag)
@@ -153,8 +162,10 @@ def build_board(nums: "list[int]") -> "Path | None":
     for c in cells:
         board.paste(c, (x, 0))
         x += c.width + gap
-    board.save(_BOARD)
-    return _BOARD
+    out = _OUT / ("_review_board_integrated.png" if integrated
+                  else "_review_board.png")
+    board.save(out)
+    return out
 
 
 if __name__ == "__main__":
@@ -169,8 +180,12 @@ if __name__ == "__main__":
     if do_build:
         _build(nums)
 
-    board = build_board(nums)
+    want_integrated = "--integrated" in args
+    board = build_board(nums, integrated=want_integrated)
     if board:
         print(f"\n[OK] Painel: {board}")
-        print("Ver:  start automation\\output\\replicated\\_review_board.png")
-        print("(cima = original, baixo = render; barra verde/amarela/vermelha = content_match)")
+        print(f"Ver:  start {board}")
+        if want_integrated:
+            print("(1a faixa = original, 2a = copia, 3a = copia com o conteudo do metadata)")
+        else:
+            print("(cima = original, baixo = render; barra verde/amarela/vermelha = content_match)")

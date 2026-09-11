@@ -63,6 +63,7 @@ _PARAM_BONUS = 0.03
 # there, because its 9.76% of lost area is 1px-THIN film caught by the min(shape) test, not by
 # area — that cover's problem is shapes not meeting, not shapes missing.
 _MIN_AREA_FRAC = 0.00015
+_THIN_RULE_MIN_PX = 40   # a 1px-thin component survives only if it is at least this long
 # Below this IoU no single primitive explains the component, so try splitting it.
 _SPLIT_MIN = 0.90
 # A split is kept only if it explains this much more of the blob than the single shape did.
@@ -284,7 +285,14 @@ def read(image_path, analysis: dict, drop_films: bool = False) -> "list | None":
             # of them. Requiring 4px on BOTH axes threw every one away: capa10 kept only the
             # 0.60cm-thick footer bar and lost the two hairline separators. Judge by AREA
             # (a long rule has plenty) and reject only what is small in every direction.
-            if m.sum() < min_area or min(m.shape) < 2 or max(m.shape) < 4:
+            # A component one pixel thin is either a drawn RULE or a speck of anti-alias,
+            # and what separates them is LENGTH, not thickness. Dropping everything under
+            # 2px thick cost capa2 both of its horizontal rules — 1px tall and 82% of the
+            # page wide, and the two strongest structural marks on that cover. Swiss layouts
+            # are built on rules, so they cannot be filtered out by thickness alone.
+            if m.sum() < min_area or max(m.shape) < 4:
+                continue
+            if min(m.shape) < 2 and max(m.shape) < _THIN_RULE_MIN_PX:
                 continue
             blobs = [(m, sl)]
             best, sc = _best_primitive(m)

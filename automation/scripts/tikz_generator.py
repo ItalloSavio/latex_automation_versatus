@@ -56,9 +56,30 @@ _SEAM_BLEED_PT = 1.0   # was 0.5 (~1px at 150dpi), too narrow to close the hairl
                        # and both controls fall away.
 
 
-def _fill_opts(color: str) -> str:
-    """Fill option string that also strokes the outline in the same colour."""
-    return f"{color},draw={color},line width={_SEAM_BLEED_PT}pt,line join=miter"
+_SEAM_BLEED_TRACED_PT = 2.0   # a TRACED contour needs far more than a tiled rectangle
+
+
+def _fill_opts(color: str, traced: bool = False) -> str:
+    """Fill option string that also strokes the outline in the same colour.
+
+    The bleed cannot be one number for every shape, and a sweep says so. A grid of rectangles
+    already tiles exactly, so extra stroke only swells each cell into its neighbour — capa4
+    (the control, and the best cover) loses 0.014 of Score by 4pt and its seam gets WORSE.
+    Independently TRACED contours are the opposite case: each colour is traced on its own and
+    the two outlines stop about 2px apart, leaving the background visible between them. That
+    hairline is what a reader describes as "white showing between the circles".
+
+    ⚠️ The comment above claimed "1pt ~ 2px at 150dpi". Measured on these rasters 1pt is
+    0.8-1.2px, so the flat 1.0pt was overlapping neighbours by under half a pixel against
+    cracks running 2px at the median — roughly 2.5x too small for a traced shape.
+
+    Swept 1/2/3/4pt over the ten MVP covers. 3pt is too much (net -0.030: capa12 gains but
+    capa1 -0.014, capa16 -0.009, capa19 -0.009). **2pt is the optimum, net +0.034**: capa2
+    +0.028, capa12 +0.004, capa8 +0.002, capa6 +0.002, capa4 EXACTLY unchanged, and the four
+    losses are 0.0006-0.0009 — noise.
+    """
+    w = _SEAM_BLEED_TRACED_PT if traced else _SEAM_BLEED_PT
+    return f"{color},draw={color},line width={w}pt,line join=miter"
 
 # ─── Text rendering calibration ───────────────────────────────────────────────
 # Swiss-design covers set Helvetica with tight tracking; the render fallback
@@ -165,7 +186,7 @@ def _build_tikz(doc: dict) -> str:
     # Text elements
     if texts:
         lines.append("  % Text elements")
-        lines += _build_text_nodes(_resolve_text_overlap(texts), color_map, bg_hex, W, regions)
+        lines += _build_text_nodes(_resolve_text_overlap(texts), color_map, bg_hex, W)
         lines.append("")
 
     lines.append(r"  \end{tikzpicture}%")
@@ -471,7 +492,7 @@ def _cmd_polygon(color: str, points_cm: list) -> str:
     y-up). The general shape that lets a proposer express what the fixed primitives
     can't — it emits VERTICES (data), the renderer stays deterministic."""
     pts = " -- ".join(f"({_f(x)},{_f(y)})" for x, y in points_cm)
-    return f"  \\fill[{_fill_opts(color)}] {pts} -- cycle;"
+    return f"  \\fill[{_fill_opts(color, traced=True)}] {pts} -- cycle;"
 
 
 def _cmd_hatch(line_col: str, base_col: "str | None", b: dict,
@@ -625,7 +646,7 @@ def _resolve_text_overlap(texts: list) -> list:
 
 
 def _build_text_nodes(texts: list, color_map: dict, bg_hex: str = "FFFFFF",
-                      W: float = 21.0, regions: "list | None" = None) -> "list[str]":
+                      W: float = 21.0) -> "list[str]":
     bg_rgb = _hex_to_rgb(bg_hex)
 
     # Pre-build a reverse map: color name → hex, for contrast lookup
@@ -709,9 +730,17 @@ def _build_text_nodes(texts: list, color_map: dict, bg_hex: str = "FFFFFF",
         # (capa19: "the" is white on the black form, "shining" dark on the yellow, and the OCR
         # hands us ONE element with ONE colour). Left as the page-background check until that
         # exists.
+        # An element may declare the ground it was PLACED on (the composer does this when it
+        # draws a panel under the type). That is better information than the page background
+        # and needs no sampling: a white title on a black panel is only ~13 RGB from a light
+        # page, so the page-based guard flipped it to black and it disappeared.
+        local_bg = (el.get("bg_hex") or "").lstrip("#").upper()
+        guard_rgb = _hex_to_rgb(local_bg) if len(local_bg) == 6 else bg_rgb
+        guard_best = (_max_contrast_color(guard_rgb, color_map)
+                      if len(local_bg) == 6 else best_contrast_name)
         resolved_hex = name_to_hex.get(col, col_h)
-        if _rgb_dist(_hex_to_rgb(resolved_hex), bg_rgb) < 45:
-            col = best_contrast_name
+        if _rgb_dist(_hex_to_rgb(resolved_hex), guard_rgb) < 45:
+            col = guard_best
 
         bold = r"\bfseries " if weight == "bold" else " "
 
@@ -726,29 +755,6 @@ def _build_text_nodes(texts: list, color_map: dict, bg_hex: str = "FFFFFF",
 
 
 
-def _local_bg_rgb(bx: dict, regions: "list | None", page_rgb) -> "tuple[int,int,int]":
-    """Colour of whatever sits under this text box: the SMALLEST region containing its
-    centre, falling back to the page background. Smallest wins because regions nest — the
-    page-sized background always contains the centre too."""
-    if not regions:
-        return page_rgb
-    cx = bx.get("x", 0) + bx.get("w", 0) / 2
-    cy = bx.get("y", 0) + bx.get("h", 0) / 2
-    best, best_area = None, float("inf")
-    for r in regions:
-        b = r.get("bbox_cm") or {}
-        if not b:
-            continue
-        if b["x"] <= cx <= b["x"] + b["w"] and b["y"] <= cy <= b["y"] + b["h"]:
-            area = b["w"] * b["h"]
-            if area < best_area:
-                best, best_area = r, area
-    if best is None:
-        return page_rgb
-    try:
-        return _hex_to_rgb(best.get("color_hex", "#FFFFFF").lstrip("#"))
-    except Exception:
-        return page_rgb
 
 
 def _max_contrast_color(bg_rgb: "tuple[int,int,int]", color_map: dict) -> str:
@@ -791,23 +797,23 @@ def _bbox_iou(b1: dict, b2: dict) -> float:
     return inter / union if union > 0 else 0.0
 
 
+_LATEX_ESCAPES = {
+    "\\": r"\textbackslash{}",
+    "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#", "_": r"\_",
+    "{": r"\{", "}": r"\}",
+    "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
+}
+
+
 def _escape_latex(text: str) -> str:
-    """Escape characters that are special in LaTeX text mode."""
-    subs = [
-        ("\\", r"\textbackslash{}"),
-        ("&",  r"\&"),
-        ("%",  r"\%"),
-        ("$",  r"\$"),
-        ("#",  r"\#"),
-        ("_",  r"\_"),
-        ("{",  r"\{"),
-        ("}",  r"\}"),
-        ("~",  r"\textasciitilde{}"),
-        ("^",  r"\textasciicircum{}"),
-    ]
-    for src, rep in subs:
-        text = text.replace(src, rep)
-    return text
+    r"""Escape characters that are special in LaTeX text mode.
+
+    ONE pass over the characters, not a chain of str.replace: replacing "\" first inserts
+    \textbackslash{}, and the later brace rules then escaped the braces that substitution had
+    just produced. A date of \today came out as the visible text \{}today on every integrated
+    cover — the replacements were corrupting each other's output.
+    """
+    return "".join(_LATEX_ESCAPES.get(c, c) for c in text)
 
 
 def _f(v: float) -> str:

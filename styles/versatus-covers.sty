@@ -115,8 +115,24 @@
 \end{titlepage}%
 }
 
+% ── Alternative layouts (covers/versatus-covers-{a,b,c,d}.tex) ───────────────
+% All four called \VSLogoEscolhida, which was defined nowhere, and each declared
+% itself as THIS package while defining \VSBookCover — so they were rival copies
+% of the package and none of them compiled. They now define \VSCoverLayoutA..D and
+% are loaded here alongside the package's own A/B, which are unchanged.
+\newcommand{\VSLogoEscolhida}[1][1.0]{\scalebox{#1}{\VSCoverLogo}}
+
+\IfFileExists{covers/versatus-covers-a.tex}{\input{covers/versatus-covers-a}}{}
+\IfFileExists{covers/versatus-covers-b.tex}{\input{covers/versatus-covers-b}}{}
+\IfFileExists{covers/versatus-covers-c.tex}{\input{covers/versatus-covers-c}}{}
+\IfFileExists{covers/versatus-covers-d.tex}{\input{covers/versatus-covers-d}}{}
+
 \newcommand{\VSBookCover}{%
-  \ifdefstring{\VSCoverOption}{B}{\VSBookCoverB}{\VSBookCoverA}%
+  \ifdefstring{\VSCoverOption}{LayoutA}{\VSCoverLayoutA}{%
+  \ifdefstring{\VSCoverOption}{LayoutB}{\VSCoverLayoutB}{%
+  \ifdefstring{\VSCoverOption}{LayoutC}{\VSCoverLayoutC}{%
+  \ifdefstring{\VSCoverOption}{LayoutD}{\VSCoverLayoutD}{%
+  \ifdefstring{\VSCoverOption}{B}{\VSBookCoverB}{\VSBookCoverA}}}}}%
 }
 
 % ── Dynamic cover foreground colors (overridden by brand preamble) ───────────

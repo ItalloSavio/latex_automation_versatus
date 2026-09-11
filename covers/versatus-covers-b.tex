@@ -1,18 +1,17 @@
-\NeedsTeXFormat{LaTeX2e}
-\ProvidesPackage{styles/versatus-covers}[2026/05/28 Versatus HPC Covers - Cover B Fixed]
+% Layout B — loaded by styles/versatus-covers.sty.
+% Select it with:  \renewcommand{\VSCoverOption}{LayoutB}
+% Defines \VSCoverLayoutB. This is NOT a package: the package owns the preamble.
 
-\RequirePackage{tikz}
-\usetikzlibrary{calc,positioning}
 
 % --- Macros de Logomarca ---
-\newcommand{\VSCoverLogo}{%
+\newcommand{\VSCoverLogoB}{%
   \ifVSCoverColor
     \includegraphics[width=5.0cm,trim=134bp 192bp 135bp 207bp,clip]{assets/logos/vs-horizontal-fundo-preto.png}%
   \else
     \includegraphics[width=5.0cm,trim=134bp 192bp 135bp 207bp,clip]{assets/logos/vs-horizontal-preto-1cor.png}%
   \fi
 }
-\newcommand{\VSCoverLogoPositive}{%
+\newcommand{\VSCoverLogoPositiveB}{%
   \ifVSCoverColor
     \includegraphics[width=5.0cm,trim=134bp 192bp 135bp 207bp,clip]{assets/logos/vs-horizontal-principal.png}%
   \else
@@ -21,7 +20,7 @@
 }
 
 % --- Comando Principal da Capa ---
-\newcommand{\VSBookCover}{%
+\newcommand{\VSCoverLayoutB}{%
 \begin{titlepage}
 \thispagestyle{empty}
 \noindent
@@ -87,4 +86,3 @@
 \end{titlepage}%
 \clearpage
 }
-\endinput

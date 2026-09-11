@@ -184,40 +184,6 @@ def _text_boxes_px(
 
 # ─── OCR / shape reconciliation ───────────────────────────────────────────────
 
-def _suppress_text_in_shapes(text_elements: list, regions: list) -> list:
-    """
-    Drop text elements whose centre falls inside a detected circle.
-
-    OCR happily reads a circular graphic as a digit/letter; when the CV already
-    claims that area as a circle, the text is a false positive to be removed.
-
-    (Tried a Fase-4 "larger shape wins" reconciliation to also drop the TINY Hough
-    rings hallucinated over "BRAUN" and keep the text — semantically right, but the
-    condensed logo font renders too wide and OVERFLOWS, so recovering the text
-    regressed the metric; capa1 also lost 2 real circles. The BRAUN area is tiny, so
-    it's a wash. Reverted — it's the same text-render ceiling as the small type.)
-    """
-    circles = [r for r in regions if r.get("shape_type") == "circle"]
-    if not circles:
-        return text_elements
-
-    kept = []
-    for el in text_elements:
-        b  = el.get("bbox_cm", {})
-        cx = b.get("x", 0) + b.get("w", 0) / 2
-        cy = b.get("y", 0) + b.get("h", 0) / 2
-        inside = False
-        for c in circles:
-            cb = c["bbox_cm"]
-            ccx = cb["x"] + cb["w"] / 2
-            ccy = cb["y"] + cb["h"] / 2
-            r   = cb["w"] / 2
-            if (cx - ccx) ** 2 + (cy - ccy) ** 2 <= r * r:
-                inside = True
-                break
-        if not inside:
-            kept.append(el)
-    return kept
 
 
 # ─── Internal runners ─────────────────────────────────────────────────────────
@@ -244,10 +210,39 @@ def _run_cv(
 def _run_ocr(image_path: Path, width_cm: float, height_cm: float) -> list:
     try:
         mod = _load_local("ocr_extractor")
-        return mod.extract_text(image_path, width_cm, height_cm)
+        els = mod.extract_text(image_path, width_cm, height_cm)
+        return _split_bicolour(mod, els, image_path, width_cm, height_cm)
     except Exception as exc:
         print(f"         [!] OCR falhou: {type(exc).__name__}: {str(exc)[:80]}")
         return []
+
+
+def _split_bicolour(mod, els: list, image_path: Path,
+                    width_cm: float, height_cm: float) -> list:
+    """Split a reading whose INK changes colour along the line (defect A4).
+
+    EasyOCR returns one box with one colour, so a title crossing two grounds gets a single
+    ink and half of it disappears: capa19's "the shining" is white over the black form and
+    dark over the yellow, and painting it all dark erased "the" — the cover shipped with
+    half its title missing.
+
+    ⚠️ ON BY THE EYE, AGAINST THE SCORE — a deliberate exception the user made. The split
+    costs capa19 0.9185 -> 0.8878, because the metric charges less for a white word that is
+    ABSENT than for one that is present in the wrong weight. Looking at the three renders
+    side by side settles it: today's ships half a title. The remaining weight/position error
+    is real and was already there, only hidden by the omission.
+
+    Contained by measurement: over the 20 covers exactly 3 of 140 elements clear both guards
+    (capa8 "underground", capa17 "SWISS", capa19 "theshining"). The other 137 pass through.
+    """
+    try:
+        out = mod.split_bicolour_text(els, str(image_path), width_cm, height_cm)
+        if len(out) != len(els):
+            print(f"         Texto bicolor: {len(els)} -> {len(out)} elementos (A4)")
+        return out
+    except Exception as exc:
+        print(f"         [!] split bicolor falhou: {type(exc).__name__}: {str(exc)[:60]}")
+        return els
 
 
 def _report_cv(cv_data: "dict | None") -> None:

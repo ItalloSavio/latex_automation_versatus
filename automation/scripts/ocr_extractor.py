@@ -265,6 +265,210 @@ def _estimate_text_color(roi: "np.ndarray") -> str:
         return "#000000"
 
 
+
+# ─── Colour per span (A4) ─────────────────────────────────────────────────────
+
+_SPAN_GAP_MIN  = 150.0   # RGB distance between the two halves' ink before we split at all
+_SPAN_SIDE_MIN = 0.25    # each side must own this fraction of the inked columns
+_SPAN_INK_MIN  = 60.0    # a pixel is ink when it is this far from ITS OWN column background
+# A column whose "ink" fills the whole box is not ink — the per-column background estimate
+# failed there. It fails exactly where the box ABUTS another region: capa8's "underground"
+# sits right on top of the orange half-disc, so `bg` is the median of black-above and
+# orange-below and comes out ORANGE, which makes the real black ground register as ink at
+# full column height. The measured ink is then #000009 on those columns and #DFE1DE on the
+# honest ones — a 240 RGB gap that clears _SPAN_GAP_MIN and splits a word whose ink is
+# uniform (#DEE0D9..#DFE2DB across 8 column bands, under 2 points of luminance).
+# This is the SAME failure the per-column sampling was introduced to avoid; it just moved
+# from the whole box to the boundary columns.
+# Measured separation on the four candidates: fraction of columns above 0.85 is
+#   capa8 "underground" 62% (FALSE) · capa17 "SWISS" 25% · capa19 "theshining" 2% (TRUE).
+_SPAN_INK_MAX_FRAC = 0.85
+_SPAN_ROW_FRAC = 0.18   # share of the span a row must span to count as a line of type
+
+
+def split_bicolour_text(elements: list, image_path, width_cm: float, height_cm: float) -> list:
+    """Split one OCR element into two when its ink genuinely changes colour along x.
+
+    EasyOCR hands back one box with one colour, so a title that crosses two regions gets a
+    single ink colour and half of it goes invisible: capa19's "theshining" is light over the
+    black shape and dark over the yellow, and painting it all #2B2A25 erases "the".
+
+    The background is sampled PER COLUMN, from just above and below the box. That matters:
+    a 2-cluster KMeans over the whole box separates the two BACKGROUNDS, not ink from
+    background, so it is blind precisely here — an earlier attempt using it reported zero
+    bicolour elements on the very covers that have them. Sampling one point under the centre
+    fails for the same reason (capa17's "SWISS" has its centre in a black bar while the word
+    lies on white), which is why that guard was reverted.
+
+    Measured on the 20 covers: 3 of 140 elements clear both guards (capa8 "underground",
+    capa17 "SWISS", capa19 "theshining") and the cut lands on the word boundary — 33% of
+    "theshining" is exactly "the". The other 137 are returned untouched.
+    """
+    try:
+        import numpy as np                 # noqa: PLC0415
+        from PIL import Image              # noqa: PLC0415
+    except Exception:
+        return elements
+
+    try:
+        arr = np.asarray(Image.open(image_path).convert("RGB")).astype(float)
+    except Exception:
+        return elements
+    h_px, w_px = arr.shape[:2]
+
+    out = []
+    for el in elements:
+        split = _find_span_cut(arr, el, width_cm, height_cm, w_px, h_px)
+        if split is None:
+            out.append(el)
+            continue
+        frac, hex1, hex2 = split
+        b = el["bbox_cm"]
+        ncut = max(1, min(len(el["text"]) - 1, round(frac * len(el["text"]))))
+        for text, x, w, hexc in (
+            (el["text"][:ncut], b["x"],                 b["w"] * frac,       hex1),
+            (el["text"][ncut:], b["x"] + b["w"] * frac, b["w"] * (1 - frac), hex2),
+        ):
+            part = dict(el)
+            part["text"] = text
+            part["bbox_cm"] = {"x": round(x, 3), "y": b["y"],
+                               "w": round(w, 3), "h": b["h"]}
+            part["color_hex"] = hexc
+            out.append(part)
+    return out
+
+
+def _fit_span_metrics(part: dict, arr, width_cm: float, height_cm: float,
+                      w_px: int, h_px: int) -> None:
+    r"""MEASURED AND NOT USED — kept for the finding, not for the behaviour.
+
+    Re-measure this span's SIZE and BASELINE from its own ink, in place.
+
+    ⚠️ Wiring this in made capa19 WORSE (0.9185 -> 0.8708). The premise looked solid — the
+    stored 135.5pt against ~85pt of real glyph — but the nominal size never reaches the page:
+    `_build_text_nodes` already shrinks any line that would run off the canvas, and that cap
+    lands near the right size on its own. Probing the element directly confirmed it, with
+    nothing beating the status quo: 85pt regular -0.0068, 85pt bold -0.0006, 95pt bold
+    -0.0015. Correcting a number that is corrected downstream just moves it away from the
+    answer. Do not re-wire without first checking what the RENDER does, not the JSON.
+
+    The colour was not the only thing the whole-box measurement got wrong. `_measure_ink`
+    looks for dark ink across the entire OCR quad, and when the quad crosses a dark SHAPE the
+    shape's edge is read as ink: capa19's title box came out 4.52cm tall against 2.85cm of
+    real glyph, so the derived size was 135.5pt where the type is ~85pt — 59% too large, and
+    the baseline landed low to match.
+
+    Per column we already know the local background, so on the "the" columns the black form
+    IS the background and only the white glyphs count. That is what makes an honest cap
+    height available here and nowhere else.
+    """
+    import numpy as np  # noqa: PLC0415
+
+    b = part["bbox_cm"]
+    x0 = max(0, int(b["x"] / width_cm * w_px))
+    x1 = min(w_px, int((b["x"] + b["w"]) / width_cm * w_px))
+    y1 = min(h_px, int((height_cm - b["y"]) / height_cm * h_px))
+    y0 = max(0, int(y1 - b["h"] / height_cm * h_px))
+    if x1 - x0 < 6 or y1 - y0 < 6:
+        return
+
+    pad = max(2, int((y1 - y0) * 0.35))
+    rows = np.zeros(y1 - y0, dtype=int)
+    for x in range(x0, x1):
+        ctx = [c for c in (arr[max(0, y0 - pad):y0, x], arr[y1:min(h_px, y1 + pad), x])
+               if len(c)]
+        if not ctx:
+            continue
+        bg = np.median(np.vstack(ctx), axis=0)
+        col = arr[y0:y1, x]
+        rows += (np.linalg.norm(col - bg, axis=1) > _SPAN_INK_MIN).astype(int)
+
+    # A row of TYPE is lit across much of the span; a stray graphic feature is not. capa19
+    # hides a small yellow arrow inside the black form, directly under "the" — against that
+    # black ground it reads as ink and stretched the measured extent to 176pt for a word set
+    # at about 85. Requiring a row to be lit across a fair share of the columns keeps glyphs
+    # and drops the arrow.
+    lit = np.where(rows >= max(2, int((x1 - x0) * _SPAN_ROW_FRAC)))[0]
+    if len(lit) < 4:
+        return
+    ink_h_px = lit[-1] - lit[0] + 1
+    if ink_h_px < 4 or ink_h_px > (y1 - y0):
+        return
+
+    has_desc = any(c in _DESCENDER_CHARS for c in part.get("text", "").lower())
+    em_px = ink_h_px / (_ASC_DESC_RATIO if has_desc else _ASCENDER_RATIO)
+    part["font_size_pt"] = round(em_px / h_px * height_cm * _CM_TO_PT, 1)
+
+    desc_px = (em_px * _DESCENDER_RATIO) if has_desc else 0.0
+    baseline_px = (y0 + lit[-1]) - desc_px
+    part["baseline_y_cm"] = round((h_px - baseline_px) / h_px * height_cm, 3)
+    part["bbox_cm"]["y"] = round((h_px - (y0 + lit[-1])) / h_px * height_cm, 3)
+    part["bbox_cm"]["h"] = round(ink_h_px / h_px * height_cm, 3)
+
+
+def _find_span_cut(arr, el, width_cm, height_cm, w_px, h_px):
+    """Return (cut_fraction, left_hex, right_hex) when the ink is genuinely two-coloured."""
+    import numpy as np  # noqa: PLC0415
+
+    b = el.get("bbox_cm") or {}
+    try:
+        x0 = int(b["x"] / width_cm * w_px)
+        x1 = int((b["x"] + b["w"]) / width_cm * w_px)
+        y1 = int((height_cm - b["y"]) / height_cm * h_px)
+        y0 = int(y1 - b["h"] / height_cm * h_px)
+    except Exception:
+        return None
+    x0, x1 = max(0, x0), min(w_px, x1)
+    y0, y1 = max(0, y0), min(h_px, y1)
+    if x1 - x0 < 12 or y1 - y0 < 4:
+        return None
+
+    pad  = max(2, int((y1 - y0) * 0.35))
+    cols = []
+    for x in range(x0, x1):
+        ctx = [c for c in (arr[max(0, y0 - pad):y0, x], arr[y1:min(h_px, y1 + pad), x]) if len(c)]
+        if not ctx:
+            continue
+        bg  = np.median(np.vstack(ctx), axis=0)
+        col = arr[y0:y1, x]
+        d   = np.linalg.norm(col - bg, axis=1)
+        ink = col[d > _SPAN_INK_MIN]
+        # Ink that spans the full column height is a failed background estimate, not a
+        # letterform: drop the column rather than let its colour vote. See _SPAN_INK_MAX_FRAC.
+        if len(ink) > (y1 - y0) * _SPAN_INK_MAX_FRAC:
+            continue
+        if len(ink) >= 2:
+            # The CORE of the stroke, not its average. Averaging every inked pixel folds in
+            # the anti-aliased rim, which is a blend of ink and ground, and the result drifts
+            # toward the background: capa19's near-black "shining" came out #4F4925 (a muddy
+            # olive) and its white "the" came out #DCDAC7. Both read as washed out and the
+            # Score fell even though the split itself was right. Keeping the pixels FURTHEST
+            # from the ground recovers the true ink.
+            dk = d[d > _SPAN_INK_MIN]
+            core = ink[dk >= np.percentile(dk, 70)]
+            cols.append((core if len(core) else ink).mean(axis=0))
+    if len(cols) < 12:
+        return None
+
+    lo   = max(1, int(len(cols) * _SPAN_SIDE_MIN))
+    best = (0.0, None)
+    for i in range(lo, len(cols) - lo):
+        c1 = np.mean(cols[:i], axis=0)
+        c2 = np.mean(cols[i:], axis=0)
+        d  = float(np.linalg.norm(c1 - c2))
+        if d > best[0]:
+            best = (d, (i / len(cols), c1, c2))
+    if best[0] < _SPAN_GAP_MIN:
+        return None
+    frac, c1, c2 = best[1]
+    return frac, _rgb_hex(c1), _rgb_hex(c2)
+
+
+def _rgb_hex(c) -> str:
+    r, g, b = (max(0, min(255, int(round(v)))) for v in c[:3])
+    return f"#{r:02X}{g:02X}{b:02X}"
+
+
 # ─── CLI ─────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

@@ -4,7 +4,8 @@
 > **como ele se corrige sozinho**, **como medimos**, e **onde estão os limites reais**.
 > Escrito para quem quer entender o projeto de ponta a ponta, não só rodar.
 >
-> Última reescrita: **2026-08-18** (branch `new_covers`). A versão anterior descrevia o
+> Última reescrita: **2026-09-09** (Fase 7 — integração capa + conteúdo).
+> A revisão de 18/08 descrevia sete capas e um sistema sem integração. A versão anterior descrevia o
 > sistema antes da **Fase 6** — um detector por forma e um juiz cego a texto. As duas coisas
 > mudaram; ver §3 e §4.
 
@@ -315,24 +316,73 @@ ou em 3 rodadas. A capa7 devolve **zero manchas** — ela diz sozinha que está 
 
 ---
 
-## 8. Estado atual das 7 capas
+## 8. Estado atual das 20 capas
 
-| capa | Score | roda sozinha? | o que ainda falta |
-|---|---|---|---|
-| capa4 | **0.9556** | ✅ | referência (grade + diagonais + texto) |
-| capa6 | **0.9217** | ✅ | texto miúdo |
-| capa7 | **0.8643** | ✅ | revisada e sólida; círculos ±1.5px do original |
-| capa1 | **0.7961** | ⚠️ cache | mosaico ok; arco vermelho e marca (fora de escopo) |
-| capa5 | **0.7543** | ✅ | hachura (teto de contraste), texto em 300px |
-| capa3 | **0.6111** | ✅ | métrica pune a curva; o olho aprova |
-| capa2 | **0.3457** | ✅ | Score cego (98% fundo); `text_match` ~0.78 é o gauge honesto |
+Números da rodada completa, conferidos pela auditoria (`automation/tools/audit.py`): **20/20
+reproduzem o entregável** — o `analysis.json` em disco re-renderiza exatamente o `render.png`
+entregue. **Média 0.8529**, **onze capas ≥ 0.90**.
 
-**capa1 é a única que não fecha ponta a ponta.** O EasyOCR lê o anel dela como o dígito
-**"6" a 411pt** e re-erra o título a cada rodada. O entregável dela vem de um
-`vlm_analysis.json` cacheado com o texto corrigido; `automation/tools/merge_capa1.py`
-regenera as regiões a partir dos detectores atuais. Rodando 100% automática ela chega a
-**0.685** — o loop já apaga o "6" e mais quatro elementos espúrios sozinho, mas o tamanho do
-tipo ainda sai errado.
+| faixa | capas |
+|---|---|
+| ≥ 0.90 (onze) | capa4 0.967 · capa12 0.952 · capa6 0.951 · capa11 0.946 · capa8 0.933 · capa9 0.932 · capa13 0.928 · capa19 0.919 · capa16 0.919 · capa7 0.918 · capa20 0.900 |
+| 0.80–0.90 | capa5 0.816 · capa1 0.815 (manual) · capa10 0.808 · capa17 0.808 · capa18 0.808 · capa3 0.803 |
+| < 0.80 | capa14 0.728 · capa2 0.706 · capa15 0.581 |
+
+**A capa8 é a prova do produto.** Ela entrou FRIA — nunca ajustada, sem nenhum passe de VLM,
+em modo puramente determinístico — e marcou **0.933**. É o teste de aceite da promessa "manda
+uma capa nova, recebe o PDF", e ele passa. As capas 9, 11, 12, 13, 16 e 20 também estão acima
+de 0.90 sem VLM.
+
+**A capa1 continua sendo a única que não fecha ponta a ponta.** O EasyOCR lê o anel dela como
+o dígito **"6" a 411pt**. O entregável (0.815) vem de cache manual; automática ela dá 0.736.
+`automation/tools/merge_capa1.py` regenera as regiões. **Nunca rode a capa1 em `plain`** — o
+`run_batch.py` recusa, porque foi assim que o entregável dela já caiu de 0.796 para 0.603.
+
+**A capa15 (0.581) é a única que nunca se moveu.** 92% do conteúdo dela é texto, as palavras
+saem certas e os TAMANHOS errados. É teto medido: o tipo é enorme com entrelinha apertada, os
+glifos se tocam e o calibrador não consegue separar uma banda de linha para medir.
+
+---
+
+## 8b. Fase 7 — a cópia recebe o NOSSO conteúdo
+
+Copiar o pôster é metade do produto. A outra metade é: **a mesma capa, com o conteúdo do
+livro**. É o que `automation/scripts/cover_integrator.py` faz.
+
+Ele mantém tudo que foi medido — posição, corpo, peso, alinhamento, entrelinha e a **paleta
+inteira** — e troca só as strings, pelas de `config/metadata.tex`, mais a marca real de
+`brands/<marca>/logos/*.tikz`. As cores da marca **não** entram: a paleta do pôster é o ponto.
+
+**Como os campos caem nos slots.** Linhas vizinhas de mesmo corpo, mesma margem esquerda e
+linha de base próxima são agrupadas num BLOCO — senão o título de duas linhas da capa1
+("Título do Livro" + "Técnico") viraria título + subtítulo. Os blocos são ranqueados por
+corpo e recebem, em ordem, `\BookTitle`, `\BookSubtitle`, `\BookAuthor`, `\BookDescription`,
+`\BookSeries`, `\BookVersion`, `\BookDate`, `\BookConfidentiality`. **O que sobra mantém o
+texto original da imagem** — decisão do usuário. Medido nas 20: 129 slots recebem conteúdo,
+7 mantêm o original.
+
+**Quebra de linha e corpo são escolhidos JUNTOS.** Nossas strings são mais longas que as do
+pôster: o slot do título da capa19 tem "theshining" (10 caracteres) e precisa levar "Título do
+Livro Técnico" (23). Deixado ao cap de overflow do renderizador, o título encolhe de 103.8pt
+para 45.1pt — cabe, e a capa perde a dominância tipográfica que **é** o design suíço. O
+integrador faz o que um designer faz: mantém o corpo e quebra a linha, até 3 linhas, exigindo
+que o corpo fique em pelo menos 55% do medido. A capa19 fecha em 2 linhas a 76pt.
+
+**Onde vai a marca.** Na bbox medida quando existe (só capa1, capa7 e capa14 têm — o campo
+`has_logo` é inerte e mente nos dois sentidos: vem `True` na capa3, que é op-art puro, e
+`False` na capa12 e na capa15). Nas outras, a página é cortada numa grade e cada célula
+pontuada pela variação da imagem original — mas **desqualificada se encostar numa caixa de
+texto NOSSA**: calmo no pôster não é livre na nossa capa. A variante clara/escura sai da
+luminância medida atrás do slot.
+
+**Cor por trecho.** Uma linha que atravessa uma borda dura não tem UMA cor boa: para
+preto+amarelo o ótimo de contraste é um oliva médio que lê mal nos dois. O integrador divide
+a linha onde o fundo muda e dá a cada parte a cor que contrasta com o SEU fundo, encaixando o
+corte na fronteira de palavra quando há uma por perto.
+
+**Como entra no livro — a fiação já existia.** `frontmatter/cover.tex` prefere
+`\VSBookCoverDynamic`, que renderiza `\RenderDynamicCover`, que é exatamente o que o
+`tikz_generator` emite. Escrever o tikz integrado em `styles/versatus-dynamic-cover.tex` basta.
 
 ---
 
@@ -429,8 +479,20 @@ python automation/scripts/replicate_cover.py capas_teste/capa_teste5.png --vlm
 # forçar nova chamada ao Gemini (gasta API)
 python automation/scripts/replicate_cover.py capas_teste/capa_teste5.png --vlm --vlm-refresh
 
-# painel visual das 7 (o olho como portão) — rápido, sem re-rodar
+# painel visual das 20 (o olho como portão) — rápido, sem re-rodar
 python automation/scripts/review_board.py
+
+# painel de 3 faixas: original | cópia | cópia com o conteúdo do metadata
+python automation/scripts/review_board.py --integrated
+
+# a capa replicada recebendo o conteúdo do livro (Fase 7)
+python automation/scripts/cover_integrator.py 19
+
+# rodar várias capas com progresso visível (escreve _run_status.md)
+python automation/tools/run_batch.py plain=3,9,10 vlm=1,2,6
+
+# o analysis.json em disco ainda reproduz o render entregue?
+python automation/tools/audit.py
 
 # onde está o erro, por zona
 python automation/scripts/zone_board.py 1 6x4
@@ -457,8 +519,9 @@ sem backup.
 - **Texto abaixo de ~6px de glifo** (capa5 tem 300px de largura): não há o que medir.
 
 **Fora de escopo por decisão:**
-- **Reconstruir logomarcas.** O sistema **reconhece** e mostra `"<Nome> (Logo)"` como
-  placeholder, registrando a bbox para um passo futuro de inserir a imagem real.
+- **Reconstruir logomarcas.** O sistema **reconhece** e nunca redesenha a marca do pôster.
+  O placeholder `"<Nome> (Logo)"` marca a POSIÇÃO, e a Fase 7 usa essa bbox para inserir o
+  logo REAL da marca a partir de `brands/` — que é o passo futuro citado aqui, agora feito.
 - Mexer em `styles/`, `brands/`, `vision_extractor.py` ou no template do livro — outro fluxo.
 - Perseguir SSIM > 0.95 com micro-tuning.
 
@@ -466,10 +529,14 @@ sem backup.
 
 ## 13. O que vem a seguir
 
-1. **Mais capas.** 13 novas em `capas_teste/novas_capas/`. Servem para descobrir se os
-   portões dos detectores são **principiados ou apenas ajustados** a uma capa — que é o
-   risco real de ter validado tudo em sete.
+1. **capa15, capa2 e capa14** — as três que o olho reprova. São o mesmo teto: tipografia que
+   o calibrador não consegue medir porque os glifos se tocam.
 2. **Determinismo da capa1** — o último furo no "manda a imagem → sai o PDF".
-3. **Vetorizador como fallback local**, ligado à fila `vocab.gap`.
-4. **`font.identify`** — o VLM classifica família/peso e o gate testa. Depende de ter o
-   arquivo da fonte instalado; senão vira um `font.gap` para o dev.
+3. **`font.identify`** — hoje a fonte cai sempre no substituto cego (TeX Gyre Heros). O
+   usuário pediu explicitamente que o sistema **identifique e reporte** qual fonte falta.
+   Está planejado e não existe em código.
+4. **Largura de texto com métrica real.** A Fase 7 estima ~0.52em por caractere; serve para
+   posicionar e quebrar linha, não para justificação fina. O caminho é medir a caixa no
+   próprio LuaLaTeX, não refinar a constante.
+5. **`judge_bench.py` não existe mais.** O banco de provas do juiz precisa ser reescrito
+   antes de qualquer nova tentativa de mexer no Score.

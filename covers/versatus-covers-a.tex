@@ -1,11 +1,10 @@
-\NeedsTeXFormat{LaTeX2e}
-\ProvidesPackage{styles/versatus-covers}[2026/05/28 Versatus HPC Covers - Cover A]
+% Layout A — loaded by styles/versatus-covers.sty.
+% Select it with:  \renewcommand{\VSCoverOption}{LayoutA}
+% Defines \VSCoverLayoutA. This is NOT a package: the package owns the preamble.
 
-\RequirePackage{tikz}
-\usetikzlibrary{calc,positioning}
 
 % --- Comando Principal da Capa ---
-\newcommand{\VSBookCover}{%
+\newcommand{\VSCoverLayoutA}{%
 \begin{titlepage}
 \thispagestyle{empty}
 \noindent
@@ -42,4 +41,3 @@
 \end{titlepage}%
 \clearpage
 }
-\endinput

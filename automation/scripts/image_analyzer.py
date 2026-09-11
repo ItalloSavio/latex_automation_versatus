@@ -434,8 +434,8 @@ def _detect_circles(
             span = (b["a1_deg"] - b["a0_deg"]) / 360.0
             reg["shape_type"]  = "annulus_sector"
             reg["r_in_cm"]     = round(b["r_in_px"] / w_px * w_cm, 3)
-            reg["angle0_deg"]  = round(b["a0_deg"], 1)
-            reg["angle1_deg"]  = round(b["a1_deg"], 1)
+            reg["angle0_deg"]  = _snap_angle(b["a0_deg"])
+            reg["angle1_deg"]  = _snap_angle(b["a1_deg"])
             reg["area_pct"]    = round(math.pi * (rp ** 2 - b["r_in_px"] ** 2)
                                        * span / (w_px * h_px), 4)
         regions.append(reg)
@@ -1486,6 +1486,25 @@ def _refine_peak(profile: "np.ndarray", rough: int, window: int = 5) -> int:
     start = max(0, rough - window)
     end   = min(len(profile), rough + window + 1)
     return int(start + np.argmax(profile[start:end]))
+
+
+
+_ANGLE_SNAP_DEG = 12.0   # how far a measured boundary may sit from a quarter-turn and still
+                         # be read as one
+
+
+def _snap_angle(deg: float) -> float:
+    """Pull a sector boundary onto the quarter-turn it is clearly meant to be.
+
+    A Bauhaus ring is divided on the vertical and horizontal axes; the angle we recover from
+    pixels is not. capa1's four boundaries measured -0, -90, -185, -275: two of them off by
+    exactly 5 degrees, which tilts the whole ring and is what a reader calls "the circle is
+    crooked". The error is in the measurement, not the design, so a boundary within
+    _ANGLE_SNAP_DEG of a multiple of 90 is snapped to it. Anything further is left alone —
+    a genuine 30-degree wedge must survive.
+    """
+    q = round(deg / 90.0) * 90.0
+    return round(q if abs(deg - q) <= _ANGLE_SNAP_DEG else deg, 1)
 
 
 def _snap_line_to_color_edge(

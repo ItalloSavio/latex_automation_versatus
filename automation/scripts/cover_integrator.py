@@ -753,6 +753,304 @@ def tex_escape(text: str) -> str:
     return "".join(_TEX_SPECIAL.get(c, c) for c in text)
 
 
+# ─── Layout penalty ───────────────────────────────────────────────────────────
+# The replica has the Score: it compares against the poster and a number settles it. A
+# COMPOSED page has no such target — it is SUPPOSED to differ from the poster, so there is
+# nothing to match against. What can still be measured is whether the page is BROKEN, and
+# these are the four ways it breaks that a reader notices before reading a word. Lower is
+# better; 0.0 means nothing measurable is wrong.
+
+_PEN_W = {"overlap": 1.0, "overflow": 1.5, "contrast": 0.8, "logo": 0.6,
+          "logo_ground": 0.5, "logo_size": 0.5}
+# A mark narrower than this fraction of the page has stopped being a brand and become a
+# speck. capa1 and capa2 inherited 1.4cm and 0.6cm slots from a VLM logo.mark that located
+# the 'v' GLYPH rather than the signature, and both printed at a fifth of readable size.
+_LOGO_MIN_W_FRAC = 0.12
+_WCAG_MIN = 3.0     # large type only needs 3:1; body text would want 4.5:1
+
+
+def _rel_lum(hex_: str) -> float:
+    """WCAG relative luminance. Distance in plain luminance is not the same thing: white on
+    orange is 77 points apart and still reads at 1.42:1, which is why _MIN_CONTRAST lets it
+    through and this does not."""
+    try:
+        c = [int(hex_.lstrip("#")[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
+    except Exception:
+        return 0.0
+    c = [v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4 for v in c]
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+
+def _wcag_ratio(a: str, b: str) -> float:
+    la, lb = _rel_lum(a), _rel_lum(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _in_poly(pts: list, x: float, y: float) -> bool:
+    """Ray casting. Needed because a TRACED shape's bbox says almost nothing about where it
+    actually is: capa2's dark polygon has a bbox covering the whole page while the ink is a
+    logo mark and two hairlines, so a bbox test reported every point on that cover as sitting
+    on #282828 and every caption as failing contrast."""
+    inside = False
+    n = len(pts)
+    for i in range(n):
+        x1, y1 = pts[i]
+        x2, y2 = pts[(i + 1) % n]
+        if (y1 > y) != (y2 > y):
+            xi = x1 + (y - y1) * (x2 - x1) / ((y2 - y1) or 1e-9)
+            if x < xi:
+                inside = not inside
+    return inside
+
+
+def _covers(r: dict, x: float, y: float) -> bool:
+    b = r.get("bbox_cm") or {}
+    if not b or not (b["x"] <= x <= b["x"] + b["w"] and b["y"] <= y <= b["y"] + b["h"]):
+        return False
+    pts = r.get("points_cm")
+    if pts and len(pts) >= 3:
+        if not _in_poly(pts, x, y):
+            return False
+        for hole in (r.get("holes_cm") or []):     # a cavity shows what is BEHIND, not this
+            if len(hole) >= 3 and _in_poly(hole, x, y):
+                return False
+        return True
+    if r.get("shape_type") in ("circle", "ellipse"):
+        cx, cy = b["x"] + b["w"] / 2, b["y"] + b["h"] / 2
+        rx, ry = max(b["w"] / 2, 1e-6), max(b["h"] / 2, 1e-6)
+        return ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1.0
+    return True
+
+
+def _ground_hex(merged: dict, x: float, y: float) -> str:
+    """Colour under a point: the LAST region drawn that actually covers it. Regions are
+    emitted back-to-front, so the last match is what the reader sees."""
+    out = merged.get("canvas", {}).get("bg_hex") or "#FFFFFF"
+    for r in merged.get("regions") or []:
+        if _covers(r, x, y):
+            out = r.get("color_hex", out)
+    return out
+
+
+def _boxes_of(merged: dict) -> list:
+    return [(e, e.get("bbox_cm") or {}) for e in (merged.get("text_elements") or [])
+            if (e.get("bbox_cm") or {}).get("w")]
+
+
+def layout_penalty(merged: dict) -> "tuple[float, dict]":
+    """How broken is this composed page? Returns (penalty, breakdown)."""
+    W = merged["canvas"]["width_cm"]
+    H = merged["canvas"]["height_cm"]
+    boxes = _boxes_of(merged)
+    area = sum(b["w"] * b.get("h", 0.3) for _, b in boxes) or 1.0
+
+    overlap = 0.0
+    for i in range(len(boxes)):
+        _, a = boxes[i]
+        for j in range(i + 1, len(boxes)):
+            _, b = boxes[j]
+            ow = max(0.0, min(a["x"] + a["w"], b["x"] + b["w"]) - max(a["x"], b["x"]))
+            oh = max(0.0, min(a["y"] + a.get("h", .3), b["y"] + b.get("h", .3))
+                     - max(a["y"], b["y"]))
+            overlap += ow * oh
+
+    overflow = 0.0
+    for _, b in boxes:
+        h = b.get("h", 0.3)
+        inside_w = max(0.0, min(b["x"] + b["w"], W) - max(b["x"], 0.0))
+        inside_h = max(0.0, min(b["y"] + h, H) - max(b["y"], 0.0))
+        overflow += max(0.0, b["w"] * h - inside_w * inside_h)
+
+    bad = 0
+    for e, b in boxes:
+        g = _ground_hex(merged, b["x"] + b["w"] * 0.5, b["y"] + b.get("h", 0.3) * 0.5)
+        if _wcag_ratio(e.get("color_hex", "#000000"), g) < _WCAG_MIN:
+            bad += 1
+    contrast = bad / max(len(boxes), 1)
+
+    logo_hit = 0.0
+    slot = ((merged.get("integration") or {}).get("logo") or {}).get("slot") or {}
+    if slot.get("w"):
+        la = slot["w"] * slot.get("h", slot["w"] * 0.34)
+        for _, b in boxes:
+            ow = max(0.0, min(slot["x"] + slot["w"], b["x"] + b["w"]) - max(slot["x"], b["x"]))
+            oh = max(0.0, min(slot["y"] + slot.get("h", .5), b["y"] + b.get("h", .3))
+                     - max(slot["y"], b["y"]))
+            logo_hit += ow * oh
+        logo_hit /= max(la, 0.01)
+
+    # The mark needs ONE ground, not two. A slot straddling a hard edge has no good variant:
+    # capa8 put the logo where the orange half-disc meets the black field, and the dark cut
+    # (a white wordmark) came out white-on-orange over half its width. The variant is picked
+    # from the MEAN luminance under the slot, which is exactly the number that hides this —
+    # a half-and-half slot averages to something plausible. Sampling across the slot and
+    # asking how many points disagree with the chosen variant catches it.
+    logo_ground = 0.0
+    lg = (merged.get("integration") or {}).get("logo") or {}
+    if slot.get("w"):
+        want_light_ink = lg.get("variant") == "dark"   # the dark cut prints a LIGHT wordmark
+        pts, wrong = 0, 0
+        for i in range(5):
+            for j in range(3):
+                gx = slot["x"] + slot["w"] * (i + 0.5) / 5
+                gy = slot["y"] + slot.get("h", slot["w"] * 0.34) * (j + 0.5) / 3
+                lum = _rel_lum(_ground_hex(merged, gx, gy))
+                pts += 1
+                if (lum > 0.35) == want_light_ink:      # light ink on a light ground, or dark on dark
+                    wrong += 1
+        logo_ground = wrong / max(pts, 1)
+
+    want = W * _LOGO_MIN_W_FRAC
+    logo_size = max(0.0, 1.0 - slot.get("w", want) / want) if slot.get("w") else 0.0
+
+    parts = {"overlap": overlap / area, "overflow": overflow / area,
+             "contrast": contrast, "logo": logo_hit, "logo_ground": logo_ground,
+             "logo_size": logo_size}
+    total = sum(_PEN_W[k] * v for k, v in parts.items())
+    return round(total, 4), {k: round(v, 4) for k, v in parts.items()}
+
+
+# ─── Art cache — the _ART table, learned instead of hand-written ──────────────
+# The user's design, and it is better than a fixed table: the automatic composer WRITES the
+# entry, the next build READS it instead of deciding again, and a build that composes a
+# measurably better page OVERWRITES it. So the ten covers keep their art direction, a cover
+# nobody has seen still gets composed, and nothing is hand-maintained.
+
+ART_DIR = ROOT / "automation" / "art"
+
+
+def art_path(slug: str) -> Path:
+    return ART_DIR / f"{slug}.json"
+
+
+def load_art(slug: str) -> "dict | None":
+    p = art_path(slug)
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def save_art(slug: str, art: dict) -> None:
+    ART_DIR.mkdir(parents=True, exist_ok=True)
+    art_path(slug).write_text(json.dumps(art, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def snapshot_art(merged: dict, penalty: float, parts: dict) -> dict:
+    """What is worth remembering about a composition: where the mark went, and where each
+    block of type landed. Keyed by ROLE and order, never by the string — the metadata
+    changes between books and the geometry is what we are caching."""
+    blocks = []
+    for e in merged.get("text_elements") or []:
+        b = e.get("bbox_cm") or {}
+        if not b.get("w"):
+            continue
+        blocks.append({"role": e.get("_role"), "x": b["x"], "y": b["y"],
+                       "w": b["w"], "h": b.get("h", 0.3),
+                       "pt": e.get("font_size_pt"), "hex": e.get("color_hex")})
+    return {"penalty": penalty, "parts": parts,
+            "logo": ((merged.get("integration") or {}).get("logo") or {}).get("slot"),
+            "blocks": blocks}
+
+
+def apply_art(merged: dict, art: dict) -> dict:
+    """Put a remembered composition back. Blocks are matched positionally within their role,
+    so a page whose metadata got longer still lands where the art direction said."""
+    by_role: dict = {}
+    for blk in art.get("blocks") or []:
+        by_role.setdefault(blk.get("role"), []).append(blk)
+    seen: dict = {}
+    for e in merged.get("text_elements") or []:
+        role = e.get("_role")
+        i = seen.get(role, 0)
+        seen[role] = i + 1
+        pool = by_role.get(role) or []
+        if i >= len(pool):
+            continue
+        blk = pool[i]
+        b = e.get("bbox_cm") or {}
+        b.update({"x": blk["x"], "y": blk["y"], "w": blk["w"], "h": blk["h"]})
+        e["bbox_cm"] = b
+        if blk.get("pt"):
+            e["font_size_pt"] = blk["pt"]
+        if blk.get("hex"):
+            e["color_hex"] = blk["hex"]
+    if art.get("logo") and (merged.get("integration") or {}).get("logo"):
+        merged["integration"]["logo"]["slot"] = art["logo"]
+        merged["integration"]["logo"]["source"] = "cache"
+    return merged
+
+
+def build_from_image(image_path, brand: str = "versatus", tag: str = "integrated",
+                     out_dir=None, recompose: bool = False) -> dict:
+    """Compose our content onto the replica of ANY image, not just the test corpus.
+
+    `build(n)` hard-codes capas_teste/capa_teste{n}.png and its output folder, which is why
+    nothing outside the corpus could ever be integrated. This is the same work addressed by
+    PATH, plus the art cache: with an entry and no `recompose`, the remembered composition is
+    used as-is; with `recompose`, the page is composed again and the cache keeps whichever
+    scores the lower layout penalty.
+    """
+    img = Path(image_path).resolve()
+    d = Path(out_dir).resolve() if out_dir else (
+        ROOT / "automation" / "output" / "replicated" / img.stem)
+    aj = d / "analysis.json"
+    if not aj.exists():
+        return {"ok": False, "error": f"sem analysis.json em {d} — rode o replicador antes"}
+
+    analysis = json.loads(aj.read_text(encoding="utf-8"))
+    render = d / "render.png"
+    slug = img.stem
+    art = load_art(slug)
+
+    merged = compose(analysis, parse_metadata(), str(render), brand)
+    fresh_pen, fresh_parts = layout_penalty(merged)
+
+    used, note = "composto", ""
+    # A HAND-EDITED entry is final. The whole point of the file being readable is that a
+    # designer can move the mark or the title and have that stick; an automatic composition
+    # that scores better must not quietly undo it. Set "locked": true in the json.
+    if art and art.get("locked"):
+        merged = apply_art(merged, art)
+        return _finish(merged, d, tag, brand, img, "cache/travado",
+                       "(locked: true — a composicao automatica nao mexe)")
+    if art and not recompose:
+        merged = apply_art(merged, art)
+        used, note = "cache", f"(penalidade guardada {art.get('penalty')})"
+    elif art and recompose:
+        # Re-MEASURE the cached composition instead of trusting its stored number. The
+        # number was produced by whatever the penalty was on the day it was written, and a
+        # metric that grows a term makes every old entry incomparably good: capa1 kept a
+        # 1.4cm logo because its entry said 0.0, recorded before the penalty could see an
+        # undersized mark at all. Scoring both sides with today's judge is the only honest
+        # comparison, and it costs one function call.
+        cached = apply_art(json.loads(json.dumps(merged)), art)
+        cached_pen, _cparts = layout_penalty(cached)
+        if fresh_pen < cached_pen:
+            save_art(slug, snapshot_art(merged, fresh_pen, fresh_parts))
+            used, note = "composto", f"(melhorou {cached_pen} -> {fresh_pen}, cache atualizado)"
+        else:
+            merged = cached
+            used, note = "cache", f"(composicao nova {fresh_pen} nao bateu {cached_pen})"
+    else:
+        save_art(slug, snapshot_art(merged, fresh_pen, fresh_parts))
+        used, note = "composto", f"(cache criado, penalidade {fresh_pen})"
+
+    return _finish(merged, d, tag, brand, img, used, note)
+
+
+def _finish(merged: dict, d: Path, tag: str, brand: str, img: Path,
+            used: str, note: str) -> dict:
+    pen, parts = layout_penalty(merged)
+    res = emit(merged, d, tag=tag, brand=brand, n=img.stem)
+    res.update({"penalty": pen, "penalty_parts": parts, "art": used, "art_note": note,
+                "image": str(img), "dir": str(d)})
+    return res
+
+
 def build(n, brand: str = "versatus", tag: str = "integrated") -> dict:
     """Render cover `n` with our content in it. Returns the paths and the placement report."""
     import importlib.util
@@ -1476,6 +1774,18 @@ def _stack_in_zone(values: list, zone: dict, proto: dict) -> tuple:
     return max(_MIN_PT, pt), lines
 
 
+def _slot_ground_mix(out: dict, x: float, y: float, w: float, h: float) -> float:
+    """How many grounds does a box sit on? 0.0 is one clean colour; higher means the box
+    straddles an edge and no single cut of the mark can read on it."""
+    from collections import Counter                     # noqa: PLC0415
+    c: Counter = Counter()
+    for i in range(5):
+        for j in range(3):
+            c[_ground_hex(out, x + w * (i + 0.5) / 5, y + h * (j + 0.5) / 3)] += 1
+    tot = sum(c.values())
+    return 1.0 - c.most_common(1)[0][1] / tot if tot else 1.0
+
+
 def _mark_slot(out: dict, source: dict, placed: list, W, H, margin, render_path) -> dict:
     """Where the Versatus mark goes: the measured spot if the poster HAS one, else adapted.
 
@@ -1484,16 +1794,33 @@ def _mark_slot(out: dict, source: dict, placed: list, W, H, margin, render_path)
     tells us exactly where a mark reads on that composition; the rest get the quietest corner
     that no type is using.
     """
+    # A REMEMBERED position is only usable if the mark still fits and our own type is not
+    # already there. Two things went wrong on capa2 with the measured box taken verbatim:
+    # what the VLM located was the 'v' GLYPH, 0.6cm wide, so the brand drew at a fifth of
+    # its readable size; and that spot is where our title now sits, so it printed underneath.
+    # Both are caught the same way — floor the width, then test the box against the type we
+    # just placed, and fall through to the corner search when it does not clear.
+    def _usable(b, src):
+        w = max(b["w"], W * 0.18)
+        h = w * (((brand_logo("versatus", "light") or {}).get("h") or 1.0)
+                 / ((brand_logo("versatus", "light") or {}).get("w") or 3.0))
+        cand = {"x": b["x"], "y": b["y"], "w": round(w, 2), "h": round(h, 2), "source": src}
+        probe = {"bbox_cm": {"x": cand["x"], "y": cand["y"], "w": w, "h": h}}
+        if any(_boxes_hit(probe, e) for e in placed):
+            return None
+        return cand
+
     for lg in (source.get("logos") or []):
         b = lg.get("bbox_cm") or {}
         if b.get("w"):
-            return {"x": b["x"], "y": b["y"], "w": b["w"],
-                    "h": b.get("h", b["w"] * 0.34), "source": "medido"}
+            cand = _usable(b, "medido")
+            if cand:
+                return cand
     for el in (source.get("text_elements") or []):
         if is_logo_placeholder(el.get("text", "")) and (el.get("bbox_cm") or {}).get("w"):
-            b = el["bbox_cm"]
-            return {"x": b["x"], "y": b["y"], "w": max(b["w"], W * 0.18),
-                    "h": max(b["w"], W * 0.18) * 0.34, "source": "placeholder"}
+            cand = _usable(el["bbox_cm"], "placeholder")
+            if cand:
+                return cand
 
     lw = W * _LOGO_W_FRAC
     # Real aspect from the brand artwork. Assuming 0.34 made the reserved box shorter than
@@ -1520,8 +1847,16 @@ def _mark_slot(out: dict, source: dict, placed: list, W, H, margin, render_path)
             r1 = int((1 - cy / H) * len(calm))
             sl = calm[max(0, r0):max(1, r1)]
             spread = sum(sl) / len(sl) if sl else 999.0
-        if best_score is None or spread < best_score:
-            best, best_score = (cx, cy), spread
+        # ONE ground beats a calm one. `calm` averages a whole horizontal band, so a corner
+        # where two fields meet can score calm while the mark itself lands half on each —
+        # capa8 put the wordmark exactly on the seam between the orange half-disc and the
+        # black field, and no cut of the logo can be right there. Sampling the ground inside
+        # the slot itself is what the layout penalty measures, so the search now optimises
+        # the same thing the judge scores.
+        mix = _slot_ground_mix(out, cx, cy, lw, lh)
+        score = (mix, spread)
+        if best_score is None or score < best_score:
+            best, best_score = (cx, cy), score
     if best is None:
         best = (W - margin - lw, margin)
     return {"x": round(best[0], 2), "y": round(best[1], 2),

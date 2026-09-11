@@ -354,7 +354,7 @@ def _build_regions(
         bx       = r["bbox_cm"]
 
         if shape == "polygon" and r.get("points_cm"):
-            lines.append(_cmd_polygon(col_name, r["points_cm"]))
+            lines.append(_cmd_polygon(col_name, r["points_cm"], r.get("holes_cm")))
 
         elif shape == "rectangle" or shape == "polygon":
             lines.append(_cmd_rect(col_name, bx))
@@ -487,12 +487,31 @@ def _cmd_annulus_sector(color: str, cx: float, cy: float, r0: float, r1: float,
             f"arc ({_f(a1)}:{_f(a0)}:{_f(r0)}cm) -- cycle;")
 
 
-def _cmd_polygon(color: str, points_cm: list) -> str:
+def _cmd_polygon(color: str, points_cm: list, holes_cm: "list | None" = None) -> str:
     """Parametric primitive: an arbitrary filled polygon from its vertices (cm, TikZ
     y-up). The general shape that lets a proposer express what the fixed primitives
-    can't — it emits VERTICES (data), the renderer stays deterministic."""
+    can't — it emits VERTICES (data), the renderer stays deterministic.
+
+    With `holes_cm` the subpaths are filled under the EVEN-ODD rule, so a counter or a
+    cavity stays open. Two notes on why that path drops the seam bleed: stroking a hole
+    boundary in the fill colour eats INTO the hole by half the line width, and at 2pt that
+    closes the counter of an 'e' outright — the very thing holes exist to keep open. A
+    shape with a hole is also not a tile butting against neighbours, which is what the
+    bleed was for.
+    """
     pts = " -- ".join(f"({_f(x)},{_f(y)})" for x, y in points_cm)
-    return f"  \\fill[{_fill_opts(color, traced=True)}] {pts} -- cycle;"
+    if not holes_cm:
+        return f"  \\fill[{_fill_opts(color, traced=True)}] {pts} -- cycle;"
+    subs = [f"{pts} -- cycle"]
+    for hole in holes_cm:
+        hp = " -- ".join(f"({_f(x)},{_f(y)})" for x, y in hole)
+        subs.append(f"{hp} -- cycle")
+    # The OUTER boundary still gets the bleed, as its own stroke — dropping it altogether
+    # reopened the hairlines this shape shares with its neighbours and cost more than the
+    # holes were worth. Only the outer subpath is stroked, so the counters stay open.
+    w = _SEAM_BLEED_TRACED_PT
+    return (f"  \\fill[{color},even odd rule] " + " ".join(subs) + ";\n"
+            f"  \\draw[{color},line width={w}pt,line join=miter] {pts} -- cycle;")
 
 
 def _cmd_hatch(line_col: str, base_col: "str | None", b: dict,

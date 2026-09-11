@@ -113,7 +113,23 @@ def _run_ocr(path: Path, width_cm: float, height_cm: float) -> "list[dict]":
     # so a single line broken by a separator ("65p in advance / 75p at the door")
     # is read as one string with the "/" instead of two boxes that drop it.
     reader = easyocr.Reader(["en", "pt"], gpu=False, verbose=False)
+
+    # TRIED AND REVERTED (2026-09-11): running DETECTION on a 3x Lanczos upscale while
+    # measuring ink natively. The recall is real — capa16 went 8 -> 9 elements, recovering
+    # "saturday" and "7 pm sharp" whole and completing "only $6 / all ages", and capa8 finally
+    # READ "the velvet" instead of leaving it to be traced as blob-glyphs. It still made
+    # capa8 worse, for three reasons that all live DOWNSTREAM of here:
+    #   · the extra detections arrive FRAGMENTED ("/11", "pm", "& 1 am" as three boxes) and
+    #     render on top of the line below;
+    #   · the looser quad makes _measure_ink catch more than the glyph, so the captions came
+    #     out 18.5pt against the 14.6pt they measure natively — type visibly too large;
+    #   · "the velvet" was read and then DROPPED by the Score-driven text gate, while the
+    #     reader had already masked those pixels because the OCR claimed them — so the title
+    #     lost both its text and its traced fallback and left a hole.
+    # Score 0.9386 -> 0.9279 and the eye agrees it is worse. Re-attempt only after the text
+    # gate stops deleting legitimate lines and fragments are re-joined.
     result = reader.readtext(str(path), width_ths=0.8)
+    scale = 1
 
     elements: list[dict] = []
     if not result:
@@ -130,8 +146,8 @@ def _run_ocr(path: Path, width_cm: float, height_cm: float) -> "list[dict]":
                 continue
 
         # Convert 4-corner quad to axis-aligned pixel bbox
-        xs = [p[0] for p in quad]
-        ys = [p[1] for p in quad]
+        xs = [p[0] / scale for p in quad]
+        ys = [p[1] / scale for p in quad]
         x1, y1 = int(min(xs)), int(min(ys))
         x2, y2 = int(max(xs)), int(max(ys))
 
@@ -254,7 +270,24 @@ def _estimate_text_color(roi: "np.ndarray") -> str:
 
         km       = KMeans(n_clusters=2, n_init=3, random_state=0).fit(pixels)
         counts   = np.bincount(km.labels_, minlength=2)
-        text_rgb = km.cluster_centers_[int(np.argmin(counts))]
+        ink_i    = int(np.argmin(counts))
+        ground   = km.cluster_centers_[1 - ink_i]
+        ink      = pixels[km.labels_ == ink_i]
+
+        # The CORE of the stroke, not the average of everything the ink cluster caught.
+        # That cluster holds the glyph core AND its anti-aliased rim, and at these source
+        # resolutions (a 570px-wide poster, type 6-14px tall) the rim is most of the pixels,
+        # so the centroid drifts toward the ground: capa8's white captions were measured
+        # #9B9C9F where the brightest 5% of the ink is #C8C9CB and the design colour is the
+        # palette's #DFE0D5 — white type rendering as mid-grey. Keeping the third of the ink
+        # FURTHEST from the ground recovers the real colour. Same instrument that
+        # _find_span_cut already uses per column; this is the general path finally using it.
+        text_rgb = ground if not len(ink) else ink.mean(axis=0)
+        if len(ink) >= 6:
+            far = np.linalg.norm(ink - ground, axis=1)
+            core = ink[far >= np.percentile(far, 70)]
+            if len(core):
+                text_rgb = core.mean(axis=0)
 
         r = max(0, min(255, int(round(text_rgb[0]))))
         g = max(0, min(255, int(round(text_rgb[1]))))

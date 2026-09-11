@@ -266,7 +266,30 @@ def replicate(
     _step(7, "Selecao de camadas (mede a contribuicao de cada detector)")
     analysis = _select_reader(analysis, image_path, _score_of)
     analysis = _select_layers(analysis, _score_of)
-    analysis = _select_text(analysis, _score_of)
+
+    def _retrace(a: dict):
+        """Re-read the shapes with the CURRENT text list, so pixels the OCR no longer
+        claims stop being masked and come back as artwork. Returns None where there is
+        nothing to re-trace (a detector cover, or the reader declining the image)."""
+        if not any(r.get("source") == "reader" for r in (a.get("regions") or [])):
+            return None
+        try:
+            reader = _load("structural_reader")
+            variants = [reader.read(image_path, a),
+                        reader.read(image_path, a, drop_films=True)]
+        except Exception:
+            return None
+        best = None
+        for regions in variants:
+            if not regions:
+                continue
+            cand = {**a, "regions": regions}
+            q = _score_of(cand)
+            if q and (best is None or q["score"] > best[0]):
+                best = (q["score"], cand)
+        return best[1] if best else None
+
+    analysis = _select_text(analysis, _score_of, _retrace)
 
     # ── Stages 8–11: self-correcting loop ─────────────────────────────────
     # Hill climbing on the SCORE: a pass is only kept when the Score improved
@@ -556,7 +579,7 @@ def _write_tex_wrapper(
 _TEXT_TRIAL_MIN_FRAC = 0.01   # only elements big enough to matter are worth a render
 
 
-def _select_text(analysis: dict, score_fn) -> dict:
+def _select_text(analysis: dict, score_fn, retrace_fn=None) -> dict:
     """Drop an OCR text element only when REMOVING it measurably improves the render.
 
     An OCR reading is a HYPOTHESIS, exactly like a detector's layer, and it can be
@@ -587,21 +610,49 @@ def _select_text(analysis: dict, score_fn) -> dict:
     base = score_fn(analysis)
     if base is None:
         return analysis
-    best_score, kept = base["score"], list(texts)
+    best_score, cur = base["score"], analysis
+    kept = list(texts)
     for i in sorted(big, key=lambda k: -(texts[k].get("bbox_cm") or {}).get("w", 0)):
         el = texts[i]
         if el not in kept:
             continue
         trial = [t for t in kept if t is not el]
-        q = score_fn({**analysis, "text_elements": trial})
+        drop  = {**cur, "text_elements": trial}
+        q  = score_fn(drop)
         s2 = q["score"] if q else -1.0
-        if s2 > best_score + 1e-3:
-            _log(f"  texto {el.get('text','')[:18]!r} ({el.get('font_size_pt',0):.0f}pt): "
-                 f"SEM={s2:.4f} > COM={best_score:.4f} → REMOVIDO (nao era texto)")
-            best_score, kept = s2, trial
+
+        name = f"{el.get('text','')[:18]!r}"
+        # KEEPING the text wins by default, and that comes first on purpose. The retrace
+        # below is an alternative to the HOLE, never an alternative to good type: offered as
+        # a third peer it beat elements that were rendering perfectly well, because the Score
+        # rewards a filled blob for covering more pixels than an open letterform does.
+        # capa8's "underground" reads correctly as type and was being converted to traced
+        # art on a +0.006 that the eye reads as a loss.
+        if s2 <= best_score + 1e-3:
+            _log(f"  texto {name}: SEM={s2:.4f} <= COM={best_score:.4f} → mantido")
+            continue
+
+        # The gate wants this element gone. Dropping it alone leaves a HOLE, because the
+        # reader masked those pixels before tracing on the OCR's word — measured on capa8,
+        # whose "the velvet" is read at 80pt against ~68pt of real glyph, renders badly, and
+        # is removed for being worse than nothing; the title then vanished entirely. Re-read
+        # with the reduced text list and the word comes back as traced shapes instead.
+        s3, retraced = -1.0, None
+        if retrace_fn is not None:
+            retraced = retrace_fn(drop)
+            if retraced is not None:
+                q3 = score_fn(retraced)
+                s3 = q3["score"] if q3 else -1.0
+
+        if s3 > s2:
+            _log(f"  texto {name} ({el.get('font_size_pt',0):.0f}pt): RETRACADO={s3:.4f} > "
+                 f"COM={best_score:.4f} → vira ARTE (o leitor reassume os pixels)")
+            best_score, cur, kept = s3, retraced, trial
         else:
-            _log(f"  texto {el.get('text','')[:18]!r}: SEM={s2:.4f} <= COM={best_score:.4f} → mantido")
-    return {**analysis, "text_elements": kept}
+            _log(f"  texto {name} ({el.get('font_size_pt',0):.0f}pt): "
+                 f"SEM={s2:.4f} > COM={best_score:.4f} → REMOVIDO (nao era texto)")
+            best_score, cur, kept = s2, drop, trial
+    return {**cur, "text_elements": kept}
 
 
 def _select_reader(analysis: dict, image_path, score_fn) -> dict:

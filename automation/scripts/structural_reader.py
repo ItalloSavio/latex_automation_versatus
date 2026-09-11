@@ -52,6 +52,10 @@ _SOLID_MIN = 0.10
 # (capa3/12/17 emitted ZERO circles and only polygons, while capa7/9 — whose circles are
 # isolated — emitted clean ones). At 32 vertices the deviation is 0.5px.
 _MAX_POLY_PTS = 64
+# A hole smaller than this is anti-alias noise inside a shape, not a counter or a cavity.
+_MIN_HOLE_PX = 12
+# Share of a candidate hole that must be background colour for it to be a real cavity.
+_HOLE_BG_MIN = 0.70
 # How much better a TRACE must be before it beats a named primitive (circle/ellipse/rect).
 _PARAM_BONUS = 0.03
 # A piece smaller than this fraction of the page is a speck. Lowered 0.0006 -> 0.00015 after
@@ -142,7 +146,7 @@ def _rrect(bh: int, bw: int, r: float) -> np.ndarray:
     return (dx * dx + dy * dy) <= r * r
 
 
-def _best_primitive(m: np.ndarray) -> "tuple[dict, float]":
+def _best_primitive(m: np.ndarray, bg: "np.ndarray | None" = None) -> "tuple[dict, float]":
     """Which primitive explains this blob? Rasterise each candidate and measure IoU.
 
     Measuring beats the fill-ratio signature it replaces: a fill near 0.5 could be a
@@ -176,17 +180,55 @@ def _best_primitive(m: np.ndarray) -> "tuple[dict, float]":
     else:
         cands.append((_iou(m, ell), {"shape_type": "ellipse"}))
 
-    cnts, _ = cv2.findContours(m.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # RETR_CCOMP, not RETR_EXTERNAL: a shape with a HOLE is not the same shape filled in.
+    # Every counter in a letterform is a hole, so tracing outer contours only turned the
+    # poster's own type into blobs — capa8's "the velvet" came back with its e/v/l closed up
+    # and read as "th vt lvet". The same blindness is why an annulus whose middle shows the
+    # BACKGROUND has never been expressible (defect D4). CCOMP gives the outer boundary and
+    # its children; the children are emitted as holes and TikZ fills with the even-odd rule.
+    cnts, hier = cv2.findContours(m.astype(np.uint8), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
     if cnts:
-        big = max(cnts, key=cv2.contourArea)
-        for eps in (0.02, 0.01, 0.005, 0.002, 0.001):
-            ap = cv2.approxPolyDP(big, eps * cv2.arcLength(big, True), True).reshape(-1, 2)
-            if not (3 <= len(ap) <= _MAX_POLY_PTS):
-                continue
-            ras = np.zeros_like(m, np.uint8)
-            cv2.fillPoly(ras, [ap.astype(np.int32)], 1)
-            kind = "triangle" if len(ap) == 3 else "polygon"
-            cands.append((_iou(m, ras.astype(bool)), {"shape_type": kind, "_pts_px": ap}))
+        h = hier[0] if hier is not None else None
+        outer = [i for i in range(len(cnts)) if h is None or h[i][3] < 0]
+        if outer:
+            bi = max(outer, key=lambda i: cv2.contourArea(cnts[i]))
+            big = cnts[bi]
+            kids = [] if h is None else [cnts[i] for i in range(len(cnts)) if h[i][3] == bi]
+            # a speck of a hole is antialias noise, not a counter
+            kids = [k for k in kids if cv2.contourArea(k) >= _MIN_HOLE_PX]
+            # A hole is only a hole when it shows the BACKGROUND. Where another colour sits
+            # inside the shape the old fill-it-in-and-overpaint behaviour is right and this
+            # one is actively worse: capa8's cream square has the red circle as a child
+            # contour, and opening it puts a black ring between the two traced edges that the
+            # seam bleed used to hide (0.9422 -> 0.9334). Counters of type pass this test —
+            # the inside of an 'e' really is the poster's ground.
+            if bg is not None and kids:
+                real = []
+                for k in kids:
+                    mk = np.zeros(m.shape, np.uint8)
+                    cv2.fillPoly(mk, [k.reshape(-1, 2).astype(np.int32)], 1)
+                    inside = mk.astype(bool)
+                    if inside.sum() and bg[inside].mean() >= _HOLE_BG_MIN:
+                        real.append(k)
+                kids = real
+            for eps in (0.02, 0.01, 0.005, 0.002, 0.001):
+                ap = cv2.approxPolyDP(big, eps * cv2.arcLength(big, True), True).reshape(-1, 2)
+                if not (3 <= len(ap) <= _MAX_POLY_PTS):
+                    continue
+                holes = []
+                for k in kids:
+                    hp = cv2.approxPolyDP(k, eps * cv2.arcLength(k, True), True).reshape(-1, 2)
+                    if 3 <= len(hp) <= _MAX_POLY_PTS:
+                        holes.append(hp)
+                ras = np.zeros_like(m, np.uint8)
+                cv2.fillPoly(ras, [ap.astype(np.int32)], 1)
+                if holes:
+                    cv2.fillPoly(ras, [hp.astype(np.int32) for hp in holes], 0)
+                kind = "triangle" if (len(ap) == 3 and not holes) else "polygon"
+                shp = {"shape_type": kind, "_pts_px": ap}
+                if holes:
+                    shp["_holes_px"] = holes
+                cands.append((_iou(m, ras.astype(bool)), shp))
 
     # Prefer a NAMED shape over a trace of the same thing. Without this the fine traces added
     # above would beat `circle` on its own circles (a 32-gon reaches IoU 0.996 where the
@@ -267,6 +309,13 @@ def read(image_path, analysis: dict, drop_films: bool = False) -> "list | None":
     bgi = int(np.bincount(idx.ravel(), minlength=len(pal)).argmax())
     txt = _text_mask(analysis, w, h, sx, sy, H)
     idx[txt] = bgi                                     # let the OCR own the type
+    # What a real cavity must show through. The text boxes are EXCLUDED even though the line
+    # above just set them to the background index: that assignment is a mask, not a reading
+    # of the art. Where a caption sits on a coloured field the masked rectangle looks like
+    # background, and treating it as a cavity punches a black box through that field —
+    # capa8's orange half-disc grew one behind "upstairs at max's kansas city". Before holes
+    # existed the outer contour simply filled over it and the type drew on top.
+    bgmask = (idx == bgi) & ~txt
 
     regions = [{"id": "bg", "shape_type": "rectangle", "color_hex": colors[bgi]["hex"],
                 "source": "reader",
@@ -295,7 +344,7 @@ def read(image_path, analysis: dict, drop_films: bool = False) -> "list | None":
             if min(m.shape) < 2 and max(m.shape) < _THIN_RULE_MIN_PX:
                 continue
             blobs = [(m, sl)]
-            best, sc = _best_primitive(m)
+            best, sc = _best_primitive(m, bgmask[sl])
             if sc < _SPLIT_MIN:
                 parts = _split(m)
                 if parts:
@@ -307,7 +356,7 @@ def read(image_path, analysis: dict, drop_films: bool = False) -> "list | None":
             for pm, psl in blobs:
                 if pm.sum() < min_area:
                     continue
-                shp, _s = _best_primitive(pm)
+                shp, _s = _best_primitive(pm, bgmask[psl])
                 pieces.append((int(pm.sum()),
                                _region(shp, psl, pm.shape, colors[ci]["hex"], sx, sy, H)))
 
@@ -338,10 +387,15 @@ def _region(shp: dict, sl: tuple, shape_px: tuple, hex_: str,
          "bbox_cm": {"x": round(xs.start * sx, 3),
                      "y": round(H - (ys.start + bh) * sy, 3),
                      "w": round(bw * sx, 3), "h": round(bh * sy, 3)}}
+    def _to_cm(seq):
+        return [[round((xs.start + px) * sx, 3), round(H - (ys.start + py) * sy, 3)]
+                for px, py in seq]
     pts = shp.get("_pts_px")
     if pts is not None:
-        r["points_cm"] = [[round((xs.start + px) * sx, 3), round(H - (ys.start + py) * sy, 3)]
-                          for px, py in pts]
+        r["points_cm"] = _to_cm(pts)
+    holes = shp.get("_holes_px")
+    if holes:
+        r["holes_cm"] = [_to_cm(hp) for hp in holes]
     if "_radius_px" in shp:
         r["radius_cm"] = round(shp["_radius_px"] * sx, 3)
     return r

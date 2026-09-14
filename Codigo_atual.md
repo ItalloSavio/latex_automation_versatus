@@ -1,6 +1,19 @@
 # Código atual — o que existe, o que faz, onde está o teto
 
-> Retrato do sistema em **2026-09-10**, com números medidos nesta data, não estimados.
+> ## ⚠️ DOCUMENTO SUPERADO — retrato de 2026-09-10
+> O MVP fechou em **2026-09-14** com escopo e números diferentes: **9 capas** (não 10),
+> **média 0.9003** (não 0.9026), comando único, portão de aceite e cache de arte.
+> Para o estado atual use **`CLAUDE.md`**; para o que falta, **`pos-mvp.md`**.
+>
+> **Duas recomendações deste documento foram MEDIDAS E REPROVADAS depois** — estão corrigidas
+> no corpo abaixo, mas vale o aviso de cabeçalho porque as duas aparecem como "ganho medido":
+> - **paleta adaptativa** (§7): com k=16 o Score REGRIDE em todas as capas testadas
+>   (capa16 −0.030, capa8 −0.114, capa13 −0.027). O ganho de 62%/52%/44% que ele cita é
+>   redução de erro de quantização — um proxy que não transfere para o render;
+> - **"os 63% de borda não são resolução"** (§6): o teste que sustenta isso subia o dpi do
+>   RENDER, e o comparador redimensiona o render para o tamanho do original antes de medir.
+>   Ele não podia mostrar outra coisa. Ver `pos-mvp.md` §D2.
+>
 > Documento de leitura; as regras de trabalho ficam no `CLAUDE.md` e a explicação didática
 > do pipeline no `doc-pipe.md`.
 

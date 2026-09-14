@@ -227,29 +227,23 @@ def analyze_image(
 # ─── Color extraction ─────────────────────────────────────────────────────────
 
 def _extract_colors(img: "Image.Image") -> list[dict]:
-    """K-means clustering on a thumbnail. Returns list sorted by coverage desc."""
-    thumb  = img.resize((_THUMB_W, _THUMB_H), Image.LANCZOS)
-    pixels = np.array(thumb).reshape(-1, 3).astype(float)
+    """A paleta k-means. MOVIDA para `palette.py` em 2026-09-11 (Fase G).
 
-    km = KMeans(n_clusters=_N_COLORS, n_init=10, random_state=42)
-    km.fit(pixels)
+    Ela ficava aqui, e a vizinhanca escondia que as 20 capas dependem deste modulo mesmo
+    com 18 delas usando so o `structural_reader`: e daqui que sai a paleta com que o leitor
+    quantiza. Separada, a dependencia real fica explicita — e este wrapper existe para que
+    `analyze_image` siga chamando o mesmo nome.
+    """
+    return _palette().extract_colors(img, n_colors=_N_COLORS)
 
-    labels  = km.labels_
-    centers = km.cluster_centers_.round().astype(int)
-    total   = len(labels)
 
-    colors = []
-    for i, center in enumerate(centers):
-        count  = int(np.sum(labels == i))
-        r, g, b = int(center[0]), int(center[1]), int(center[2])
-        colors.append({
-            "hex":      f"#{r:02X}{g:02X}{b:02X}",
-            "rgb":      [r, g, b],
-            "coverage": round(count / total, 4),
-        })
-
-    colors.sort(key=lambda c: c["coverage"], reverse=True)
-    return colors
+def _palette():
+    import importlib.util                              # noqa: PLC0415
+    from pathlib import Path as _P                     # noqa: PLC0415
+    spec = importlib.util.spec_from_file_location("palette", _P(__file__).parent / "palette.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 # ─── Region extraction ────────────────────────────────────────────────────────

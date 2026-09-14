@@ -140,32 +140,6 @@ def group_blocks(elements: list) -> list:
     return blocks
 
 
-def map_fields(elements: list, meta: dict) -> dict:
-    """Decide which metadata string each text element should carry.
-
-    Returns {element_index: new_string}. Blocks beyond the field list are left OUT of the
-    mapping entirely — the caller keeps their original text, which is what the user chose.
-    A block of N lines consumes ONE field: the field's own words are re-wrapped across the
-    lines so a two-line title slot still reads as a two-line title.
-
-    Logo PLACEHOLDERS are not content slots and never receive a field: "Versatus (Logo)" on
-    capa1 marks where the real mark belongs, and handing it \\BookSubtitle would both lose
-    the mark and waste a field.
-    """
-    live = [i for i, e in enumerate(elements) if not is_logo_placeholder(e.get("text", ""))]
-    sub = [elements[i] for i in live]
-    out = {}
-    for field, blk in zip(_FIELD_ORDER, group_blocks(sub)):
-        value = (meta.get(field) or "").strip()
-        if not value:
-            continue
-        for j, chunk in zip(blk, _wrap(value, len(blk))):
-            # A short field in a tall block would otherwise blank out the spare lines and
-            # punch holes in the composition. An unassigned line keeps what it already says,
-            # which is the same rule the leftover blocks follow.
-            if chunk:
-                out[live[j]] = chunk
-    return out
 
 
 def is_logo_placeholder(text: str) -> bool:
@@ -237,72 +211,6 @@ def brand_logo(brand: str = "versatus", variant: str = "light") -> dict:
             "x0": min(xs), "y0": min(ys)}
 
 
-def logo_slot(analysis: dict, image_path=None) -> dict:
-    """Where the brand mark goes, in cm, on the replicated canvas.
-
-    Prefers a bbox the pipeline actually measured — `analysis["logos"]`, which only exists
-    where the VLM proposed a `logo.mark` (capa1, capa7, capa14). Everywhere else the cover
-    carries no measured logo position at all, so we place it in the emptiest zone: the page
-    is cut into a grid and each cell scored by how little the ORIGINAL image varies inside
-    it, which finds flat background rather than artwork or type. `has_logo` is deliberately
-    ignored — it is inert and wrong in both directions (True on capa3, which is pure op-art;
-    False on capa12 and capa15, which have text).
-    """
-    W = analysis["canvas"]["width_cm"]
-    H = analysis["canvas"]["height_cm"]
-    target_w = W * _LOGO_TARGET_W_FRAC
-
-    for lg in (analysis.get("logos") or []):
-        b = lg.get("bbox_cm") or {}
-        if b.get("w"):
-            return {"x": b["x"], "y": b["y"], "w": b["w"],
-                    "h": b.get("h", b["w"] * 0.34), "source": "medido"}
-
-    # A "<Name> (Logo)" placeholder is itself a measured position — it is where the VLM
-    # recognised a mark and the pipeline wrote a stand-in. That is exactly the slot.
-    for el in (analysis.get("text_elements") or []):
-        if is_logo_placeholder(el.get("text", "")):
-            b = el.get("bbox_cm") or {}
-            if b.get("w"):
-                return {"x": b["x"], "y": b["y"], "w": b["w"],
-                        "h": b.get("h", b["w"] * 0.34), "source": "placeholder"}
-
-    margin = min(W, H) * _LOGO_MARGIN_FRAC
-    best = None
-    try:
-        import numpy as np              # noqa: PLC0415
-        from PIL import Image           # noqa: PLC0415
-        arr = np.asarray(Image.open(image_path).convert("RGB")).astype(float)
-        h_px, w_px = arr.shape[:2]
-        cols, rows = _LOGO_GRID
-        for r in range(rows):
-            for c in range(cols):
-                x0, x1 = int(c * w_px / cols), int((c + 1) * w_px / cols)
-                y0, y1 = int(r * h_px / rows), int((r + 1) * h_px / rows)
-                cell = arr[y0:y1, x0:x1]
-                if cell.size == 0:
-                    continue
-                busy = float(cell.reshape(-1, 3).std(axis=0).mean())
-                x_cm = x0 / w_px * W
-                y_cm = (h_px - y1) / h_px * H          # TikZ y grows upward
-                if x_cm < margin or x_cm + target_w > W - margin or y_cm < margin:
-                    continue
-                # Flat in the ORIGINAL is not the same as free in OURS: the poster's calm
-                # top band is exactly where our title lands. Any cell a text box touches is
-                # disqualified, or the mark ends up printed through the type.
-                if _hits_text(analysis, x_cm, y_cm, target_w, target_w * 0.34):
-                    continue
-                if best is None or busy < best[0]:
-                    best = (busy, x_cm, y_cm)
-    except Exception:
-        best = None
-
-    if best is None:
-        return {"x": margin, "y": margin, "w": target_w,
-                "h": target_w * 0.34, "source": "canto padrao"}
-    _, x_cm, y_cm = best
-    return {"x": round(x_cm, 2), "y": round(y_cm, 2), "w": round(target_w, 2),
-            "h": round(target_w * 0.34, 2), "source": "zona mais vazia"}
 
 
 _MIN_CONTRAST = 60.0   # luminance distance below which type stops being readable
@@ -481,56 +389,19 @@ def logo_tikz(slot: dict, logo: dict) -> str:
             f"  \\end{{scope}}\n")
 
 
+# ─── REMOVIDO em 2026-09-11 (Fase G) ──────────────────────────────────────────
+# `integrate()` e os seus tres ajudantes exclusivos — `map_fields`, `logo_slot` e
+# `_resolve_collisions`, 200 linhas — implementavam o caminho de SLOTS: preencher as caixas
+# que o OCR leu no poster com o nosso texto. Ele foi construido, medido e reprovado (a
+# docstring de `build` guardava o veredito: "espalhava nossas palavras por posicoes escolhidas
+# para outras palavras, e as paginas ficavam com cara de detrito"), e desde entao `build`
+# chamava `compose`, que compoe do zero sobre a arte. Ficou como codigo morto sem que a doc
+# registrasse a reversao, o que fez o caminho parecer vivo por semanas.
+# `_fit_to_slot` e `logo_variant_for` NAO foram removidos: os dois tem outro dono vivo
+# (`_prefer_legible_wrap` e `compose`).
+
 # ─── Integration ──────────────────────────────────────────────────────────────
 
-def integrate(analysis: dict, meta: dict, image_path=None, brand: str = "versatus") -> dict:
-    """Return a COPY of the analysis carrying our content instead of the poster's.
-
-    Geometry is untouched: every bbox, font size, weight, rotation and colour survives. Only
-    the strings change, and only in the slots the priority mapping claims — the rest keep
-    what the OCR read, which is the behaviour the user picked.
-    """
-    out = json.loads(json.dumps(analysis))
-    els = out.get("text_elements") or []
-    mapping = map_fields(els, meta)
-    W = out["canvas"]["width_cm"]
-    rebuilt = []
-    for i, el in enumerate(els):
-        if i in mapping:
-            rebuilt.extend(_fit_to_slot(el, mapping[i], W, src=i))
-        else:
-            rebuilt.append(el)
-    rebuilt = _resolve_collisions(rebuilt, els, mapping, W)
-    # Keep the SLOT-indexed field map and the untouched originals: the legibility pass below
-    # may need to lay a slot out again from scratch, and by then `els` has been rewritten.
-    field_map, source_els = dict(mapping), els
-    out["text_elements"] = els = rebuilt
-    mapping = {i: e["text"] for i, e in enumerate(els) if e.get("_filled")}
-
-    kept = [i for i in range(len(els))
-            if i not in mapping and not is_logo_placeholder(els[i].get("text", ""))]
-    out["integration"] = {
-        "brand": brand,
-        "fields_placed": {str(i): v for i, v in sorted(mapping.items())},
-        "slots_kept_original": kept,
-    }
-    slot = logo_slot(out, image_path)
-    # The stand-in text goes away: the real mark is about to be drawn in its place. This has
-    # to happen BEFORE the contrast pass, which rewrites the element list wholesale — reading
-    # `els` again afterwards would silently throw the recolouring away.
-    out["text_elements"] = [e for e in els if not is_logo_placeholder(e.get("text", ""))]
-    _ensure_contrast(out, image_path)
-    _prefer_legible_wrap(out, source_els, field_map, W)
-    for e in out["text_elements"]:      # scratch keys never reach the analysis on disk
-        e.pop("_role", None)
-        e.pop("_filled", None)
-        e.pop("_lines", None)
-        e.pop("_src", None)
-    variant = logo_variant_for(slot, out, image_path)
-    logo = brand_logo(brand, variant)
-    out["integration"]["logo"] = {"slot": slot, "variant": variant,
-                                  "macro": logo.get("macro"), "found": bool(logo)}
-    return out
 
 
 _CHAR_EM      = 0.52    # same width estimate the renderer's overflow cap uses
@@ -675,66 +546,6 @@ def _boxes_hit(a: dict, b: dict) -> bool:
             and ba["y"] < bb["y"] + bb["h"] and ba["y"] + ba["h"] > bb["y"])
 
 
-def _resolve_collisions(rebuilt: list, original: list, mapping: dict, canvas_w: float) -> list:
-    """Undo a line break that made a slot run into its neighbour.
-
-    Wrapping stacks the extra lines DOWNWARD from the slot, which is fine on a sparse cover
-    and not fine on a dense one: capa14 has 17 text elements and capa15 ten, and there the
-    second and third lines land on top of the block below. Both were unreadable.
-
-    The slot is re-set on a single line — smaller type, but type that can be read. Only slots
-    WE filled are touched; a collision between two of the poster's own boxes was there in the
-    original and is not ours to reflow.
-    """
-    for _ in range(_COLLIDE_STEPS):
-        victim = partner = None
-        for i, a in enumerate(rebuilt):
-            for j, b in enumerate(rebuilt):
-                if i >= j or not _boxes_hit(a, b):
-                    continue
-                # Only a box we filled may be reflowed, and between two of ours the SMALLER
-                # one yields — shrinking the title to save a caption inverts the hierarchy.
-                cand = [k for k in (i, j) if rebuilt[k].get("_filled")]
-                if cand:
-                    victim = min(cand, key=lambda k: rebuilt[k].get("font_size_pt") or 0)
-                    partner = j if victim == i else i
-                    break
-            if victim is not None:
-                break
-        if victim is None:
-            return rebuilt
-
-        el = rebuilt[victim]
-        b = el.get("bbox_cm") or {}
-        other = rebuilt[partner]
-        ob = other.get("bbox_cm") or {}
-
-        # STACK before shrinking. Our strings are far wider than the poster's little labels,
-        # so on a dense cover half a dozen of them overlap sideways at once; shaving 10% off
-        # each in turn never converges and just leaves a pile of tiny type. Dropping the
-        # smaller one below its neighbour is what actually separates them, and it is what a
-        # designer does with a column of captions.
-        drop = (ob.get("y", 0) - b.get("y", 0)) + (b.get("h", 0) + _STACK_GAP_CM)
-        if 0 < drop <= _STACK_MAX_CM:
-            snapshot = json.loads(json.dumps(el))
-            b["y"] = round(b.get("y", 0) - drop, 3)
-            if "baseline_y_cm" in el:
-                el["baseline_y_cm"] = round(el["baseline_y_cm"] - drop, 3)
-            fits = b["y"] >= 0 and not any(
-                _boxes_hit(el, o) for k, o in enumerate(rebuilt) if k != victim)
-            if fits:
-                continue
-            el.clear()
-            el.update(snapshot)
-            b = el["bbox_cm"]
-
-        pt = (el.get("font_size_pt") or 0) * (1 - _COLLIDE_SHRINK)
-        if pt < _MIN_PT:
-            return rebuilt
-        el["font_size_pt"] = round(pt, 1)
-        b["w"] = round(_text_w_cm(el.get("text", ""), pt, el), 3)
-        b["h"] = round(pt / _PT_PER_CM, 3)
-    return rebuilt
 
 
 _TEX_SPECIAL = {"&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#",

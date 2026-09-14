@@ -1,14 +1,34 @@
 # Swiss Cover Replicator — escopo do sistema
 
+> ## 🟢 MVP FECHADO — 2026-09-14
+> **9 capas · média 0.9003 · auditoria 9/9 · portão de aceite 8/9 OK · 8 das 9 saem de um comando.**
+>
+> ```bash
+> python automation/scripts/cover_pipeline.py minha_capa.png              # a réplica
+> python automation/scripts/cover_pipeline.py minha_capa.png --integrar   # + conteúdo do livro
+> ```
+>
+> O que fazer a seguir está em **`pos-mvp.md`**, com a evidência medida de cada item e três
+> hipóteses explicitamente MORTAS para ninguém repetir.
+> A explicação didática do pipeline está em **`doc-pipe.md`**. Este arquivo é a memória de
+> trabalho: decisões, medições e reversões.
+
 ## Objetivo único (North Star)
 
 **Entrada:** uma imagem de capa (estilo Swiss design — GENÉRICO: qualquer pôster
-Swiss, não só as da Versatus. As **20** capas de teste valem igual — eram 7 até
-2026-08-16, quando o usuário somou `capa_teste8..20`.)
+Swiss, não só as da Versatus).
 **Saída:** um PDF LaTeX/TikZ **visualmente idêntico** à imagem.
 **Autonomia:** o sistema deve iterar sozinho — medir, corrigir, re-renderizar — até
 que a comparação máquina-a-máquina considere original e render idênticos.
 Logo: **identificar** se há logo (sim/não), **não** adicionar/reconstruir.
+
+**Escopo do MVP: 9 capas** — 1, 2, 4, 6, 8, 12, 13, 16, 19. Eram 7 até 2026-08-16, viraram 20,
+e o usuário fechou em 10 (10/09) e depois em 9 (11/09, a capa7 saiu). As outras onze continuam
+em `automation/output/replicated/` com análise e render preservados.
+
+**A Fase 7 (trocar o conteúdo pelo do livro) é OPÇÃO, não etapa.** O foco é replicar a imagem;
+`--integrar` é quem pede. A direção de arte pode ser fixada à mão em `automation/art/<nome>.json`
+com `"locked": true`.
 
 Nada além disso é escopo. Ver "Fora de escopo" no final.
 
@@ -37,7 +57,7 @@ Regra: fechar item ABERTO de causa conhecida e correção barata ANTES de atacar
 | D4 | "anel" vira tiras laterais | 10 | 🚫 BLOQUEADO — **NÃO É um anel**. Medido: o núcleo vermelho corre 690 dos 700px de altura, então o laranja é um **U aberto**, não uma cavidade — por isso preencher oclusão nunca funcionou lá (não há buraco). O que separava as tiras era o filme `#E79743` (264 componentes de 3–4px); com `drop_films` elas juntam (2.45→**4.99cm**) e o Score sobe de 0.8086 para 0.8100, mas seguem polígonos traçados. **Direção certa:** regra COMPOSICIONAL — quando o bbox da peça A contém B inteira e A é mal explicada, testar A∪B como um primitivo com B pintada por cima (barra arredondada laranja + barra vermelha em cima). Mecanismo novo, não existe hoje |
 | T1 | **descartes sem medição** no pipeline | todas | 🔄 EM CURSO — **2 de 19 fechados**. (a) piso de ÁREA do leitor 0.0006→**0.00015**: capa18 perdia 10.56% da página e capa20 6.02% logo abaixo da linha; varrido pelo renderizador real, capa18 0.7876→**0.8076**, capa20 0.8898→**0.9003**, controles imóveis. ⚠️ capa3 NÃO melhora — baixar o piso 4× não recupera 1 peça lá, os 9.76% dela são filme de 1px pego por `min(shape)<2`, ou seja formas que NÃO SE ENCOSTAM, não formas ausentes. (b) piso de confiança do OCR: o piso de confiança do OCR. Medido nas 8 capas com problema de texto: entre 0.20 e 0.45 tudo que é real tem 9–34 caracteres e o lixo tem 1–3 (`'9'`, `'222'`, `'8'`); abaixo de 0.20 o lixo volta a ser longo (capa14, tipo rotacionado, 20–30 chars a 0.00–0.04). Regra nova: `conf≥0.20 E ≥8 alfanum`. capa18 3→**5** textos (+0.003), capa2 →**13** textos; capa4/13/20/6 idênticas. Restam: `h_box_cm<0.15`, guards de círculo do `image_analyzer` |
 | T2 | `_select_text` sem guard | — | 📋 ABERTO — apagar é destrutivo, deveria exigir evidência forte |
-| T3 | capa1 depende de cache manual | 1 | 🔄 **RESOLVÍVEL — precisa do seu aval (09/09)** — o número "automático 0.7346" está VELHO: era o caminho dos detectores. Com o leitor estrutural a capa1 automática dá **0.8567**, acima do 0.8154 manual, e o olho aprova. Trocar o entregável dela apaga a cirurgia manual, então não fiz por conta própria; o `reader_analysis.json` dela está pronto no diretório da capa |
+| T3 | capa1 depende de cache manual | 1 | 🚫 **BLOQUEADO (11/09) — e o 0.8567 era MEDIÇÃO FALSA.** Aquele número saiu de renderizar o `reader_analysis.json` PARADO em disco, não de rodar o pipeline. Rodando de verdade a capa1 dá **0.7304** contra 0.8132 da versão manual, e o render tem um `"6"` branco gigante no lugar do anel mais o título como arte traçada ilegível. Um passe FRESCO de VLM levou a 0.7349 — não fecha a diferença. ⚠️ **Lição: renderizar um JSON guardado não é rodar o pipeline.** A capa1 fica como exceção documentada até o juiz enxergar que um `"6"` de 411pt não é texto (D1) |
 | T4 | 11 capas nunca viram o VLM | 3,4,8,9,10,11,12,13,16,18,20 | 📋 ABERTO — custa API, priorizar por capa |
 | R1 | `image_analyzer.py` — 1789 linhas servem **2 de 20 capas** | 1, 4 | 🔄 **MEDIDO (09/09), remoção NÃO é o refactor certo** — contado nas regiões: 18 capas usam só `reader`; só capa1 (grid/mosaic/circle) e capa4 (grid) usam os detectores. Rendendo as duas SÓ com o leitor: **capa4 0.9665 → 0.9654** (perde 0.001) e **capa1 0.8154 → 0.8567** (ganha 0.041, e o render é visivelmente melhor — mosaico nítido, anel bem formado, sem o "6" falso). ⚠️ **Mas apagar o módulo quebraria as 20:** ele também produz a PALETA k-means que o `structural_reader` usa para quantizar. O refactor certo é **separar paleta de detectores**, não deletar. Os detectores de forma valem 0.001 numa capa |
 | R2 | "7 scripts órfãos" — **eu tinha medido errado** | — | ✅ FECHADO (09/09) — só `list_models` e `list_or_models` estavam soltos, e foram apagados. Os outros cinco são um CLUSTER conectado (`build_cover → vision_extractor → preview_cover/convert_logos → svg_to_tikz`), e `svg_to_tikz`/`convert_logos` **geram os logos TikZ que a Fase 7 usa** — apagá-los teria quebrado a integração. ⚠️ A lição: "quem importa X" ≠ "X é órfão"; um grafo de 5 nós tem raiz sem referência e nem por isso está morto |
@@ -90,12 +110,14 @@ FASE 6  ✅ FEITO (branch `new_covers`, 2026-08-16/18) — a REESCRITA DO LEITOR
 o mosaico da capa18 e a malha da capa16 são alta-frequência e renderizam bem. O teto era
 o `triangle` não conseguir carregar a própria orientação. Ver "## FASE 6".
 
-**Ranking por Score (2026-09-02, rodada completa das 20 — fonte:
-`output/replicated/_run_status.md`):** capa4 0.967 | capa12 0.952 | capa6 0.951 |
-capa11 0.946 | capa8 0.933 | capa9 0.932 | capa13 0.928 | capa19 0.919 | capa16 0.919 |
-capa7 0.918 | capa20 0.900 | capa5 0.816 | capa1 0.815 | capa10 0.808 | capa17 0.808 |
-capa18 0.808 | capa3 0.803 | capa14 0.728 | capa2 0.706 | capa15 0.581.
-**Média 0.857, ONZE em ≥0.90.**
+**Ranking do MVP (2026-09-14, rebuild completo das 9):** capa4 0.9665 | capa12 0.9560 |
+capa6 0.9531 | capa8 0.9373 | capa13 0.9299 | capa16 0.9192 | capa19 0.9040 |
+capa1 0.8132 (manual) | capa2 0.7234. **Média 0.9003, SETE em ≥0.90, auditoria 9/9.**
+
+⚠️ O ranking das 20 (média 0.857, de 02/09) está VENCIDO e foi removido daqui: onze daquelas
+capas saíram do escopo em 10–11/09 e os números das nove mudaram desde então. As outras onze
+continuam em `automation/output/replicated/`, com análise e render preservados, caso o escopo
+volte a crescer.
 
 ⚠️ **O NÚMERO NÃO SEPARA AS CLASSES DO OLHO (medido 2026-08-19, LER ANTES DE PRIORIZAR).**
 O usuário classificou as 20 em BOAS (1,2,4,6,7,12,13,16), OK (3,8,9,11,15,17,18,19,20) e
@@ -219,11 +241,31 @@ olho aprova; a capa15 acusa 12 e é realmente ruim. **O portão continua sendo o
 fonte. Serve para posicionar e quebrar linha; não serve para justificação fina. Se um dia
 precisar ser exato, o caminho é medir a caixa no próprio LuaLaTeX, não refinar a constante.
 
-## MVP — as DEZ capas escolhidas (2026-09-10)
+## MVP — as NOVE capas (2026-09-11)
 
-**Escopo fechado pelo usuário: capa1, 2, 4, 6, 7, 8, 12, 13, 16, 19.** As outras dez ficam
-para depois — não gastar tempo nelas. Fonte: a real é paga, então fica o TeX Gyre Heros; o
-trilho `font.identify` está fora do MVP.
+**Escopo: capa1, 2, 4, 6, 8, 12, 13, 16, 19.** A **capa7 SAIU em 11/09** (decisão do usuário):
+era a única fraca nas DUAS camadas — textos miúdos sobrepostos na réplica, título sobre um
+círculo escuro no layout. Está em `MVP/_fora/`, movida e não apagada. As outras onze ficam
+para depois. Fonte: a real é paga, então fica o TeX Gyre Heros; `font.identify` fora do MVP.
+
+**Estado em 11/09 — média 0.9003, auditoria 9/9, OITO das nove saem de UM comando:**
+
+| capa | Score | origem |
+|---|---|---|
+| capa4 | 0.9665 | detectores |
+| capa12 | 0.9560 | leitor |
+| capa6 | 0.9531 | leitor |
+| capa8 | 0.9373 | leitor + retraço |
+| capa19 | 0.9040 | leitor + VLM (+0.0672 na Fase E) |
+| capa13 | 0.9299 | leitor + VLM |
+| capa16 | 0.9192 | leitor + VLM (texto corrigido) |
+| capa1 | 0.8132 | **detectores + cirurgia manual — a exceção** |
+| capa2 | 0.7234 | leitor + VLM |
+
+⚠️ **A capa1 é a única que NÃO sai da imagem, e o motivo está medido:** o OCR lê o anel como
+um `'6'` de 411pt e **remover custa 0.13 de Score**, então `_select_text` o mantém — certo
+pelo número, errado pelo olho. É o defeito D1, bloqueado pelo juiz. O caminho automático
+completo dá **0.7304** contra os 0.8132 da versão manual. Ver a correção do 0.8567 abaixo.
 
 ### Dois defeitos de RÉPLICA que o review do usuário revelou
 
@@ -245,12 +287,33 @@ Erro de medição, não de design: `_snap_angle` puxa a fronteira para o quarto 
 está a menos de `_ANGLE_SNAP_DEG = 12` dele, e deixa em paz qualquer cunha genuína (−30, −47
 passam intactas). capa1 0.8145 → **0.8195**.
 
-### Direção de arte por capa — DADO, não código
+### Direção de arte por capa — CACHE APRENDIDO, não tabela no código (reescrito 11/09)
 
-O compositor coloca tipo e marca medindo a arte, e para a maioria isso basta. Mas o usuário
-olhou as dez e deu decisões que nenhuma regra geral recupera ("o logo no primeiro quadrado
-branco", "o título acima dos círculos"). Elas vivem em `cover_integrator._ART` como
-coordenadas em cm. Capa ausente da tabela é composta como antes.
+⚠️ **`cover_integrator._ART` NÃO EXISTE MAIS — e a versão anterior desta seção descrevia
+uma tabela que o código já não tinha.** Isso custou meio dia: os `integrated.tikz` em disco
+citavam `slot direcao do usuario`, string que não estava em nenhum `.py`, e **8 dos 10
+layouts entregues não saíam do código**. Regra que fica: quando a doc descreve um símbolo,
+`grep` por ele antes de construir em cima.
+
+O desenho novo é do usuário e é melhor que qualquer tabela fixa — **um cache que a máquina
+escreve, relê e aprimora**, em `automation/art/<nome-da-imagem>.json`:
+
+```
+composição automática  →  ESCREVE a entrada
+build seguinte         →  LÊ, e não decide de novo (economia de processamento)
+--recompose            →  recompõe e fica com a de MENOR penalidade de layout
+"locked": true         →  a mão do designer é final; a automática nunca sobrescreve
+```
+
+O arquivo é legível e editável — slot da marca e geometria de cada bloco em cm, chaveados por
+`_role` e ordem, **nunca pela string** (o metadata muda entre livros; o que se cacheia é a
+geometria).
+
+⚠️ **Comparar contra o número GUARDADO é errado e eu implementei assim primeiro.** Quando a
+penalidade ganhou o termo `logo_size`, toda entrada antiga virou incomparavelmente boa — a
+capa1 manteve uma marca de 1,4cm porque a entrada dela dizia `0.0`, escrita quando a métrica
+nem sabia enxergar marca pequena. **Re-MEDIR o cache com o juiz de hoje** antes de comparar
+é o que fecha; custa uma chamada de função. Depois disso a capa1 foi de 0.2222 para 0.0.
 
 **⚠️ Adivinhar o PAPEL de uma linha pelo TAMANHO não funciona.** Eu classificava título e
 imprint pelo corpo; na capa7 as duas linhas do título saíram a **34pt e 87pt** depois dos
@@ -267,6 +330,142 @@ contenção — as letras traçadas são mais largas que a caixa reportada e nen
 "dentro"), e `_clear_under_type` descarta o que é pequeno (≤1.6cm²) e cai sob o bloco que nós
 mesmos acabamos de compor — ali estamos escrevendo, então o que é minúsculo embaixo é detrito
 por definição.
+
+## FASE C — o comando único, o cache de arte e a penalidade de layout (2026-09-11)
+
+**O objetivo é REPLICAR a imagem. Trocar o conteúdo pelo do livro é opção, não etapa.**
+O padrão do comando reflete isso:
+
+```bash
+python automation/scripts/cover_pipeline.py capa.png              # só a réplica
+python automation/scripts/cover_pipeline.py capa.png --integrar   # + conteúdo do livro
+```
+
+`cover_integrator.build_from_image(path)` substitui o `build(n)` que montava caminho a partir
+de um NÚMERO — era isso que impedia qualquer imagem fora do corpus de chegar à capa final.
+O comando pula a réplica quando já existe `analysis.json` (`--rebuild` força): é a etapa cara,
+OCR mais uma dezena de compilações.
+
+### A penalidade de layout — o juiz que o layout não tinha
+
+A réplica tem o Score: existe um alvo e um número resolve. A composição **não tem alvo** — ela
+DEVE divergir do pôster. O que dá para medir é se a página está QUEBRADA, nas formas que o
+leitor nota antes de ler uma palavra. Menor é melhor; 0.0 é nada mensurável errado.
+
+```
+penalidade = sobreposição entre blocos + texto fora da página + contraste WCAG < 3:1
+           + colisão logo×texto + fundo do logo não-uniforme + marca pequena demais
+```
+
+**Ela achou quatro defeitos que número nenhum tinha achado**, e cada correção foi guiada por
+ela: a marca da capa8 na emenda preto/laranja (busca de canto passou a medir o fundo DENTRO
+do slot, não a calma da faixa inteira); a marca de 0,6cm da capa2 (o `logo.mark` do VLM
+localiza o GLIFO `v`, não a assinatura — piso de largura + teste de colisão, caindo para a
+busca de canto); a de 1,4cm da capa1 herdada do cache; e um **erro meu de medição**: eu testava
+contenção por BBOX, e um polígono traçado com bbox da página inteira fazia todo ponto reportar
+`#282828` — a capa2 marcava 1.9 de contraste que não existia. Agora é ray-casting, com buracos.
+**Penalidade média das 9: 0.0006.**
+
+⚠️ **A penalidade REPORTA, ela não manda.** Uma entrada com `"locked": true` é respeitada mesmo
+quando a automática pontua melhor — testado movendo a marca da capa8 para um fundo ruim de
+propósito: o sistema manteve a decisão humana e subiu a penalidade para 0.5. É a divisão certa.
+
+## FASE D — o portão de texto e os BURACOS no traçado (2026-09-11)
+
+**O achado, com o log como prova:**
+```
+texto 'the velvet' (80pt): SEM=0.9311 > COM=0.9280 → REMOVIDO (nao era texto)
+```
+O portão **acertou** — o elemento sai a 80pt contra ~68pt de glifo real e desenhá-lo mal é pior
+que não desenhar. O defeito é que **o leitor já mascarou aqueles pixels** confiando no OCR, então
+remover deixa BURACO em vez de devolver o traçado. A capa8 perdia o título inteiro.
+
+**Três peças, e as duas guardas vieram de REGRESSÃO, não de raciocínio:**
+1. **Retraço como alternativa ao buraco** — quando o portão descarta um texto, o leitor relê sem
+   aquela caixa na máscara. ⚠️ Oferecido como terceira via em pé de igualdade com "manter", ele
+   converteu `'underground'`, que renderizava BEM, em arte traçada por +0.006 que o olho lê como
+   perda. **Só entra quando o portão JÁ decidiu apagar.**
+2. **Buracos no traçado** (`RETR_CCOMP` + `even odd rule`). Sem isso o retraço não valia nada:
+   toda contra-forma de letra vinha fechada e `"the velvet"` saía `"th vt lvet"`. **Desbloqueio
+   estrutural: forma com cavidade finalmente é exprimível** — é o pré-requisito do D4.
+3. **Buraco só é buraco quando mostra o FUNDO.** O quadrado creme da capa8 tem o círculo vermelho
+   como contorno-filho; abri-lo punha um anel preto entre os dois (0.9422→0.9334). E a máscara de
+   texto **não conta como fundo**: `idx[txt] = bgi` marca o fundo GLOBAL, então sobre o laranja
+   aquilo virava cavidade falsa e abria uma barra preta atrás das legendas da capa8.
+   A sangria volta só no contorno EXTERNO — aplicada ao buraco, 2pt fecham a contra-forma de um `e`.
+
+## Fase A — o que passou e o que foi MEDIDO E REPROVADO (2026-09-11)
+
+**✅ Cor da tinta pelo NÚCLEO DO TRAÇO.** `_estimate_text_color` usava o centróide do cluster
+minoritário do k-means, que contém o glifo E toda a borda anti-serrilhada — nessas resoluções a
+borda é a maioria, e a cor drifta para o fundo. A capa8 media `#9B9C9F` onde o núcleo real é
+`#C8C9CB` e a cor de design é `#DFE0D5`: branco virava cinza-médio. **68 cores corrigidas nas 9**,
+Score plano (±0.0002), olho decisivo. ⚠️ **Meu teste de aceite inicial estava errado**: usei
+"distância à paleta" como proxy e ela piorava — a cor real da tinta NÃO precisa existir na paleta
+k-means (o branco correto da capa7 fica a 75 dela).
+
+**❌ Contorno sub-pixel.** Upsample da máscara + corte na meia-altura + `fillPoly` com shift.
+Saldo **−0.0088 em 8 capas**. Ganha em curvas (capa16 +0.0054, capa1 +0.0058) e **colapsa
+componente pequeno**: os fragmentos do logo da capa2 caem de 35 para 4 pontos. Mesmo guardado
+por espessura, o teto é +0.002 ao custo de mais uma constante. Não paga.
+
+**❌ Upscale do OCR antes da detecção.** O RECALL é real — capa16 8→9 elementos recuperando
+`'saturday'` e `'7 pm sharp'` inteiras, capa8 finalmente LENDO `'the velvet'`. Mas piora o
+entregável por três razões todas DOWNSTREAM: os extras chegam FRAGMENTADOS (`/11`, `pm`,
+`& 1 am` em três caixas que colidem); a quad mais frouxa faz `_measure_ink` pegar mais que o
+glifo (legendas a 18,5pt contra 14,6pt medidos); e o texto recuperado era APAGADO pelo portão.
+Score 0.9386→0.9279. ⚠️ **Escala fixa 3× lê melhor que a adaptativa** que eu escrevi (ela dava
+2× na capa8). Reatacar só depois que fragmentos forem re-unidos.
+
+## O PORTÃO DE ACEITE DA RÉPLICA (`automation/tools/accept.py`, 2026-09-11)
+
+O Score diz **quanto a réplica se parece** com o original. Ele não diz **se ela está quebrada**,
+e essa diferença custou caro repetidas vezes — sempre com o número dizendo que melhorou:
+
+| defeito | o que o Score fez |
+|---|---|
+| capa19 perdeu o `"the"` do título | **subiu** 0.055 |
+| capa8 teve `'the velvet'` apagado, virou buraco | subiu 0.003 |
+| capa1 mantém um `"6"` de 411pt (o anel lido como dígito) | remover **custa 0.13** |
+| capa8 ganhou barra preta atrás das legendas | não reagiu |
+
+Nenhum aparece numa comparação de pixels ponderada por área. Todos aparecem olhando a ANÁLISE
+com as perguntas certas. O portão não mede semelhança — mede **defeito estrutural**:
+
+```
+tipo vazando da página · blocos sobrepostos >30% · em > 25% da altura da página
+cor de tinta longe de toda a paleta · polígonos minúsculos alinhados (letra virou mancha)
+contagem de peças perto do teto · zero texto numa capa com zonas de texto medidas
+```
+
+Veredito `OK` / `ATENCAO` / `REVISAR`, sai com código 1 em REVISAR para servir de portão em
+script, e roda no fim de todo `cover_pipeline.py`.
+
+**Validado nos dois sentidos, que é o que importa num juiz:** diz `REVISAR` na capa1
+AUTOMÁTICA que rejeitamos (pegando o `"6"` a 411pt e o título desenhado como manchas) e `OK`
+na versão manual que entregamos. Hoje: **8/9 OK**, e o único `ATENCAO` é real — os 5 polígonos
+do `'the velvet'` da capa8, que é exatamente o teto conhecido do traçado.
+
+⚠️ O limiar de 25% da altura foi escolhido com os dois lados na mão: o `"6"` da capa1 ocupa
+46%, e o título mais generoso do conjunto (135pt na capa19) ocupa 16%.
+
+## FASE G — limpeza (2026-09-11)
+
+**200 linhas mortas removidas:** `integrate()` e os três ajudantes exclusivos dele
+(`map_fields`, `logo_slot`, `_resolve_collisions`). Era o caminho de SLOTS — preencher com o
+nosso texto as caixas que o OCR leu no pôster. Foi construído, medido e reprovado, e desde
+então `build` chamava `compose`; ficou morto **sem que a doc registrasse a reversão**, o que
+fez o caminho parecer vivo por semanas. `_fit_to_slot` e `logo_variant_for` FICARAM: têm outro
+dono vivo. Regressão depois: penalidade 0.0006 idêntica, zero erros.
+
+**Paleta separada dos detectores** (`automation/scripts/palette.py`). A vizinhança escondia a
+dependência real: 18 das 20 capas usam só o `structural_reader`, mas **as 20 dependem do
+`image_analyzer`** porque é de lá que sai a paleta de quantização. Foi por isso que "apagar o
+image_analyzer" apareceu como refactor óbvio várias vezes e teria quebrado tudo.
+⚠️ **É um MOVE, não uma mudança** — provado: paleta byte-idêntica nas 9, e a capa4 (que usa os
+detectores) segue em 0.9665 ponta a ponta. ⚠️ Quase introduzi um bug aqui: escrevi a miniatura
+como 200×280 quando o original é **300×450**, o que teria mudado a paleta das 20 de uma vez.
+Ao mover constantes, imprima as do original e compare.
 
 ## Pipeline
 
@@ -704,37 +903,37 @@ Diagnóstico (ad-hoc): **SSIM por zona** — gráfica (acima de y=8.63cm) vs tex
 **Teto realista do SSIM:** ~0.95. Acima disso é ruído de sub-pixel (vetor rasterizado
 vs foto). Mas o SSIM alto NÃO garante fidelidade — cruzar sempre com o content_match.
 
-## Estado atual das 20 capas
+## Estado do MVP — as 9 capas (2026-09-14)
 
-⚠️ Score na escala NOVA (pós-`_content_split`, ver "O juiz"). A **capa8** entrou FRIA (nunca foi ajustada, nenhum passe de VLM) e marcou **0.917** — é a melhor evidência de que o pipeline generaliza para capa que ele nunca viu.
+Rebuild completo, auditoria **9/9 reproduzem**, portão de aceite **8/9 OK**. Média **0.9003**.
 
-| capa | Score | classe do OLHO | situação |
+| capa | Score | origem | situação |
 |---|---|---|---|
-| capa4 | 0.967 | BOA | ✅ referência. Uma das DUAS onde os detectores ainda ganham do leitor |
-| capa12 | 0.952 | BOA | ✅ círculos sobrepostos (transparência sai chapada e mesmo assim casa) |
-| capa6 | 0.951 | BOA | ✅ leitor + 3 blocos de texto do VLM |
-| capa11 | 0.946 | ok | ✅ lattice de círculos; a INVERSÃO figura/fundo sumiu. Texto recuperado (A1) |
-| capa8 | 0.933 | ok | ✅ **nunca vista antes da Fase 6 — 0.917 a FRIO na 1ª rodada.** É o teste de aceitação do produto |
-| capa9 | 0.932 | ok | ✅ array de bolinhas com raio em rampa — o leitor pega sem detector novo |
-| capa13 | 0.928 | BOA | ✅ grade 4×4 + círculo. **0.490 antes da Fase 6** |
-| capa19 | 0.919 | ok | ✅ polígono + tipografia; `text.weight` entrou aqui (box 0.810→0.914) |
-| capa16 | 0.919 | BOA | ✅ malha de losangos. **0.406 antes da Fase 6** |
-| capa7 | 0.918 | BOA | ✅ (era 0.864 antes da Fase 6) |
-| capa20 | 0.900 | ok | ✅ cruzou 0.90 com o piso de área (A10) |
-| capa5 | 0.816 | PÉSSIMA | ⏳ hachura = teto de contraste (medido 2×) |
-| capa1 | 0.815 | BOA | ⏳ **manual**. O automático dá 0.736 (o OCR volta a ler o anel como "6"). **NUNCA rodar `plain`** |
-| capa10 | 0.808 | PÉSSIMA | ⏳ barras-U (D4 bloqueado); o resto do erro é texto |
-| capa17 | 0.808 | ok | ⏳ caiu de 0.864 após a reversão do guard de contraste — ver T5 |
-| capa18 | 0.808 | ok | ⏳ mosaico de triângulos REAL (era 0.411); ganhou 4 correções no dia |
-| capa3 | 0.803 | ok | ⏳ formas existem e NÃO SE ENCOSTAM (filme de 1px); o lattice perde o portão — ver A2 |
-| capa14 | 0.728 | PÉSSIMA | ⏳ tipografia VERTICAL; o VLM propõe `logo.mark` em vez de `text.rotate` |
-| capa2 | 0.706 | BOA | ⏳ +0.125 num só dia (piso do OCR + dedup). O olho já aprovava em 0.581 |
-| capa15 | 0.581 | ok | ❌ **a única que não se moveu.** Palavras certas, TAMANHOS errados; teto medido (glifos se tocam) |
+| capa4 | 0.9665 | detectores | ✅ referência; a ÚNICA onde os detectores ainda ganham do leitor |
+| capa12 | 0.9560 | leitor | ✅ círculos sobrepostos (transparência chapada e mesmo assim casa) |
+| capa6 | 0.9531 | leitor | ✅ |
+| capa8 | 0.9373 | leitor + retraço | ✅ título voltou a ser legível com os buracos no traçado |
+| capa13 | 0.9299 | leitor + VLM | ✅ grade 4×4 + círculo. **0.490 antes da Fase 6** |
+| capa16 | 0.9192 | leitor + VLM | ✅ malha de losangos; o VLM **corrigiu o texto** que o OCR errava |
+| capa19 | 0.9040 | leitor + VLM | ✅ **+0.0672 na Fase E**, o maior ganho do passe fresco |
+| capa1 | 0.8132 | detectores + manual | ⚠️ **a exceção** — ver T3; o automático dá 0.7304 |
+| capa2 | 0.7234 | leitor + VLM | ⏳ 96% fundo com tipo fino; o Score mente para baixo nela |
 
-**Falta na capa7 (0.874→0.95):** o falso "alvo" de círculos concêntricos sobre o
-texto "BRAUN" (Hough alucina anéis na tipografia), o círculo escuro grande do topo-
-esq. (baixo contraste, virou retângulo), e os blocos de texto (só "Walter Knoll" saiu,
-lido errado). A grade NÃO era o problema — o `_select_layers` mede que ela ajuda.
+**A prova do produto (refeita a frio em 14/09):** uma imagem inédita, sob nome novo, sem
+diretório em cache, pelo comando único → **0.9323**, PDF gerado, cache de arte criado, e o
+portão acusando sozinho o único defeito real. É a promessa exercida como o usuário a exerceria.
+⚠️ O mesmo teste mostrou que **gradiente não está no vocabulário**: o fundo em degradê virou
+manchas. Ver `pos-mvp.md` §B1.
+
+**As outras onze capas** saíram do escopo mas continuam em `automation/output/replicated/` com
+análise e render preservados. A capa7 saiu do MVP em 11/09 e está em `MVP/_fora/`.
+
+**(histórico — a capa7 SAIU do MVP em 11/09)** Era a única fraca nas DUAS camadas: textos
+miúdos sobrepostos na réplica, título sobre um círculo escuro no layout. O que faltava nela:
+o falso "alvo" de círculos concêntricos sobre o texto "BRAUN" (Hough alucina anéis na
+tipografia), o círculo escuro grande do topo-esq. (baixo contraste, virou retângulo), e os
+blocos de texto (só "Walter Knoll" saiu, lido errado). A grade NÃO era o problema — o
+`_select_layers` mede que ela ajuda. Os arquivos estão em `MVP/_fora/`.
 
 ## Primitivo `circle_lattice` (op-art de círculos — capa3, ENTROU)
 
@@ -788,7 +987,8 @@ preto = fundo). O render fazia dois DISCOS CHAPADOS na metade do raio. Duas caus
   à esquerda), e se depois de tudo sobrou uma cor só, colapsa em círculo cheio. `_dedup_circles`
   também passou a comparar ÂNGULO (dois setores do mesmo anel têm mesma cor/centro/raio).
 Medido: capa1 determinística 0.4339→**0.4641**; entregável **0.444→0.5331** (content 0.26→0.403).
-capa1 renderiza de cache (OCR não-determinístico), então os setores foram MESCLADOS no
+capa1 renderiza de cache (cirurgia manual; ⚠️ o motivo registrado antes — "OCR não-determinístico" —
+foi MEDIDO EM 11/09 e é FALSO, ver `merge_capa1`), então os setores foram MESCLADOS no
 `vlm_analysis.json` dela pelo próprio detector — nada escrito à mão. **Teto restante da capa1:
 o mosaico** (46% do erro; 3 tentativas já revertidas).
 
@@ -1175,7 +1375,11 @@ Fora do pipeline. `diff_blobs.py` (manchas de discordância ranqueadas — é co
 causa de "está estranho" sem chutar), `render_analysis.py` (renderiza+mede qualquer analysis
 com a máquina real), `vectorize.py` (o vetorizador rejeitado, guardado como rede de segurança)
 e **`merge_capa1.py`, que é NECESSÁRIO para regenerar a capa1** — ela renderiza de cache
-porque o OCR dela é não-determinístico, e sem esse script ela não é reproduzível.
+porque o entregável dela é cirurgia manual, e sem esse script ela não é reproduzível.
+⚠️ **O motivo que estava escrito aqui — "o OCR dela é não-determinístico" — é FALSO.** Medido em
+11/09: `extract_text` rodado duas vezes na capa1 e na capa16 devolve saída IDÊNTICA, elemento por
+elemento, até a cor. Essa premissa sustentava o curto-circuito de cache da capa1 e, por tabela, a
+dúvida sobre o pipeline inteiro ser reprodutível. Ele é.
 
 **`run_batch.py` — rodar várias capas com PROGRESSO VISÍVEL.** Uma rodada leva dezenas de
 minutos e era invisível até terminar. Ele escreve `output/replicated/_run_status.md` a cada
@@ -1287,10 +1491,27 @@ defeito é local, não geral, e não vale mudança global).
   Fundir cores próximas por limiar mexeria em 11 capas pra consertar uma tira. Não entra.
 - **D4 anel vira tiras laterais** — ABERTO (ver Reversões: preencher oclusão foi revertido).
 
-⚠️ **USO DO VLM (2026-08-19):** só 9 das 20 capas JÁ TIVERAM um passe (1,2,5,6,7,14,15,17,19).
-**Onze nunca viram o VLM** (3,4,8,9,10,11,12,13,16,18,20). E as 9 foram propostas contra
-renders que não existem mais (pré-leitor-estrutural). Os edits cacheados são re-julgados, mas
-a PROPOSTA é velha. Re-propor custa API — priorizar por capa, nunca em lote.
+⚠️ **USO DO VLM — FASE E rodada nas 9 do MVP (2026-09-11).** Passe FRESCO em 4, 6, 8, 12, 13,
+16, 19 (capa1 e capa2 já tinham levado um no mesmo dia). Resultado: **capa19 +0.0672**
+(0.8368→0.9040, via `region.add`×3 + `text.weight`/`size`/`move`), capa13 +0.0045,
+capa16 +0.0001, e **capa4/6/12 idênticas — o portão rejeitou tudo**. Média das 9: 0.8923→**0.9003**.
+
+**O ganho que o Score quase não mostra é o que mais importa:** na capa16 o VLM CORRIGIU o que o
+OCR errou — `'river rcck cafe'`→`'river rock cafe'`, `'und shudder{0 Ihink'`→`'and shudder to
+think'`, `'bullala; new'`→`'buffalo, new york'`. Isso vale +0.0001 no número e é a diferença
+entre um pôster legível e um ilegível. **É o único caminho medido para os caracteres** — o
+upscale de OCR provou que escala não resolve.
+
+⚠️ **CACHE DE VLM ENVELHECE, E O SCORE PREMIA O ENVELHECIMENTO.** Rodando a capa19 com os edits
+CACHEADOS (sem API), eles **apagaram o `"the"`** do título e o Score **SUBIU** 0.8368→0.8923 —
+apagar metade de um título de 135pt custa menos que desenhá-lo. Proposta velha com juiz cego a
+texto é como se perde meio título sem ninguém notar. Com proposta FRESCA a mesma capa foi a
+0.9040 mantendo os 6 textos. **Regra: re-propor, nunca reusar cache antigo como se fosse
+resposta; e conferir a LISTA de textos antes e depois.**
+
+✅ A rede de segurança entre rodadas funcionou sozinha duas vezes (capa8 e capa16): as rodadas
+pioraram, o loop voltou ao melhor, e quem acusou foi o termo de TEXTO (`0.8747→0.8226`), não o
+Score.
 
 ## Protocolo de trabalho (SEMPRE seguir)
 
@@ -1307,6 +1528,11 @@ a PROPOSTA é velha. Re-propor custa API — priorizar por capa, nunca em lote.
 6. **Depois de mexer no ORQUESTRADOR, rode a auditoria** (`automation/tools/audit.py`): o
    `analysis.json` guardado tem que reproduzir o `render.png` entregue. Essa família de bug
    é silenciosa — o número sobe, o arquivo mente, ninguém percebe.
+   ⚠️ **MAS ela NÃO prova o que parece (medido 11/09).** Ela re-renderiza o JSON guardado e
+   **nunca re-roda o OCR**, então "9/9 reproduzem" sempre significou JSON→render, jamais
+   imagem→entregável. Foi por isso que a não-reprodutibilidade ficou invisível: a capa8
+   entregue tinha 6 elementos de texto e o pipeline lia 7. Para provar ponta a ponta, rode
+   `cover_pipeline.py <imagem> --rebuild` e compare com o entregue.
 
 ## Vocabulário suportado (limite arquitetural)
 

@@ -47,6 +47,14 @@ def _load(name):
     return mod
 
 
+def _load_tool(name):
+    spec = importlib.util.spec_from_file_location(
+        name, ROOT / "automation" / "tools" / f"{name}.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def run(image, brand="versatus", out_dir=None, rebuild=False, recompose=False,
         vlm=False, max_passes=1, dpi=150, integrate=False):
     img = Path(image).resolve()
@@ -69,6 +77,20 @@ def run(image, brand="versatus", out_dir=None, rebuild=False, recompose=False,
         if not analysis.exists():
             print("[erro] o replicador nao produziu analysis.json")
             return 1
+
+    # ── veredito da replica ───────────────────────────────────────────────────
+    # O Score diz quanto a replica se parece com o original; nao diz se ela esta QUEBRADA, e
+    # e justamente onde ele e cego que os defeitos moram. Ver automation/tools/accept.py.
+    try:
+        import json as _json                            # noqa: PLC0415
+        acc = _load_tool("accept")
+        found = acc.check(_json.loads(analysis.read_text(encoding="utf-8")))
+        v = acc.verdict(found)
+        print(f"\n  veredito    : {v}")
+        for lv, msg in found:
+            print(f"    [{lv}] {msg}")
+    except Exception as exc:                            # nunca quebrar a rodada por causa disto
+        print(f"  veredito    : indisponivel ({type(exc).__name__})")
 
     # ── 2. conteudo do livro — OPCIONAL ───────────────────────────────────────
     # Replicar a imagem e o objetivo; trocar o conteudo pelo do livro e um segundo passo que

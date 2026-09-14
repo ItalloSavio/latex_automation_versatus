@@ -4,10 +4,10 @@
 > **como ele se corrige sozinho**, **como medimos**, e **onde estão os limites reais**.
 > Escrito para quem quer entender o projeto de ponta a ponta, não só rodar.
 >
-> Última reescrita: **2026-09-09** (Fase 7 — integração capa + conteúdo).
-> A revisão de 18/08 descrevia sete capas e um sistema sem integração. A versão anterior descrevia o
-> sistema antes da **Fase 6** — um detector por forma e um juiz cego a texto. As duas coisas
-> mudaram; ver §3 e §4.
+> Última reescrita: **2026-09-14** (MVP fechado: 9 capas, comando único, portão de aceite).
+> As revisões anteriores descreviam 20 capas, um `build(n)` preso ao corpus de teste e um
+> sistema sem veredito automático. Ver §8 (estado), §11 (como rodar) e §12b (o portão).
+> O que falta depois do MVP está em **`pos-mvp.md`**, com a motivação de cada item.
 
 ---
 
@@ -316,31 +316,39 @@ ou em 3 rodadas. A capa7 devolve **zero manchas** — ela diz sozinha que está 
 
 ---
 
-## 8. Estado atual das 20 capas
+## 8. Estado do MVP — as 9 capas
 
-Números da rodada completa, conferidos pela auditoria (`automation/tools/audit.py`): **20/20
-reproduzem o entregável** — o `analysis.json` em disco re-renderiza exatamente o `render.png`
-entregue. **Média 0.8529**, **onze capas ≥ 0.90**.
+Escopo fechado em 9 (a capa7 saiu em 11/09: era a única fraca nas DUAS camadas, e está em
+`MVP/_fora/`). Auditoria: **9/9 reproduzem o entregável**. **Média 0.9003.**
 
-| faixa | capas |
-|---|---|
-| ≥ 0.90 (onze) | capa4 0.967 · capa12 0.952 · capa6 0.951 · capa11 0.946 · capa8 0.933 · capa9 0.932 · capa13 0.928 · capa19 0.919 · capa16 0.919 · capa7 0.918 · capa20 0.900 |
-| 0.80–0.90 | capa5 0.816 · capa1 0.815 (manual) · capa10 0.808 · capa17 0.808 · capa18 0.808 · capa3 0.803 |
-| < 0.80 | capa14 0.728 · capa2 0.706 · capa15 0.581 |
+| capa | Score | origem | sai de um comando? |
+|---|---|---|---|
+| capa4 | 0.9665 | detectores | ✅ |
+| capa12 | 0.9560 | leitor | ✅ |
+| capa6 | 0.9531 | leitor | ✅ |
+| capa8 | 0.9373 | leitor + retraço | ✅ |
+| capa19 | 0.9040 | leitor + VLM | ✅ |
+| capa13 | 0.9299 | leitor + VLM | ✅ |
+| capa16 | 0.9192 | leitor + VLM | ✅ |
+| capa1 | 0.8132 | detectores + cirurgia manual | ❌ **a exceção** |
+| capa2 | 0.7234 | leitor + VLM | ✅ |
 
-**A capa8 é a prova do produto.** Ela entrou FRIA — nunca ajustada, sem nenhum passe de VLM,
-em modo puramente determinístico — e marcou **0.933**. É o teste de aceite da promessa "manda
-uma capa nova, recebe o PDF", e ele passa. As capas 9, 11, 12, 13, 16 e 20 também estão acima
-de 0.90 sem VLM.
+**A prova do produto foi refeita a frio em 14/09**, e desta vez do jeito certo: uma imagem
+inédita, sob nome novo, sem diretório em cache, pelo comando único. Resultado **0.9323**, capa
+e PDF gerados, cache de arte criado, e o portão de aceite acusando sozinho o único defeito
+real. É a promessa "manda uma capa nova, recebe o PDF" exercida como o usuário a exerceria.
 
-**A capa1 continua sendo a única que não fecha ponta a ponta.** O EasyOCR lê o anel dela como
-o dígito **"6" a 411pt**. O entregável (0.815) vem de cache manual; automática ela dá 0.736.
-`automation/tools/merge_capa1.py` regenera as regiões. **Nunca rode a capa1 em `plain`** — o
-`run_batch.py` recusa, porque foi assim que o entregável dela já caiu de 0.796 para 0.603.
+⚠️ **O que esse teste também mostrou:** o fundo em degradê do pôster virou manchas. **Gradiente
+não está no vocabulário** — a paleta de 8 cores quantiza um degradê em placas. Não é bug, é
+primitivo ausente, e atinge qualquer pôster com degradê. Ver `pos-mvp.md`.
 
-**A capa15 (0.581) é a única que nunca se moveu.** 92% do conteúdo dela é texto, as palavras
-saem certas e os TAMANHOS errados. É teto medido: o tipo é enorme com entrelinha apertada, os
-glifos se tocam e o calibrador não consegue separar uma banda de linha para medir.
+**A capa1 é a única que não fecha ponta a ponta**, e o motivo está medido: o EasyOCR lê o anel
+como o dígito **"6" a 411pt** e **remover custa 0.13 de Score**, então o portão medido o mantém
+— certo pelo número, errado pelo olho. O entregável (0.8132) vem de cirurgia manual; o caminho
+automático completo dá **0.7304**, e um passe fresco de VLM só chega a 0.7349.
+⚠️ Um número de 0.8567 circulou para essa capa e era **medição falsa**: saiu de renderizar um
+`reader_analysis.json` parado em disco, não de rodar o pipeline. Renderizar um JSON guardado
+não é rodar o pipeline.
 
 ---
 
@@ -372,8 +380,25 @@ que o corpo fique em pelo menos 55% do medido. A capa19 fecha em 2 linhas a 76pt
 `has_logo` é inerte e mente nos dois sentidos: vem `True` na capa3, que é op-art puro, e
 `False` na capa12 e na capa15). Nas outras, a página é cortada numa grade e cada célula
 pontuada pela variação da imagem original — mas **desqualificada se encostar numa caixa de
-texto NOSSA**: calmo no pôster não é livre na nossa capa. A variante clara/escura sai da
-luminância medida atrás do slot.
+texto NOSSA**: calmo no pôster não é livre na nossa capa.
+
+⚠️ **Três correções de 11/09, todas descobertas pela penalidade de layout (§12b):**
+- A bbox medida **não serve crua**. O `logo.mark` do VLM localiza o GLIFO — o `v` da versatus —
+  não a assinatura: a capa2 herdou um slot de **0,6cm** e a marca imprimiu a um quinto do
+  tamanho legível. Piso de largura, e teste de colisão com o tipo já posto antes de aceitar.
+- **Uma calma por FAIXA não vê o slot.** A capa8 pôs a marca exatamente na emenda entre o
+  semicírculo laranja e o campo preto, e nenhum corte do logo funciona ali. A busca agora mede
+  o fundo **dentro do próprio slot** — o mesmo número que a penalidade cobra.
+- A variante clara/escura sai da luminância medida atrás do slot, **na réplica**, não no
+  original — a arte mudou.
+
+**A direção de arte é um CACHE, não uma tabela.** `automation/art/<nome-da-imagem>.json`: a
+composição automática escreve, o build seguinte lê sem decidir de novo, e `--recompose` fica
+com a de menor penalidade. Editar o arquivo e pôr `"locked": true` torna a decisão humana
+final — testado movendo a marca da capa8 para um fundo ruim de propósito: o sistema manteve a
+escolha e subiu a penalidade para 0.5. **A penalidade reporta; ela não manda.**
+⚠️ Comparar contra o número GUARDADO é errado: quando a métrica ganha um termo, toda entrada
+antiga vira incomparavelmente boa. O cache é **re-medido com o juiz de hoje** antes de comparar.
 
 **Cor por trecho.** Uma linha que atravessa uma borda dura não tem UMA cor boa: para
 preto+amarelo o ótimo de contraste é um oliva médio que lê mal nos dois. O integrador divide
@@ -469,37 +494,57 @@ com limiar é o jeito de achá-los.
 
 ## 11. Como rodar
 
+**O comando que resume o produto** — uma imagem qualquer entra, a réplica sai:
+
 ```bash
-# uma capa, determinística
+# SÓ A RÉPLICA (o objetivo). Aceita qualquer PNG, não só o corpus de teste.
+python automation/scripts/cover_pipeline.py minha_capa.png
+
+# + o conteúdo do livro por cima (Fase 7 — OPCIONAL, nunca no caminho crítico)
+python automation/scripts/cover_pipeline.py minha_capa.png --integrar
+
+# refaz a réplica do zero (senão ele reusa o analysis.json, que é a etapa cara)
+python automation/scripts/cover_pipeline.py minha_capa.png --rebuild
+
+# recompõe o layout e guarda no cache de arte se a penalidade melhorar
+python automation/scripts/cover_pipeline.py minha_capa.png --integrar --recompose
+```
+
+Toda rodada termina com o **veredito** do portão de aceite (§12b).
+
+**Direção de arte à mão:** `automation/art/<nome-da-imagem>.json` guarda a posição da marca e
+de cada bloco em cm. Edite o arquivo e acrescente `"locked": true` — a composição automática
+passa a respeitá-lo mesmo quando ela pontuaria melhor.
+
+Os comandos de baixo nível continuam valendo para diagnóstico:
+
+```bash
+# só a etapa de réplica, com controle fino
 python automation/scripts/replicate_cover.py capas_teste/capa_teste4.png
+python automation/scripts/replicate_cover.py capas_teste/capa_teste2.png --vlm
+python automation/scripts/replicate_cover.py capas_teste/capa_teste2.png --vlm --vlm-refresh
 
-# com o proponente VLM (usa o cache de edits; não gasta API)
-python automation/scripts/replicate_cover.py capas_teste/capa_teste5.png --vlm
-
-# forçar nova chamada ao Gemini (gasta API)
-python automation/scripts/replicate_cover.py capas_teste/capa_teste5.png --vlm --vlm-refresh
-
-# painel visual das 20 (o olho como portão) — rápido, sem re-rodar
-python automation/scripts/review_board.py
-
-# painel de 3 faixas: original | cópia | cópia com o conteúdo do metadata
-python automation/scripts/review_board.py --integrated
-
-# a capa replicada recebendo o conteúdo do livro (Fase 7)
-python automation/scripts/cover_integrator.py 19
-
-# rodar várias capas com progresso visível (escreve _run_status.md)
-python automation/tools/run_batch.py plain=3,9,10 vlm=1,2,6
+# esta réplica saiu entregável? (o veredito, isolado)
+python automation/tools/accept.py            # todas
+python automation/tools/accept.py 8 19       # só estas
 
 # o analysis.json em disco ainda reproduz o render entregue?
-python automation/tools/audit.py
+python automation/tools/audit.py 1 2 4 6 8 12 13 16 19
 
-# onde está o erro, por zona
+# painéis visuais (o olho como portão)
+python automation/scripts/review_board.py
+python automation/scripts/review_board.py --integrated
+
+# várias capas com progresso visível (escreve _run_status.md)
+python automation/tools/run_batch.py plain=4,6,8 vlm=2,13,16
+
+# diagnóstico
 python automation/scripts/zone_board.py 1 6x4
-
-# manchas de discordância ranqueadas (diagnóstico)
 python automation/tools/diff_blobs.py 1 6
 ```
+
+⚠️ **Windows:** exporte `PYTHONIOENCODING=utf-8` antes das ferramentas de `automation/tools/`.
+Sem isso elas quebram com `UnicodeEncodeError` no console cp1252 ao imprimir `→`.
 
 **Provedor do VLM:** Gemini (`GEMINI_API_KEY`), reusando a infraestrutura do
 `vision_extractor` sem modificá-lo.
@@ -527,14 +572,47 @@ sem backup.
 
 ---
 
+## 12b. O portão de aceite — o veredito que o Score não dá
+
+O Score responde **quanto a réplica se parece** com o original. Ele não responde **se ela está
+quebrada**, e a diferença custou caro repetidamente — sempre com o número dizendo que melhorou:
+
+| defeito real | o que o Score fez |
+|---|---|
+| capa19 perdeu o `"the"` do título | **subiu** 0.055 |
+| capa8 teve `'the velvet'` apagado, virou buraco | subiu 0.003 |
+| capa1 mantém um `"6"` de 411pt (o anel lido como dígito) | remover **custa 0.13** |
+| capa8 ganhou barra preta atrás das legendas | não reagiu |
+
+Nenhum aparece numa comparação de pixels ponderada por área. `automation/tools/accept.py` não
+mede semelhança — mede **defeito estrutural**: tipo vazando da página, blocos sobrepostos,
+corpo maior que 25% da altura, cor de tinta longe de toda a paleta, polígonos minúsculos
+alinhados (letra virou mancha), contagem de peças perto do teto, zero texto onde há zonas de
+texto medidas. Veredito `OK` / `ATENCAO` / `REVISAR`, com código de saída 1 em REVISAR.
+
+**Validado nos dois sentidos**, que é o que separa um juiz de um alarme: diz `REVISAR` na
+capa1 AUTOMÁTICA que rejeitamos e `OK` na manual que entregamos.
+
+O **layout** tem o seu próprio juiz, e pela mesma razão: a composição não tem alvo (ela DEVE
+divergir do pôster), então o que se mede é se a página está quebrada — sobreposição, texto fora
+da página, contraste WCAG, colisão e fundo e tamanho da marca. Média das 9: **0.0006**.
+⚠️ A penalidade **reporta, não manda**: uma entrada de arte com `"locked": true` é respeitada
+mesmo quando a automática pontuaria melhor.
+
+---
+
 ## 13. O que vem a seguir
 
-1. **capa15, capa2 e capa14** — as três que o olho reprova. São o mesmo teto: tipografia que
-   o calibrador não consegue medir porque os glifos se tocam.
-2. **Determinismo da capa1** — o último furo no "manda a imagem → sai o PDF".
-3. **`font.identify`** — hoje a fonte cai sempre no substituto cego (TeX Gyre Heros). O
-   usuário pediu explicitamente que o sistema **identifique e reporte** qual fonte falta.
-   Está planejado e não existe em código.
+Está em **`pos-mvp.md`**, na raiz do projeto — cada item com a motivação, a evidência medida e
+o tamanho estimado. Os três maiores, em resumo:
+
+1. **Gradiente como primitivo** — o teste frio de 14/09 mostrou um fundo em degradê virando
+   manchas. Atinge qualquer pôster com degradê.
+2. **Um juiz que enxergue texto ausente** — é o que destrava a capa1 e o que evitaria os
+   quatro defeitos da tabela acima. Hoje o portão de aceite cobre o buraco por fora.
+3. **Provar a capa dentro do livro** — a fiação existe (`frontmatter/cover.tex` prefere
+   `\VSBookCoverDynamic`), mas `styles/versatus-dynamic-cover.tex` ainda contém uma capa de
+   outra marca. É o único elo da cadeia nunca demonstrado.
 4. **Largura de texto com métrica real.** A Fase 7 estima ~0.52em por caractere; serve para
    posicionar e quebrar linha, não para justificação fina. O caminho é medir a caixa no
    próprio LuaLaTeX, não refinar a constante.

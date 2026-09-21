@@ -1,0 +1,80 @@
+{
+  "source_image": "capa_teste4.png",
+  "canvas": {
+    "width_cm": 21.0,
+    "height_cm": 29.56
+  },
+  "note": "OCR do estagio 1, antes de qualquer portao. A GEOMETRIA e o que mede; a string vai junto so como legenda humana.",
+  "text_boxes": [
+    {
+      "text": "david bowie",
+      "confidence": 0.998,
+      "bbox_cm": {
+        "x": 0.763,
+        "y": 6.1,
+        "w": 13.052,
+        "h": 1.906
+      }
+    },
+    {
+      "text": "at dunstable civic center",
+      "confidence": 0.754,
+      "bbox_cm": {
+        "x": 7.215,
+        "y": 1.408,
+        "w": 4.722,
+        "h": 0.323
+      }
+    },
+    {
+      "text": "with the flamin' groovies;",
+      "confidence": 0.691,
+      "bbox_cm": {
+        "x": 0.792,
+        "y": 1.349,
+        "w": 4.781,
+        "h": 0.381
+      }
+    },
+    {
+      "text": "wednesday",
+      "confidence": 1.0,
+      "bbox_cm": {
+        "x": 15.75,
+        "y": 1.349,
+        "w": 2.2,
+        "h": 0.381
+      }
+    },
+    {
+      "text": "special guests from the us.a.",
+      "confidence": 0.875,
+      "bbox_cm": {
+        "x": 0.792,
+        "y": 0.821,
+        "w": 5.661,
+        "h": 0.381
+      }
+    },
+    {
+      "text": "65p in advance / 75p at the door",
+      "confidence": 0.652,
+      "bbox_cm": {
+        "x": 7.215,
+        "y": 0.821,
+        "w": 6.394,
+        "h": 0.381
+      }
+    },
+    {
+      "text": "june 21 1972 / 7:30 pm",
+      "confidence": 0.589,
+      "bbox_cm": {
+        "x": 15.721,
+        "y": 0.821,
+        "w": 4.458,
+        "h": 0.381
+      }
+    }
+  ]
+}

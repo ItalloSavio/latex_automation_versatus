@@ -1,0 +1,130 @@
+{
+  "source_image": "capa_teste1.png",
+  "canvas": {
+    "width_cm": 21.0,
+    "height_cm": 31.31
+  },
+  "note": "OCR do estagio 1, antes de qualquer portao. A GEOMETRIA e o que mede; a string vai junto so como legenda humana.",
+  "text_boxes": [
+    {
+      "text": "versatus",
+      "confidence": 1.0,
+      "bbox_cm": {
+        "x": 13.378,
+        "y": 27.187,
+        "w": 7.389,
+        "h": 1.867
+      }
+    },
+    {
+      "text": "HPC",
+      "confidence": 0.998,
+      "bbox_cm": {
+        "x": 18.9,
+        "y": 26.254,
+        "w": 1.789,
+        "h": 0.933
+      }
+    },
+    {
+      "text": "TéulodoLivro",
+      "confidence": 0.628,
+      "bbox_cm": {
+        "x": 11.9,
+        "y": 19.836,
+        "w": 9.1,
+        "h": 3.267
+      }
+    },
+    {
+      "text": "6",
+      "confidence": 0.759,
+      "bbox_cm": {
+        "x": 0.389,
+        "y": 17.386,
+        "w": 4.2,
+        "h": 10.657
+      }
+    },
+    {
+      "text": "",
+      "confidence": 0.759,
+      "bbox_cm": {
+        "x": 4.589,
+        "y": 17.386,
+        "w": 4.2,
+        "h": 10.657
+      }
+    },
+    {
+      "text": "Subtítulo científico ou programa de",
+      "confidence": 0.982,
+      "bbox_cm": {
+        "x": 12.133,
+        "y": 17.308,
+        "w": 8.789,
+        "h": 0.933
+      }
+    },
+    {
+      "text": "estudos",
+      "confidence": 0.999,
+      "bbox_cm": {
+        "x": 12.25,
+        "y": 16.336,
+        "w": 1.944,
+        "h": 0.622
+      }
+    },
+    {
+      "text": "Material tecnico",
+      "confidence": 0.996,
+      "bbox_cm": {
+        "x": 12.172,
+        "y": 6.068,
+        "w": 3.033,
+        "h": 0.545
+      }
+    },
+    {
+      "text": "DATA: 12 de junho de 2026",
+      "confidence": 0.77,
+      "bbox_cm": {
+        "x": 12.25,
+        "y": 2.567,
+        "w": 5.289,
+        "h": 0.545
+      }
+    },
+    {
+      "text": "VERSAO: v0.1",
+      "confidence": 0.473,
+      "bbox_cm": {
+        "x": 12.172,
+        "y": 1.867,
+        "w": 3.033,
+        "h": 0.622
+      }
+    },
+    {
+      "text": "USO INTERNO",
+      "confidence": 0.973,
+      "bbox_cm": {
+        "x": 12.25,
+        "y": 0.545,
+        "w": 2.722,
+        "h": 0.545
+      }
+    },
+    {
+      "text": "RASCUNHO TÉCNICO",
+      "confidence": 0.688,
+      "bbox_cm": {
+        "x": 15.283,
+        "y": 0.545,
+        "w": 4.122,
+        "h": 0.545
+      }
+    }
+  ]
+}

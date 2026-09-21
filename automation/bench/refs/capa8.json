@@ -1,0 +1,80 @@
+{
+  "source_image": "capa_teste8.png",
+  "canvas": {
+    "width_cm": 21.0,
+    "height_cm": 29.55
+  },
+  "note": "OCR do estagio 1, antes de qualquer portao. A GEOMETRIA e o que mede; a string vai junto so como legenda humana.",
+  "text_boxes": [
+    {
+      "text": "held over for the entire summer",
+      "confidence": 0.777,
+      "bbox_cm": {
+        "x": 9.984,
+        "y": 18.754,
+        "w": 6.484,
+        "h": 0.516
+      }
+    },
+    {
+      "text": "wednesday thru sunday",
+      "confidence": 0.757,
+      "bbox_cm": {
+        "x": 9.984,
+        "y": 17.723,
+        "w": 4.863,
+        "h": 0.516
+      }
+    },
+    {
+      "text": "june 24 thru august 28 1970",
+      "confidence": 0.845,
+      "bbox_cm": {
+        "x": 9.911,
+        "y": 17.133,
+        "w": 5.747,
+        "h": 0.516
+      }
+    },
+    {
+      "text": "the velvet",
+      "confidence": 1.0,
+      "bbox_cm": {
+        "x": 9.653,
+        "y": 12.712,
+        "w": 8.547,
+        "h": 2.063
+      }
+    },
+    {
+      "text": "underground",
+      "confidence": 1.0,
+      "bbox_cm": {
+        "x": 9.726,
+        "y": 10.611,
+        "w": 11.163,
+        "h": 2.432
+      }
+    },
+    {
+      "text": "upstairs at max's kansas city",
+      "confidence": 0.845,
+      "bbox_cm": {
+        "x": 10.058,
+        "y": 9.285,
+        "w": 5.6,
+        "h": 0.368
+      }
+    },
+    {
+      "text": "213 park avenue south; new york city",
+      "confidence": 0.604,
+      "bbox_cm": {
+        "x": 10.058,
+        "y": 8.659,
+        "w": 7.147,
+        "h": 0.405
+      }
+    }
+  ]
+}

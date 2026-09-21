@@ -56,6 +56,39 @@ _MAX_SHIFT_CM  = 0.60
 _MAX_SCALE     = (0.60, 1.40)
 
 
+def _generator_hscale_prior() -> float:
+    """The hscale the GENERATOR draws with when an element carries none.
+
+    ⚠️ BUG FIXED 2026-09-17 — this used to be `el.get("hscale", 1.0)`, while
+    tikz_generator draws an element without hscale at `_TEXT_HSCALE = 0.89`. So the
+    calibrator measured "0.7% too narrow", computed 1.0 × 1.0072 and wrote 1.0072 — and
+    the generator, reading that as ABSOLUTE, drew the line 13% WIDER than before. Every
+    width correction on an uncalibrated element became a ~12% stretch. Measured in
+    isolation on capa4 'david bowie', one variable only:
+
+        delivered (0.89 implied)  box F1 0.978   Score 0.9666
+        what it wrote   1.0072    box F1 0.744   Score 0.9511
+        what it meant   0.8964    box F1 0.965   Score 0.9655
+
+    That one element accounted for the whole −0.0152 of capa4's calibration bundle, which
+    is why the hill-climb rejected all seven corrections together. The comment on
+    `_TEXT_HSCALE` says "starting from 1.0 the loop climbs back on its own" — true when
+    the prior WAS 1.0; the prior moved to 0.89 and this default never followed.
+
+    Read from the generator instead of restating the number: a copy of a constant is
+    exactly how the two drifted apart.
+    """
+    import importlib.util                                       # noqa: PLC0415
+    spec = importlib.util.spec_from_file_location(
+        "_tikz_generator_prior", Path(__file__).with_name("tikz_generator.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return float(mod._TEXT_HSCALE)
+
+
+_HSCALE_PRIOR = _generator_hscale_prior()
+
+
 def calibrate(
     analysis:      dict,
     original_path: "str | Path",
@@ -101,6 +134,15 @@ def calibrate(
 
     n_changed = 0
     for el in texts:
+        # A logo PLACEHOLDER is a scope decision, not type to fit. "<Name> (Logo)" sits where
+        # the real mark is, so measuring it against the original measures the LOGO's ink — and
+        # the correction follows the graphic. Measured on capa2: 'Versatus (Logo)' went 10pt
+        # → 36pt and its box F1 ROSE 0.321 → 0.667 (the big red letters land on the red 'v'),
+        # while on the page it became a huge "Vers" over the wordmark. A per-box judge cannot
+        # catch this — it is right by the number and wrong by category — so it is excluded
+        # here, by category, the same way accept.py exempts declared mark zones.
+        if "(Logo)" in (el.get("text") or ""):
+            continue
         want = _measure_ink(orig, el, W_cm, H_cm, w_px, h_px)   # original (target)
         got  = _measure_ink(rend, el, W_cm, H_cm, w_px, h_px)   # this render
         if want is None or got is None:
@@ -248,7 +290,7 @@ def _apply_correction(el: dict, want: dict, got: dict) -> bool:
     # Only once the height is right: a leftover width error at the correct size is genuine
     # tracking/condensation, which is what hscale is for.
     elif got["w"] > 1e-6 and abs(rw - 1.0) > _MIN_SCALE_ADJ:
-        cur   = el.get("hscale", 1.0)
+        cur   = el.get("hscale", _HSCALE_PRIOR)   # NOT 1.0 — see _generator_hscale_prior
         new_s = cur * (1.0 + _DAMP * (rw - 1.0))
         new_s = min(max(new_s, _MAX_SCALE[0]), _MAX_SCALE[1])
         if abs(new_s - cur) > 1e-6:
@@ -305,7 +347,7 @@ if __name__ == "__main__":
         if any(k in _el for k in ("hscale", "dx_cm", "dy_cm")):
             print(
                 f"  {_el['text']!r:34s} "
-                f"hscale={_el.get('hscale', 1.0):.4f}  "
+                f"hscale={_el.get('hscale', _HSCALE_PRIOR):.4f}  "
                 f"dx={_el.get('dx_cm', 0.0):+.3f}cm  "
                 f"dy={_el.get('dy_cm', 0.0):+.3f}cm"
             )

@@ -1,0 +1,50 @@
+{
+  "source_image": "capa_teste6.png",
+  "canvas": {
+    "width_cm": 21.0,
+    "height_cm": 29.58
+  },
+  "note": "OCR do estagio 1, antes de qualquer portao. A GEOMETRIA e o que mede; a string vai junto so como legenda humana.",
+  "text_boxes": [
+    {
+      "text": "oonesony",
+      "confidence": 0.257,
+      "bbox_cm": {
+        "x": 11.036,
+        "y": 22.475,
+        "w": 2.234,
+        "h": 0.447
+      }
+    },
+    {
+      "text": "ociooer 6 {003",
+      "confidence": 0.366,
+      "bbox_cm": {
+        "x": 10.991,
+        "y": 21.939,
+        "w": 2.949,
+        "h": 0.402
+      }
+    },
+    {
+      "text": "rancid",
+      "confidence": 1.0,
+      "bbox_cm": {
+        "x": 11.036,
+        "y": 10.366,
+        "w": 8.132,
+        "h": 2.324
+      }
+    },
+    {
+      "text": "huybock mochine",
+      "confidence": 0.266,
+      "bbox_cm": {
+        "x": 11.036,
+        "y": 7.283,
+        "w": 3.485,
+        "h": 0.447
+      }
+    }
+  ]
+}

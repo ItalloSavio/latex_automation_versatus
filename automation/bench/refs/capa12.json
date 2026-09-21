@@ -1,0 +1,100 @@
+{
+  "source_image": "capa_teste12.png",
+  "canvas": {
+    "width_cm": 21.0,
+    "height_cm": 28.0
+  },
+  "note": "OCR do estagio 1, antes de qualquer portao. A GEOMETRIA e o que mede; a string vai junto so como legenda humana.",
+  "text_boxes": [
+    {
+      "text": "Friends",
+      "confidence": 1.0,
+      "bbox_cm": {
+        "x": 2.658,
+        "y": 14.532,
+        "w": 9.259,
+        "h": 1.949
+      }
+    },
+    {
+      "text": "1990s-2000s",
+      "confidence": 0.674,
+      "bbox_cm": {
+        "x": 8.994,
+        "y": 13.513,
+        "w": 2.703,
+        "h": 0.354
+      }
+    },
+    {
+      "text": "jennifer aniston",
+      "confidence": 0.989,
+      "bbox_cm": {
+        "x": 2.703,
+        "y": 13.424,
+        "w": 3.5,
+        "h": 0.443
+      }
+    },
+    {
+      "text": "courteney cox",
+      "confidence": 0.935,
+      "bbox_cm": {
+        "x": 2.703,
+        "y": 12.848,
+        "w": 3.146,
+        "h": 0.443
+      }
+    },
+    {
+      "text": "york city",
+      "confidence": 0.799,
+      "bbox_cm": {
+        "x": 10.013,
+        "y": 12.848,
+        "w": 1.905,
+        "h": 0.443
+      }
+    },
+    {
+      "text": "lisa kudrow",
+      "confidence": 0.933,
+      "bbox_cm": {
+        "x": 2.703,
+        "y": 12.405,
+        "w": 2.57,
+        "h": 0.31
+      }
+    },
+    {
+      "text": "matt leblanc",
+      "confidence": 0.893,
+      "bbox_cm": {
+        "x": 2.703,
+        "y": 11.829,
+        "w": 2.703,
+        "h": 0.31
+      }
+    },
+    {
+      "text": "matthew perry",
+      "confidence": 0.763,
+      "bbox_cm": {
+        "x": 2.703,
+        "y": 11.165,
+        "w": 3.19,
+        "h": 0.399
+      }
+    },
+    {
+      "text": "david schwimmer",
+      "confidence": 0.963,
+      "bbox_cm": {
+        "x": 2.703,
+        "y": 10.677,
+        "w": 3.943,
+        "h": 0.354
+      }
+    }
+  ]
+}

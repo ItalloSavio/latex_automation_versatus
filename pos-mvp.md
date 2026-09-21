@@ -54,9 +54,14 @@ troca de pesos (`ssim 0.75 / structural 0.25`) ordenava melhor e **apagou texto 
 capas**. Qualquer juiz novo precisa de **dois termos**: algo que ordene como o olho
 (`ssim`/`structural`) **e** algo que puna conteúdo AUSENTE. Só o primeiro degenera.
 
-### A2 · Reescrever o `judge_bench.py`  `pequeno` · **pré-requisito do A1**
+> **Estado em 17/09:** A2 ✅ feito (16/09). A1 **parcial, por decisão**: o `accept.py` passou a ver
+> conteúdo AUSENTE (16/09, contra a referência congelada) e palavras COLADAS em tipo de display
+> (17/09). O Score **não** foi trocado — repesar deu 2/3 no banco e três casos não calibram peso.
+> O juiz novo entrou como PORTÃO. Detalhe e números no `CLAUDE.md`.
 
-Não existe. O banco de provas que validava o juiz contra os vereditos já dados pelo usuário
+### A2 · Reescrever o `judge_bench.py`  `pequeno` · **pré-requisito do A1** · ✅ FEITO 16/09
+
+Não existia. O banco de provas que validava o juiz contra os vereditos já dados pelo usuário
 foi perdido, e o `CLAUDE.md` registra isso como pendência desde 09/09. **Mexer no Score sem
 ele é como o projeto já errou uma vez**, em 19/08: a troca passou nos dois testes que existiam
 e quebrou quatro capas que ninguém testou.
@@ -203,6 +208,13 @@ fluxo deveria decidir.
 | `_TEXT_ADD_SCORE_TOL = 0.02` está frouxo | Foi calibrado quando o Score era cego a texto ("cai ~0.005 mesmo em texto bem posto"). Depois do `_content_split` ele **não é mais cego**, e a folga nunca foi reapertada | pequeno |
 | ~19 descartes sem medição no pipeline | Três já cobraram caro (`min(m.shape)<4` comia toda régua fina; `_suppress_text_in_shapes` comia texto em círculo; `dedup_text` comia texto por vizinhança). Restam guards em `ocr_extractor` (`h_box_cm < 0.15`) e nos de círculo do `image_analyzer`. Padrão de busca: `grep -B1 continue` atrás de `if` com limiar | médio |
 | `line join=miter` em contorno traçado | Os traçados têm esporas degeneradas: na capa8, **18 de 472 vértices (3,8%) abaixo de 5°**. Com 2pt e o miter limit padrão do PDF, a espícula chega a **10pt = 3,5mm**. `line join=round` é uma linha, mas passa pelo portão de regressão | pequeno |
+| ~~O cache do VLM guarda propostas JÁ processadas pelo snap~~ ✅ **FECHADO 18/09 — era a causa-raiz de três "regressões"** | No `_vlm_pass`, o cache era gravado DEPOIS do `snap_text_adds` e todo rebuild aplicava o snap de novo (não idempotente). Consequência medida: **nenhuma capa cujo entregável veio de uma rodada fresca do VLM podia ser reproduzida pelo próprio cache** — nem com o código de antes de 17/09 (capa6 pelo cache: 0.9501, sem `with`/`and boy's life`, contra 0.9524 entregue). Foi isso que fez o rebuild de 17/09 parecer regredir a 6, a 8 e a 19. Corrigido: entrada que já tem `font_size_pt` é aplicada como está, e o cache novo guarda a proposta CRUA. Prova: capa6 pelo cache com o código novo → 7/7 textos idênticos ao entregue, Score 0.9524, 0,06% dos pixels diferentes | ✅ |
+| **O cache do VLM endereça por ID POSICIONAL** (achado 18/09) | `assign_ids` numera por ORDEM (`r1`, `t2`…), e a proposta cacheada guarda esse número. Quando a análise muda de tamanho, o id aponta para outra peça. Medido na capa19: **33 dos 35 edits cacheados usam id**, e o rebuild lê **23 regiões** contra 21 da análise que gerou as propostas — `region.remove r1` passa a remover outra forma, e a capa cai 0.9040 → **0.8877** (colisão `theshining` + faixas oliva). É a terceira forma da mesma dívida: **cache guarda PROPOSTA, e uma proposta precisa de um endereço que sobreviva à re-análise** (assinatura de forma+bbox+cor, não índice). Consertar exige portão de regressão e, para validar de verdade, rodadas FRESCAS (API) nas capas afetadas | médio |
+| **Palavras coladas em tipo MIÚDO são invisíveis** (achado 17/09) | O `accept.word_collisions` só opina com linha ≥ 16px na imagem-fonte. No cabeçalho da capa2 (~7px de linha) um rebuild colou `"SÉRIE /"` em `"Versatus HPC…"` — visível no render, abaixo da resolução da medição (§D2). Mesma causa-raiz das colisões grandes: cada linha julgada na PRÓPRIA janela, e janelas vizinhas se sobrepõem | médio |
+| Aterramento aceita edit que não muda nada | Ao vivo na capa19, o VLM propôs `text.weight bold` para cinco elementos que JÁ eram bold; cada um custou um render para ser rejeitado com delta zero. Recusar no aterramento (valor igual ao atual) é uma linha | pequeno |
+| capa2: wordmark traçado e placeholder se sobrepõem | O `logo.mark` escreveu `Versatus (Logo)` mas o `vers` traçado pelo leitor continua embaixo | pequeno |
+| capa6: três linhas que o OCR NUNCA leu | `wednesday`, `october 6 1993`, `east of mass. on 15th st.` — não estão nem na referência, então nenhuma medida as cobra. O passe de refinamento as VIU e adicionou (`october 6 1993` com box_local 1.000), mas as adições colidiram com blocos existentes e a rede de segurança reverteu tudo. É o caso-alvo da próxima iteração do refinamento | médio |
+| `text.add` de uma linha nasce regular e assentado no fundo da caixa | `apply_edit` segue a convenção "linha solta = regular" e usa a base da caixa como linha de base. Para uma palavra de título isso dá peso e altura errados, que só `text.weight`/`text.move` seguintes corrigem — e na capa19 a correção de corpo que veio depois sobrecorrigiu | pequeno |
 | `image_analyzer` serve 2 capas de 20 | 1.802 linhas para capa1 e capa4. A paleta já foi separada (`palette.py`), então os detectores **já podem** ser congelados — mas só valem 0.001 na capa4 e a capa1 depende deles. Decisão de produto, não técnica | médio |
 
 ---

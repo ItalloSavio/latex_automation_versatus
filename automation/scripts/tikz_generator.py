@@ -365,6 +365,9 @@ def _build_regions(
         elif shape == "ellipse":
             lines.append(_cmd_ellipse(col_name, bx))
 
+        elif shape == "half_ellipse":
+            lines.append(_cmd_half_ellipse(col_name, bx, r.get("orient", "top")))
+
         elif shape == "rounded_rect":
             lines.append(_cmd_rounded_rect(col_name, bx, r.get("radius_cm", 0.0)))
 
@@ -512,6 +515,25 @@ def _cmd_polygon(color: str, points_cm: list, holes_cm: "list | None" = None) ->
     w = _SEAM_BLEED_TRACED_PT
     return (f"  \\fill[{color},even odd rule] " + " ".join(subs) + ";\n"
             f"  \\draw[{color},line width={w}pt,line join=miter] {pts} -- cycle;")
+
+
+def _cmd_half_ellipse(color: str, b: dict, orient: str) -> str:
+    """Meia elipse com o lado reto numa das bordas da bbox — a cúpula, a taça e as duas
+    meias-luas laterais. Um ARCO de verdade, não uma corda poligonal: a mesma forma traçada
+    como polígono de 23 vértices sai visivelmente facetada quando é larga (o domo da capa8
+    tem 21cm). `orient` diz onde fica o lado RETO."""
+    x, y, w, h = b["x"], b["y"], b["w"], b["h"]
+    if orient == "top":            # cúpula: reto embaixo
+        start, a0, a1, rx, ry = (x + w, y), 0, 180, w / 2.0, h
+    elif orient == "bottom":       # taça: reto em cima
+        start, a0, a1, rx, ry = (x, y + h), 180, 360, w / 2.0, h
+    elif orient == "left":         # meia-lua: reto à direita
+        start, a0, a1, rx, ry = (x + w, y + h), 90, 270, w, h / 2.0
+    else:                          # "right" — reto à esquerda
+        start, a0, a1, rx, ry = (x, y), 270, 450, w, h / 2.0
+    return (f"  \\fill[{_fill_opts(color)}] ({_f(start[0])},{_f(start[1])}) "
+            f"arc[start angle={a0}, end angle={a1}, "
+            f"x radius={_f(rx)}cm, y radius={_f(ry)}cm] -- cycle;")
 
 
 def _cmd_hatch(line_col: str, base_col: "str | None", b: dict,

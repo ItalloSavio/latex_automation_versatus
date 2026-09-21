@@ -78,6 +78,7 @@ def assemble(
     print("  [1/4] OCR (texto + posicao)…")
     text_elements = _run_ocr(image_path, width_cm, height_cm)
     print(f"         {len(text_elements)} elemento(s) de texto detectado(s)")
+    _write_reference(output_path, image_path, width_cm, height_cm, text_elements)
     text_boxes_px = _text_boxes_px(text_elements, image_path, width_cm, height_cm)
 
     # ── Stage 2: CV analysis (grid masks the text zones) ─────────────────────
@@ -205,6 +206,41 @@ def _run_cv(
             return None
         print(f"         [!] CV falhou: {type(exc).__name__}: {_s[:80]}")
         return None
+
+
+def _write_reference(output_path: Path, image_path: Path,
+                     width_cm: float, height_cm: float, text_elements: list) -> None:
+    """Congela a leitura do ORIGINAL como `reference.json`, ao lado do entregavel.
+
+    Esta lista e a unica visao do original que nenhum portao ainda tocou. O pipeline a produzia
+    e a DESCARTAVA, e por isso o verificador de aceite nao conseguia responder "o que sumiu?":
+    olhando so a analise final, nao ha como saber o que havia. A capa19 foi entregue com metade
+    do titulo e aprovada com `OK`.
+
+    ⚠️ O que serve de regua e a GEOMETRIA, nao a string. Uma comparacao de strings reprovaria a
+    capa1, onde o anel lido como um `"6"` de 411pt e leitura de confianca 0.76 que o certo e
+    remover; perguntando por TINTA na caixa, o anel desenhado como anel responde tao bem quanto.
+    A string vai junto so como legenda humana. Ver `automation/tools/accept.py::missing_content`.
+    """
+    try:
+        ref = {
+            "source_image": image_path.name,
+            "canvas": {"width_cm": width_cm, "height_cm": height_cm},
+            "note": "OCR do estagio 1, antes de qualquer portao. A GEOMETRIA e o que mede; "
+                    "a string vai junto so como legenda humana.",
+            "text_boxes": [
+                {"text": e.get("text", ""),
+                 "confidence": round(float(e.get("confidence") or 0.0), 3),
+                 "bbox_cm": e.get("bbox_cm")}
+                for e in text_elements if (e.get("bbox_cm") or {}).get("w")
+            ],
+        }
+        p = output_path.parent / "reference.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(ref, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"         quadro de referencia congelado ({len(ref['text_boxes'])} caixas)")
+    except Exception as exc:                      # nunca derrubar a analise por causa do registro
+        print(f"         [!] reference.json nao escrito: {type(exc).__name__}: {str(exc)[:60]}")
 
 
 def _run_ocr(image_path: Path, width_cm: float, height_cm: float) -> list:

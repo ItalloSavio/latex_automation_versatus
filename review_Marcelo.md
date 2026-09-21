@@ -1,128 +1,229 @@
 # Swiss Cover Replicator — Revisão do Projeto
 
-> Documento executivo. Estado atual, como funciona, como medimos e próximos passos.
+> Documento executivo. Estado atual, como funciona, como medimos, o que está pronto e o que falta.
+> **Atualizado em 2026-09-16.** A versão anterior era de julho e descrevia 7 capas e um sistema
+> sem integração de conteúdo — as duas coisas mudaram.
 
 ---
 
 ## 1. O que é, em uma frase
 
-Um sistema que **recria uma capa de design suíço como um PDF vetorial editável**,
-automaticamente, a partir de uma imagem. Você envia um PNG da capa → o sistema
-devolve um PDF (LaTeX/TikZ) visualmente igual — e **se corrige sozinho** até bater a
-semelhança.
+Um sistema que **recria uma capa de design suíço como um PDF vetorial editável**, a partir de
+uma imagem. Você manda um PNG → sai um PDF (LaTeX/TikZ) visualmente igual — e o sistema
+**mede o próprio resultado e se corrige** até não ter mais o que melhorar.
 
-Não é "gerar uma capa parecida". É **reconstruir aquela capa específica**.
+Não é "gerar uma capa parecida". É **reconstruir aquela capa específica**, e como **estrutura**
+(um círculo é um círculo, um texto é um texto), não como cópia de pixels.
 
 ## 2. Por que essa abordagem importa
 
-- **Determinístico** — mesma entrada produz sempre a mesma saída. A geração do código
-  não usa IA generativa (que "alucina"); cada linha vem de uma medição.
-- **Editável** — a saída é **vetorial** (texto, formas, cores como objetos), não uma
-  imagem. Dá para ajustar qualquer elemento depois. Imprime em qualquer tamanho.
-- **Autônomo** — o sistema mede o próprio resultado contra a original e corrige em
-  loop, sem intervenção humana.
+- **Determinístico** — mesma entrada, mesma saída. O código TikZ não é escrito por IA
+  generativa; cada coordenada vem de uma medição nos pixels.
+- **Editável** — a saída é vetorial (texto, formas e cores como objetos), não uma imagem.
+  Ajusta-se qualquer elemento depois e imprime em qualquer tamanho.
+- **Auto-corretivo** — o sistema renderiza, compara com a original, corrige e repete; uma
+  correção só é aceita se melhorar, então **o resultado nunca piora**.
+- **Auditável** — existe uma ferramenta que verifica se o arquivo entregue corresponde
+  exatamente à análise que o gerou. Hoje: **9 de 9**.
 
-## 3. Como funciona (visão geral)
+## 3. Como funciona
 
 ```
    IMAGEM
      │
-     ▼
-  [OCR]  lê o texto e ONDE ele está
+     ├─ [OCR]          lê o texto, onde está, o tamanho, o peso e a cor da tinta
      │
-     ▼
-  [Visão Computacional]  identifica cores, formas (retângulos, triângulos,
-     │                   círculos), grade, e ONDE cada coisa fica ("mapa de layout")
-     ▼
-  [Gerador TikZ]  monta o PDF vetorial a partir dessas medições
+     ├─ [Visão]        quantiza as cores e separa a capa em componentes; para cada um,
+     │                 testa qual primitivo (círculo, retângulo, triângulo, meio-disco,
+     │                 polígono) melhor EXPLICA aqueles pixels e mede o encaixe
      │
-     ▼
-  [Compara com a original]  → dá uma nota objetiva (Score)
+     ├─ [Portões]      três decisões tomadas por MEDIÇÃO, não por confiança:
+     │                 qual leitor usar · qual camada manter · qual texto é real
      │
-     ├── nota boa? → PRONTO
-     └── nota ruim? → corrige e repete o loop
+     ├─ [Gerador]      monta o PDF vetorial
+     │
+     ├─ [LOOP]         compara com a original → corrige → repete
+     │                 (calibra tipografia, recolore regiões)
+     │
+     ├─ [VLM]          um modelo de visão compara as duas imagens e propõe correções
+     │                 tipadas; cada uma passa por um portão que mede e pode rejeitar
+     │
+     └─ [VEREDITO]     "esta capa saiu entregável?" — verificação de defeito estrutural
 ```
 
-O diferencial é o **loop**: o sistema não tenta acertar de primeira — ele renderiza,
-**mede a diferença** contra a original, corrige, e repete. E **só aceita uma correção
-se a nota subiu** — então o resultado nunca piora.
+**O diferencial é o loop com portão.** O sistema não tenta acertar de primeira: ele renderiza,
+mede a diferença, corrige, e mede de novo. E nada entra sem passar por medição — inclusive as
+propostas do modelo de visão, que são rejeitadas uma a uma quando não melhoram.
 
-## 4. Como medimos sucesso
+## 4. Como medimos
 
-Uma única nota, o **Score** (0 a 1), combina três medidas:
+Uma nota, o **Score** (0 a 1):
 
 | Componente | O que mede | Peso |
 |---|---|---|
-| **content_match** | qualidade SÓ no conteúdo (ignora o fundo) | 50% |
+| **content_match** | qualidade só no conteúdo, ignorando o fundo | 50% |
 | **SSIM** | similaridade estrutural geral | 30% |
 | **content_iou** | se o conteúdo está no lugar certo | 20% |
 
-**Por que não só SSIM (a métrica clássica)?** Porque ele **engana**: uma capa que é
-75% fundo preto ganha nota alta só acertando o fundo, mesmo faltando todo o conteúdo.
-Exemplo real: uma capa tinha SSIM 0.94 (parecia ótima) mas reproduzia só **3%** do
-conteúdo. O `content_match` conta a verdade. **Meta: Score ≥ 0.95 = pronto.**
+**Por que não só SSIM:** ele engana. Uma capa 75% preta ganha nota alta só acertando o fundo,
+mesmo faltando todo o conteúdo — um caso real teve SSIM 0.94 reproduzindo 3% do conteúdo.
 
-Ferramenta de inspeção visual (`review_board`): monta as 7 capas lado a lado
-(original vs gerada + notas) para o olho humano validar — o juiz final.
+### ⚠️ O aprendizado mais importante do projeto
 
-## 5. Estado atual — 7 capas de teste
+**O Score é quase cego a texto, e descobrimos isso da forma mais cara possível.** Quatro casos
+medidos onde o número disse "melhorou" e o resultado piorou:
+
+| o que aconteceu | o que o Score fez |
+|---|---|
+| uma capa perdeu metade do título | **subiu** 0.055 |
+| outra teve o título apagado, virou buraco | subiu 0.003 |
+| uma capa lê um anel gráfico como o dígito "6" gigante | **remover o erro custa 0.13** |
+
+Por isso o sistema ganhou **um segundo juiz**, independente do Score: um verificador de
+**defeito estrutural** — texto vazando da página, blocos sobrepostos, tipo grande demais para
+ser tipo, letra desenhada como mancha. Ele não mede semelhança; ele responde *"isto está
+quebrado?"*.
+
+### ✅ Resolvido em 16/09: ele passou a enxergar o que FALTA
+
+Até então esse verificador tinha um buraco: olhando só o resultado final, **não havia como saber
+o que sumiu**. A capa que perdeu metade do título era aprovada.
+
+A causa não era falta de uma regra — era falta de uma **referência**. A régua que mediríamos o
+texto era construída a partir do próprio resultado sendo julgado, então o elemento omitido
+simplesmente não era cobrado: **apagar saía de graça.** A correção foi congelar, uma vez, o que
+o sistema lê na imagem original, e passar a medir todo candidato contra essa régua fixa.
+
+Resultado medido: a capa que saiu pela metade passa de *aprovada* para **"revisar"**, apontando o
+problema pelo nome — *"o original lê 'the' aqui (1% da página) e o entregável não põe quase
+nada"*. E a versão correta continua aprovada, sem alarme falso.
+
+**O placar caiu de 8/9 para 7/9 — e nenhuma capa piorou.** O que mudou foi o juiz: a capa1 passou
+a acusar um defeito que sempre esteve lá (o título sai maior e deslocado). Um número de aprovação
+só é comparável dentro da mesma versão do verificador.
+
+**Consequência prática:** a validação final continua sendo **o olho humano**, com uma ferramenta
+que monta original × gerada lado a lado. O número prioriza; o olho decide. Mas o sistema já
+recusa sozinho uma classe de defeito que antes passava batida.
+
+## 5. Estado atual — as 9 capas do MVP
+
+**Média 0.90 · auditoria 9/9 · veredito estrutural 7/9 · oito das nove saem de um comando.**
 
 | Capa | Score | Situação |
 |---|---|---|
-| capa4 (david bowie) | **0.956** ✅ | **Pronta.** Referência — grade + triângulos + texto. |
-| capa7 (Braun) | **0.874** ✅ | **Recém-destravada** — composição de círculos (+0.21 num único bug). |
-| capa6 (rancid) | **0.926** ✅ | Quase pronta — grade + diagonais; falta só o texto miúdo. |
-| capa3 (op-art) | **0.747** ↑ | Subiu de 0.60 — grade ciente-de-texto (op-art de círculos). |
-| capa5 (grafik) | 0.612 | Subiu de 0.59 (bônus do mesmo ajuste); hachura é o desafio. |
-| capa1 (mosaico) | 0.434 | Difícil — mosaico fino + logo. |
-| capa2 (texto) | 0.315 | Fundo domina; texto fino (a métrica está sendo calibrada). |
+| capa4 (david bowie) | **0.967** | Referência. Praticamente indistinguível da original. |
+| capa12 (Friends) | **0.956** | Círculos sobrepostos com transparência. |
+| capa6 (rancid) | **0.952** | O modelo de visão corrigiu 6 linhas de texto que o OCR errava. |
+| capa8 (velvet underground) | **0.938** | Entrou "fria" no conjunto e já marcou 0.93. |
+| capa13 (YOU) | **0.930** | Era 0.49 antes da reescrita do leitor. |
+| capa16 (vision) | **0.919** | Malha de losangos; era 0.41. |
+| capa19 (the shining) | **0.904** | Ganhou 0.067 num único passe de visão. |
+| capa1 (mosaico Versatus) | **0.818** | **A exceção** — depende de ajuste manual (ver §8). |
+| capa2 (Versatus texto) | **0.723** | 96% fundo com tipografia fina; o número mente para baixo. |
 
-**Leitura:** o sistema **domina uma classe inteira de capas** (grades, blocos de cor,
-triângulos, círculos, texto — capa4/capa6/capa7). O desafio restante são capas com
-**padrões complexos** (op-art, mosaico, hachura), que exigem crescer o "vocabulário
-visual". Nota de método: a capa7 saltou de 0.67 → 0.87 ao corrigir **um** bug de
-renderização — evidência de que o caminho é depurar o compilador, não reescrevê-lo.
+### A prova do produto
 
-## 6. O que já foi conquistado (a arquitetura)
+Em 14/09 testamos a promessa de verdade: **uma imagem inédita, sob nome novo, sem nada em
+cache, por um único comando.** Resultado **0.932**, PDF gerado, e o verificador apontando
+sozinho o único defeito real. É o produto exercido como um usuário o exerceria.
 
-- **Reconstrução fiel** de uma classe inteira de layouts (Score 0.956 na referência).
-- **Loop de auto-correção** que, por design, nunca piora o resultado.
-- **Mapa de layout** — o sistema entende onde é texto vs. geometria, evitando que o
-  texto seja lido como parte do desenho (isso destravou a capa6).
-- **Seleção de camadas medida** — uma capacidade rara: quando adicionamos um detector
-  novo, o sistema **mede** se ele ajuda e o **rejeita sozinho** se não ajudar. Isso
-  elimina o retrabalho de "adicionar algo que quebra e reverter na mão".
-- **Métrica honesta** (content_match) — enxerga o conteúdo, não só o fundo.
+## 6. O que já está conquistado
 
-## 7. Como chegamos ao resultado final (roadmap)
+- **Um leitor genérico** no lugar de um detector por tipo de forma. Produz 8 das 9 capas.
+  Foi a mudança que levou capa13 de 0.49 para 0.93 e capa16 de 0.41 para 0.92.
+- **Portões medidos** — quando adicionamos um detector novo, o sistema mede se ele ajuda e o
+  **rejeita sozinho** se não ajudar. Elimina o retrabalho de "adiciona, quebra, reverte à mão".
+- **Modelo de visão como proponente, nunca protagonista** — ele sugere correções tipadas
+  (dado, nunca código) e um portão aceita ou rejeita **uma a uma**. Numa capa ele propôs 12
+  correções e o portão rejeitou todas as 12, sem prejuízo.
+- **Comando único** — `cover_pipeline.py minha_capa.png`. Aceita qualquer PNG.
+- **Segunda camada, opcional** — a mesma arte recebendo o conteúdo do livro (títulos do
+  metadata e a marca real), com direção de arte fixável à mão quando o designer quiser.
+- **Auditoria automática** — o arquivo entregue corresponde à análise que o gerou.
 
-O sistema deixou de ser "conversor de imagem" e está virando um **compilador de
-linguagem visual** — entende não só *o que* existe na imagem, mas *como os elementos
-se relacionam* (padrões, repetição, simetria).
+## 7. Como isto entra no livro
 
-```
-FASE 1  ✅ Nota objetiva (Score) que prioriza conteúdo        — FEITO
-FASE 2  ✅ Seleção de camadas medida (anti-retrabalho)         — FEITO
-FASE 3  🔨 Reconhecer PADRÕES (periodicidade, hachura, mosaico) — em curso
-FASE 4     Mapa de layout completo (segmentar toda a capa)
-FASE 5     VLM (modelo de visão) — só como auxílio nas capas ambíguas
-```
+A capa gerada é um comando LaTeX que o template já sabe consumir (`\VSBookCoverDynamic`).
+A fiação existe e está testada.
 
-A estratégia é **uma capa por vez, da mais fácil à mais difícil**, sempre com um
-"portão de regressão": nenhuma melhoria pode piorar as capas que já funcionam.
+⚠️ **Ressalva honesta:** esse elo é o **único da cadeia que ainda não foi demonstrado
+ponta a ponta** — ninguém compilou o livro final com uma das nove capas dentro. O arquivo que
+ocupa esse lugar hoje é de outro fluxo. 
 
 ## 8. Limitações honestas
 
-- Capas com **padrões densos e de alta-frequência** (op-art, mosaico fino, hachura)
-  são o limite atual — exigem reconhecer padrões, não só objetos isolados.
-- A **fonte** é um clone métrico da Helvetica (letterforms batem), não o recorte
-  original exato — diferença sutil.
-- Há um **teto natural de ~0.95** porque comparamos um vetor renderizado contra uma
-  foto (fímbria de sub-pixel). Acima disso é perfeccionismo de métrica, não fidelidade.
+**Tetos estruturais — não se resolvem com mais engenharia:**
 
-## 9. Resumo para decisão
+- **A fonte** é um clone métrico da Helvetica (as larguras batem, o desenho das letras não).
+  A original é licenciada e paga.
+- **O OCR erra caracteres** nessas resoluções, em qualquer escala. Testamos ampliar a imagem
+  3× e `"buffalo, new york"` continua saindo `"bullalo; ncw york"`. **Só o modelo de visão
+  corrige** — e corrige bem, mas custa chamada de API.
 
-O **núcleo está provado e correto** (capa4). A arquitetura é sólida, determinística e
-auto-corretiva. O trabalho restante é **crescer o vocabulário visual** para cobrir mais
-estilos de capa — um caminho claro e incremental, não uma reescrita. O sistema já
-entrega valor real para a classe de capas que domina hoje.
+**Limites do vocabulário — têm solução, ainda não construída:**
+
+- **Gradiente** não existe como primitivo. Um fundo em degradê vira manchas de cor chapada.
+  Apareceu no teste da imagem inédita e atinge qualquer pôster com degradê.
+- **Composição** — nenhum primitivo diz "esta peça está por cima daquela". É o que impede a
+  ponta de uma forma recortada de fechar corretamente numa das capas.
+
+**A exceção conhecida — capa1:** o OCR lê o anel gráfico dela como um dígito "6" de 411pt, e
+**remover esse erro custa 0.13 de Score** — então o portão medido o mantém: certo pelo número,
+errado pelo olho. Essa capa continua dependendo de um ajuste manual.
+
+⚠️ **O trabalho de 16/09 não destravou a capa1, e é importante não confundir as duas coisas.**
+O verificador agora *acusa* o problema (ele reprova a versão automática e aponta o título fora de
+lugar na entregue), mas quem escolhe manter ou remover o "6" durante a construção é a **nota**, e
+a nota não foi alterada — de propósito, porque alterá-la com três casos de teste é exatamente o
+movimento que quebrou quatro capas em agosto. Ganhamos o alarme; falta a decisão automática.
+
+## 9. Próximos passos
+
+Em ordem, com a justificativa de cada um:
+
+**1 · Um juiz que enxergue conteúdo ausente** — ✅ **FEITO em 16/09** (§4). O verificador passou
+a medir contra uma referência congelada e agora recusa sozinho a capa que perde conteúdo.
+O banco de provas do juiz foi reescrito antes de tocar em qualquer coisa, como exigido.
+
+⚠️ **Duas ressalvas honestas.** (a) A nota (o Score) **não** foi alterada — o juiz novo entrou
+como *portão*, não como função objetivo. Repesar a nota foi testado e **não** resolve o caso da
+capa1, porque ali o mecanismo do erro é outro; e três casos de teste são poucos para calibrar
+pesos, exatamente o erro que quebrou quatro capas em agosto. (b) Um caso do banco continua sem
+solução: quando o texto original é *ilegível para o OCR*, não há referência para cobrar, e só o
+modelo de visão resolve.
+
+**2 · Passe de refinamento pós-construção**
+Um processo separado que abre a imagem original ao lado da capa gerada, identifica **onde o
+sistema decidiu errado** (ex.: recusou um texto que claramente existe), e corrige. Fica
+deliberadamente **fora** do pipeline principal: o detector interno é cego a tipografia fina
+por construção, e um modelo de visão comparando as duas imagens não é.
+
+**3 · Gradiente como primitivo**
+Bloqueia qualquer pôster com fundo em degradê. Desenho conhecido, ainda não construído.
+
+**4 · Provar a capa dentro do livro** 
+Fechar o único elo não demonstrado da cadeia.
+
+**5 · Identificação de fonte**
+O sistema reportaria *"esta capa pede Akzidenz-Grotesk"* — informação acionável para decidir
+sobre licenciamento, mesmo sem ter o arquivo.
+
+### Restrições que orientam as decisões
+
+- **Tempo não é restrição; qualidade é.** O uso real é de 1 a 3 capas por rodada, e 10 a 30
+  minutos por capa é aceitável. Nenhuma escolha deve trocar fidelidade por velocidade.
+- **Poucas imagens, o mais próximas possível do original.** É fidelidade, não volume.
+
+## 10. Resumo para decisão
+
+O núcleo está **provado, medido e auditável**. Oito das nove capas saem de um comando a partir
+do PNG, com média 0.90 e verificação automática de que o entregável corresponde à análise.
+A arquitetura é a certa: medir em vez de confiar, reverter em vez de esperar.
+
+O trabalho restante **não é reescrita** — é dar ao sistema um juiz que concorde com o olho
+humano. Em 16/09 demos o passo mais importante disso: ele já **recusa sozinho** uma capa que
+perdeu conteúdo, apontando o que falta pelo nome. O que ainda não faz é **decidir sozinho** —
+o alarme existe, mas a nota que guia a construção continua quase cega a tipografia, e mexer nela
+exige mais casos de teste do que temos. É essa a distância que resta entre "automatizado" e
+"automático", e ela está mapeada, medida e com caminho definido.

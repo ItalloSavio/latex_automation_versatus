@@ -104,7 +104,9 @@ def main(argv):
 
         p = subprocess.run(
             [sys.executable, str(SCRIPTS / "replicate_cover.py"), str(img),
-             "--max-passes", "2", *_FLAGS[mode]],
+             # 3 rodadas de proposta (§4.5). O "2" antigo, na semantica do laco antigo,
+             # dava UMA proposta so.
+             "--max-passes", "3", *_FLAGS[mode]],
             capture_output=True, text=True, cwd=str(ROOT),
         )
         out, dt = p.stdout + p.stderr, time.time() - cur[2]

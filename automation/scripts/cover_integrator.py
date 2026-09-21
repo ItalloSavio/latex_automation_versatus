@@ -631,6 +631,22 @@ def _covers(r: dict, x: float, y: float) -> bool:
         cx, cy = b["x"] + b["w"] / 2, b["y"] + b["h"] / 2
         rx, ry = max(b["w"] / 2, 1e-6), max(b["h"] / 2, 1e-6)
         return ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1.0
+    if r.get("shape_type") == "half_ellipse":
+        # A meia elipse tem o centro numa BORDA da bbox, e sem este caso ela caía no teste de
+        # bbox — o que fez a penalidade da capa8 saltar de 0.0 para 0.5 no minuto em que o
+        # primitivo entrou: o domo amarelo tem bbox de página inteira, então TODO ponto
+        # passava a reportar amarelo e a marca parecia estar sobre ele.
+        o = r.get("orient", "top")
+        if o == "top":
+            cx, cy, rx, ry = b["x"] + b["w"] / 2, b["y"], b["w"] / 2, b["h"]
+        elif o == "bottom":
+            cx, cy, rx, ry = b["x"] + b["w"] / 2, b["y"] + b["h"], b["w"] / 2, b["h"]
+        elif o == "left":
+            cx, cy, rx, ry = b["x"] + b["w"], b["y"] + b["h"] / 2, b["w"], b["h"] / 2
+        else:
+            cx, cy, rx, ry = b["x"], b["y"] + b["h"] / 2, b["w"], b["h"] / 2
+        rx, ry = max(rx, 1e-6), max(ry, 1e-6)
+        return ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1.0
     return True
 
 

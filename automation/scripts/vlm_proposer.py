@@ -190,15 +190,70 @@ def propose(
     with no key. Live path calls Gemini vision via the project's existing config."""
     if mock is not None:
         return mock[:max_edits]
+    prompt = (_context_text(analysis, zones, blobs)
+              + f"\n\nPropose at most {max_edits} edits. Return ONLY JSON: "
+              '{"edits":[ ... ]}.')
+    return _ask(image_path, render_path, prompt, _SYSTEM, max_edits)
 
+
+# ─── The REFINEMENT question (pipeline-ideal.md §4.7) ─────────────────────────────────────
+# `propose` asks "what edits raise fidelity?". The refinement pass asks something else on
+# purpose: "where did the SYSTEM decide wrong?". The difference is not wording. A decision
+# error — a line the OCR never read and so was never drawn, a graphic kept as a glyph — is not
+# a small pixel residual, and the in-loop residual detector is blind to exactly that class
+# (its morphological opening erases thin type). Two images side by side are not.
+_SYSTEM_REFINE = (
+    "You are auditing the DECISIONS of a deterministic cover replicator. The build is "
+    "FINISHED. Compare the ORIGINAL cover with the RENDER and find where the SYSTEM DECIDED "
+    "WRONG — not where pixels differ slightly, but where it made a wrong call:\n"
+    "  · text that exists in the original and is MISSING from the render (often a line the "
+    "OCR never read, so nothing was ever drawn there) → text.add, reading it from the "
+    "ORIGINAL;\n"
+    "  · text drawn at a clearly wrong size, weight, position or angle → text.size / "
+    "text.weight / text.move / text.rotate;\n"
+    "  · a graphic that was read as text (a ring drawn as a giant digit) → text.remove;\n"
+    "  · a shape that is missing, or a large area in the wrong colour → region.add / "
+    "region.color.\n"
+    "NOT errors, never 'fix' these: sub-pixel offsets and anti-aliasing; the typeface itself "
+    "(the render uses a Helvetica clone on purpose, letterforms differ slightly); a logo "
+    "placeholder written as '<Name> (Logo)' — it is an intentional scope decision.\n"
+    "You receive two lists. CONFIRMED ERRORS were measured against the original by the system "
+    "itself — address them first. ALREADY TRIED were proposed before, measured, and made the "
+    "render WORSE — do not propose them again in the same form.\n"
+    "Emit one typed edit per decision error. If you find no decision errors, return "
+    '{"edits": []} — an empty answer is a valid and good answer; do not invent work.\n\n'
+    + _SCHEMA_DOC
+)
+
+
+def propose_corrections(
+    analysis: dict, image_path: "str | Path", render_path: "str | Path",
+    confirmed: "list[str] | None" = None, tried: "list[str] | None" = None,
+    mock: "list | None" = None, max_edits: int = 12,
+) -> list:
+    """The refinement pass's proposer: typed edits for DECISION ERRORS (see _SYSTEM_REFINE).
+    `confirmed` are errors the system measured itself; `tried` are proposals already measured
+    worse. `mock` short-circuits the API exactly like `propose`."""
+    if mock is not None:
+        return mock[:max_edits]
+    parts = [_context_text(analysis, None, None)]
+    parts.append("CONFIRMED ERRORS (measured against the original):\n"
+                 + ("\n".join(f"  - {c}" for c in confirmed) if confirmed else "  (none)"))
+    parts.append("ALREADY TRIED AND MEASURED WORSE (do not repeat):\n"
+                 + ("\n".join(f"  - {t}" for t in tried) if tried else "  (none)"))
+    prompt = ("\n\n".join(parts)
+              + f"\n\nPropose at most {max_edits} edits. Return ONLY JSON: "
+              '{"edits":[ ... ]}.')
+    return _ask(image_path, render_path, prompt, _SYSTEM_REFINE, max_edits)
+
+
+def _ask(image_path, render_path, prompt: str, system: str, max_edits: int) -> list:
+    """One Gemini vision call over (ORIGINAL, RENDER, prompt) → parsed edits."""
     from google import genai            # noqa: PLC0415 — live path only
     from google.genai import types      # noqa: PLC0415
     ve = _load("vision_extractor")       # reuse _call_gemini + the model chain (no edits)
 
     client = genai.Client(http_options={"api_version": "v1beta"})   # reads GEMINI_API_KEY
-    prompt = (_context_text(analysis, zones, blobs)
-              + f"\n\nPropose at most {max_edits} edits. Return ONLY JSON: "
-              '{"edits":[ ... ]}.')
     parts = [
         types.Part(text="ORIGINAL cover (the target):"),
         types.Part(inline_data=types.Blob(data=Path(image_path).read_bytes(),
@@ -211,7 +266,7 @@ def propose(
     last = None
     for model in ve._resolve_model_chain():
         try:
-            return _edits_from_text(ve._call_gemini(parts, _SYSTEM, model, client))[:max_edits]
+            return _edits_from_text(ve._call_gemini(parts, system, model, client))[:max_edits]
         except Exception as exc:
             last = exc
     raise RuntimeError(f"todos os modelos Gemini falharam: {last}")

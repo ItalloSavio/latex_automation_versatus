@@ -1,7 +1,10 @@
 # Swiss Cover Replicator — escopo do sistema
 
 > ## 🟢 MVP FECHADO — 2026-09-14
-> **9 capas · média 0.9003 · auditoria 9/9 · portão de aceite 8/9 OK · 8 das 9 saem de um comando.**
+> **9 capas · média 0.9017 · auditoria 9/9 · portão de aceite 7/9 OK · 8 das 9 saem de um comando.**
+>
+> ⚠️ O portão era 8/9 até 16/09 e virou **7/9 sem nenhuma capa piorar** — ele passou a enxergar
+> conteúdo AUSENTE e a capa1 acusou um defeito que sempre esteve lá. Ver "O PASSO 1".
 >
 > ```bash
 > python automation/scripts/cover_pipeline.py minha_capa.png              # a réplica
@@ -12,6 +15,25 @@
 > hipóteses explicitamente MORTAS para ninguém repetir.
 > A explicação didática do pipeline está em **`doc-pipe.md`**. Este arquivo é a memória de
 > trabalho: decisões, medições e reversões.
+
+## ⚠️ RESTRIÇÕES DO PROJETO — leia antes de otimizar qualquer coisa
+
+Estas não derivam do código e **não estavam escritas em lugar nenhum até 14/09**. A ausência
+delas me fez otimizar contra o usuário durante uma sessão inteira.
+
+- **TEMPO NÃO É RESTRIÇÃO. QUALIDADE É.** O uso real é de **1 a 3 capas por rodada**;
+  **10–15 min por capa é ótimo e até 30 min é aceitável**. Nunca reduza passes, pule o VLM
+  ou corte iteração "para ser rápido" sem pedido explícito.
+  ⚠️ **O erro concreto:** pus `max_passes=1` como padrão do `cover_pipeline.py` por
+  velocidade. Resultado medido: **zero elementos calibrados nas 9 capas** (o laço quebra em
+  `if _pass == max_passes` ANTES do estágio 12) e **três capas travadas fora do VLM**.
+- **Poucas imagens, o mais próximas possível do original.** É fidelidade, não volume.
+- **Orçamento pequeno.** API do Gemini se gasta com critério — mas se gasta, porque é o único
+  caminho medido para fidelidade de caractere.
+- **O usuário PRECISA de feedback de progresso.** Uma rodada de 15 minutos sem saída é
+  inaceitável. O `run_batch.py` escreve `_run_status.md`; o `cover_pipeline.py` não tem nada.
+- **Determinismo, não achismo.** Parar porque não há mais o que propor é resposta válida;
+  parar porque um número cruzou um limiar arbitrário, não. Se é teto, meça e registre o teto.
 
 ## Objetivo único (North Star)
 
@@ -64,7 +86,8 @@ Regra: fechar item ABERTO de causa conhecida e correção barata ANTES de atacar
 | R3 | `cover.tikz` da capa1 dessincronizado do `analysis.json` | 1 | ✅ FECHADO (04/09) — o TikZ era da rodada automática e o JSON da restauração manual. Re-renderizado; **20/20 conferem** com o gerador atual |
 | F1 | Fase 7 — integração capa + conteúdo do metadata | todas | ✅ FEITO (09/09) — `cover_integrator.py`. **129 slots** recebem conteúdo Versatus nas 20 capas, 7 mantêm o texto original, 3 capas usam bbox de logo MEDIDA e 17 a zona mais vazia. Zero vazamento de texto nas 20 |
 | F2 | `\VSLogoEscolhida` indefinido — os 4 layouts em `covers/` não compilavam | — | ✅ FECHADO (09/09) — cada arquivo se declarava como O pacote `styles/versatus-covers` E definia `\VSBookCover`, então eram 4 cópias rivais das quais só uma podia carregar. Viraram `\VSCoverLayoutA..D`, carregados pelo pacote; `\VSCoverOption` aceita `LayoutA..LayoutD`. A/B do pacote **intactos**. Provado: livro compila (exit 0) e os 4 layouts rendem 4 páginas |
-| F3 | `audit.py` e `judge_bench.py` NÃO EXISTIAM | — | ✅ `audit.py` RECONSTRUÍDO (09/09) — eu havia "corrigido" o caminho deles no CLAUDE.md para `automation/tools/` numa sessão anterior, mas os arquivos viviam no scratchpad temporário e sumiram; a doc apontava para um fantasma. ⚠️ `judge_bench.py` **segue inexistente** — o banco de provas do juiz precisa ser reescrito se for usado de novo |
+| F3 | `audit.py` e `judge_bench.py` NÃO EXISTIAM | — | ✅ FECHADO (16/09) — `audit.py` reconstruído em 09/09 (eu havia "corrigido" o caminho deles aqui numa sessão anterior, mas os arquivos viviam no scratchpad e sumiram: a doc apontava para um fantasma). **`judge_bench.py` reescrito em 16/09** com 3 pares ISOLADOS congelados em `automation/bench/cases/` — ⚠️ o primeiro par que montei comparava duas RODADAS do pipeline (confundido); o par tem que diferir em UM elemento. Empate agora conta como **`CEGA`**, não como erro: somar "não distingue" a "inverteu" faz uma métrica muda parecer invertida, e as duas coisas pedem respostas diferentes |
+| F4 | o juiz não via conteúdo AUSENTE | 19, 8 | ✅ **FECHADO (16/09) — era erro de REFERENCIAL, não de fórmula.** `accept.missing_content()` + quadro congelado (`make_reference.py`). A capa19 entregue pela metade vai de `OK` para `REVISAR`; o portão nas 9 vai de 8/9 para 7/9 (a capa1 cai para `ATENCAO` por defeito REAL). Ver a seção do portão de aceite |
 
 ## Direção estratégica (o reframe — LER ISTO)
 
@@ -110,9 +133,9 @@ FASE 6  ✅ FEITO (branch `new_covers`, 2026-08-16/18) — a REESCRITA DO LEITOR
 o mosaico da capa18 e a malha da capa16 são alta-frequência e renderizam bem. O teto era
 o `triangle` não conseguir carregar a própria orientação. Ver "## FASE 6".
 
-**Ranking do MVP (2026-09-14, rebuild completo das 9):** capa4 0.9665 | capa12 0.9560 |
-capa6 0.9531 | capa8 0.9373 | capa13 0.9299 | capa16 0.9192 | capa19 0.9040 |
-capa1 0.8132 (manual) | capa2 0.7234. **Média 0.9003, SETE em ≥0.90, auditoria 9/9.**
+**Ranking do MVP (2026-09-18):** capa4 **0.9702** | capa12 **0.9588** | capa6 0.9524 |
+capa8 0.9380 | capa13 **0.9316** | capa16 0.9192 | capa19 0.9040 | capa1 0.8181 (manual) |
+capa2 0.7234. **Média 0.9017, SETE em ≥0.90, auditoria 9/9.**
 
 ⚠️ O ranking das 20 (média 0.857, de 02/09) está VENCIDO e foi removido daqui: onze daquelas
 capas saíram do escopo em 10–11/09 e os números das nove mudaram desde então. As outras onze
@@ -254,7 +277,7 @@ para depois. Fonte: a real é paga, então fica o TeX Gyre Heros; `font.identify
 |---|---|---|
 | capa4 | 0.9665 | detectores |
 | capa12 | 0.9560 | leitor |
-| capa6 | 0.9531 | leitor |
+| capa6 | 0.9524 | leitor |
 | capa8 | 0.9373 | leitor + retraço |
 | capa19 | 0.9040 | leitor + VLM (+0.0672 na Fase E) |
 | capa13 | 0.9299 | leitor + VLM |
@@ -441,10 +464,79 @@ contagem de peças perto do teto · zero texto numa capa com zonas de texto medi
 Veredito `OK` / `ATENCAO` / `REVISAR`, sai com código 1 em REVISAR para servir de portão em
 script, e roda no fim de todo `cover_pipeline.py`.
 
+### ✅ O PASSO 1 — o juiz passou a ver AUSÊNCIA (2026-09-16). A causa era o REFERENCIAL.
+
+O portão acima detectava vazamento, sobreposição e tipo grande demais — mas **não detectava o
+que sumiu**, porque só olhava a análise final: sem saber o que havia, não há como saber o que
+falta. A capa19 que foi entregue com metade do título saía `OK`.
+
+**O achado, e ele é mais geral do que parecia.** Eu esperava que "conteúdo ausente" fosse uma
+mancha onde o original tem tinta e o render tem fundo. **Medido, não é** — o `"the"` da capa19 é
+branco *sobre a forma preta*, e o fundo da página é amarelo, então naquela área o original marca
+99.6% de "conteúdo" e os DOIS renders marcam 100%. Uma máscara binária presença-vs-fundo é
+**incapaz** de ver tipo que se apoia sobre outra forma: omitir não muda a presença, muda a cor.
+A sonda deu números idênticos nos dois lados (0.151% / 1.585%) e a hipótese morreu.
+
+**A causa real é que a régua vinha do réu.** O `text_match` acumula o denominador do recall
+(`rec_d`) só sobre as caixas da PRÓPRIA análise julgada, então a caixa que o candidato OMITIU
+nunca entra na conta: apagar um elemento é literalmente de graça. Medindo os dois lados no MESMO
+quadro, sem mudar uma linha da fórmula:
+
+```
+regua DO REU (cada um nas suas caixas) : 0.9032 -> 0.8662   ERRA
+regua FIXA   (ambos no mesmo quadro)   : 0.8049 -> 0.8662   OK
+```
+
+**O quadro congelado** (`automation/tools/make_reference.py` → `automation/bench/refs/capaN.json`)
+é a saída de `cover_assembler._run_ocr` no ORIGINAL: o estágio 1, antes de qualquer portão. É a
+única leitura que nenhum candidato influenciou. `accept.missing_content()` pergunta, caixa a
+caixa: *"o original tem tinta aqui — o entregável põe tinta parecida aqui?"*
+
+⚠️ **O desenho de `pipeline-ideal.md` §4.3 era comparar STRINGS** ("toda linha que o OCR leu com
+confiança alta tem correspondente?"). Medido, isso REPROVA a capa1: o anel lido como um `"6"` de
+411pt é leitura de confiança 0.76, e removê-lo — que é o certo — seria acusado como ausência.
+Perguntando por TINTA o problema some, porque ali o original de fato tem tinta (o anel) e o anel
+desenhado como anel responde tão bem quanto o `"6"` respondia.
+
+**Medido, com os dois lados na mão para cada limiar:** o menor recall LEGÍTIMO nos 6 renders do
+banco é **0.504** e a única ausência real é o `"the"` a **0.095** — `_REF_MISS_RECALL = 0.35` cai
+num vão de ~5× para cada lado. Duas isenções foram NECESSÁRIAS e as duas vieram da medição:
+leitura de confiança < 0.50 (as 3 linhas ilegíveis da capa6 dão recall 0.000 nos DOIS lados) e
+**zona de marca declarada** (a capa1 escreve `Versatus (Logo)` de propósito; o teste é o CENTRO
+da caixa na zona dilatada, porque por ÁREA o placeholder cobre só 38% da leitura `'versatus'` e
+11% de `'HPC'`, e as duas escapariam).
+
+**Resultado:** a capa19 que saiu pela metade vai de `OK` para **`REVISAR`**, com acusação nominal
+(*"o original lê 'the' aqui (1.02% da página) e o entregável não põe quase nada — recall 0.09"*),
+e a versão correta segue `OK`. Nas 9 entregues o portão vai de 8/9 para **7/9 OK**: a capa1 cai
+para `ATENCAO` por `'TéulodoLivro'` com recall 0.25 — **defeito verdadeiro**, o título sai maior,
+com entrelinha larga e deslocado (conferido no olho em `MVP/comparacao/capa01.png`), e é o item
+A11 que já estava aberto. Zero alarme falso nas outras oito.
+
+⚠️ **Teto honesto: a capa6 continua CEGA.** O par legível×ilegível não separa, porque as leituras
+ruins estão abaixo do piso de confiança e a correção veio do VLM, não do OCR — não há caixa na
+referência para cobrar. O banco registra isso como `CEGA`, não como acerto.
+
+### ✅ Palavras COLADAS em tipo de display (2026-09-17) — `accept.word_collisions`
+
+*"O original tem um espaço entre estas duas palavras — o render ainda tem?"* Pares vindos da
+REFERÊNCIA; espaço medido como sequência de colunas de cor UNIFORME na faixa da linha (uniformidade
+e não distância a um fundo, porque o espaço entre "the" e "shining" cai na fronteira preto/amarelo).
+Nasceu de duas colisões no mesmo dia por caminhos independentes, ambas invisíveis a toda métrica:
+a caixa de "shining" dá F1 **0.900 com e sem** o "e" encostado nela.
+**Só opina com linha ≥ 16px na imagem-fonte** — medido com os dois lados na mão: no título da capa19
+(~100px) o espaço é 6px e a colisão vai a 0px; no cabeçalho da capa2 (~7px) o espaço é 1–3px, a
+sonda PERDEU uma colisão visível e na capa1 (13px) acusou aperto que não era colisão. Validado:
+acusa só o "theshining", **zero falsos positivos** em 16 renders (9 entregues + A/B do laço).
+Tipo miúdo fica como teto de resolução (§D2 do `pos-mvp.md`), não como falso "OK".
+`reference_findings()` é o ponto de entrada ÚNICO (ausência + colisão) para `accept`,
+`cover_pipeline`, `refine_replica` e `judge_bench` — a regra não pode divergir entre cópias.
+
 **Validado nos dois sentidos, que é o que importa num juiz:** diz `REVISAR` na capa1
 AUTOMÁTICA que rejeitamos (pegando o `"6"` a 411pt e o título desenhado como manchas) e `OK`
-na versão manual que entregamos. Hoje: **8/9 OK**, e o único `ATENCAO` é real — os 5 polígonos
-do `'the velvet'` da capa8, que é exatamente o teto conhecido do traçado.
+na versão manual que entregamos. Hoje: **7/9 OK**, e os dois `ATENCAO` são reais — os 5
+polígonos do `'the velvet'` da capa8 (o teto conhecido do traçado) e o título da capa1 fora de
+escala, que só passou a aparecer com a verificação de ausência de 16/09.
 
 ⚠️ O limiar de 25% da altura foi escolhido com os dois lados na mão: o `"6"` da capa1 ocupa
 46%, e o título mais generoso do conjunto (135pt na capa19) ocupa 16%.
@@ -513,7 +605,136 @@ text_boxes senão int(h_px*0.73)`. Sem texto → altura toda. Genérico e guarda
 capas com texto ficam idênticas (mesmo 0.73); só capa3/capa5 (0 textos) mudam. Ganho:
 capa3 0.602→0.747, capa5 0.586→0.612, zero regressão.
 
+## ✅ O LAÇO ROTEADO — pipeline-ideal §4.1 + §4.5 (2026-09-17)
+
+**`replicate_cover._correct()`** substitui o laço inline. A seção logo abaixo ("Loop de
+auto-correção") descreve o laço ANTIGO e fica como histórico.
+
+**O defeito medido, partindo dos 9 entregáveis:** o laço antigo montava UM candidato por passada —
+todas as calibrações E todos os patches de cor — e o julgava pelo Score global. Era um A/B
+confundido por construção. capa1: só-calibração **+0.0054** com as 4 linhas melhores na própria
+caixa; só-patch **−0.0527**; pacote −0.0481 → **rejeitava tudo**. Nas 9: de 60 calibrações, 51
+melhoram a própria linha e 9 pioram; o laço antigo **jogava fora 21 boas e aceitava 6 ruins**.
+
+**Agora:** TIPO julgado pelo F1 de tinta na janela do PRÓPRIO elemento (a mesma do calibrador — que
+nunca move `bbox_cm`, então antes e depois estão no mesmo quadro), com confirmação re-renderizando
+após reverter os perdedores; o Score é só guarda (`edit_gate._GUARD_EPS`). COR julgada pelo Score.
+Os dois separados. Para quando uma rodada não aceita nada. `max_passes` conta RODADAS DE PROPOSTA
+(antes a renderização inicial contava como passada e `max_passes=1` significava ZERO correções —
+foi assim que o calibrador ficou inerte no MVP inteiro). `cover_pipeline` 1→3, `run_batch` 2→3.
+
+**A/B ISOLADO (só o laço muda, partindo dos entregáveis, 3 rodadas):** média **0.9009 → 0.9080**;
+capa2 +0.0449 (`text_match` 0.855→0.959), capa8 +0.0053, capa1 +0.0060, capa6 +0.0044, capa4
++0.0025, capa16 +0.0014, capa12 +0.0013, capa19 0, **capa13 −0.0018**. OLHO: capa2 claramente
+melhor; capa13 melhor apesar do número (o `YOU` finalmente no corpo e altura do original — Score e
+`text_match` erram juntos ali); capa16 `vision` corretamente rejeitado.
+
+**Dois bugs antigos que só apareceram porque o laço passou a medir linha a linha:**
+- **`calibrator` assumia `hscale` padrão 1.0; o gerador desenha a 0.89.** "0,7% mais largo" virava
+  +13%. Isolado na capa4 `'david bowie'`: entregue F1 0.978 · escrito 1.0072 → **0.744** · o
+  pretendido 0.8964 → 0.965. Esse elemento sozinho explicava o −0.0152 do pacote inteiro da capa4.
+  Agora o calibrador LÊ `_TEXT_HSCALE` do gerador — uma cópia de constante foi como os dois divergiram.
+- **O calibrador ajustava o placeholder `"<Name> (Logo)"`** contra a tinta do logo real: capa2
+  `'Versatus (Logo)'` 10→36pt com F1 SUBINDO 0.321→0.667 e um "Vers" vermelho enorme na página.
+  Certo pelo número, errado por categoria — agora pulado por categoria.
+
+⚠️ **O ponto cego de julgar tipo caixa a caixa:** janelas vizinhas se sobrepõem, e uma linha pode
+"melhorar na própria caixa" invadindo a vizinha. O log `⚠ COLATERAL` mede: 4 ocorrências nas 9
+(−0.001 a −0.057), nenhuma visível — por isso NÃO reverte (custaria +0.072 na capa6 para proteger
+−0.010). Mas no rebuild real a capa2 colou `"SÉRIE /"` em `"Versatus HPC…"` a ~7px de linha, abaixo
+do que o `word_collisions` consegue medir. Ver `pos-mvp.md` §F.
+
+## ✅ O PASSE DE REFINAMENTO — `refine_replica.py` (pipeline-ideal §4.7, 2026-09-17)
+
+```bash
+python automation/scripts/refine_replica.py capas_teste/capa_teste19.png --work-dir DIR --refresh
+```
+Opt-in, FORA do pipeline, sobre a capa já construída. Pergunta ao VLM **onde o sistema decidiu
+errado** (`vlm_proposer.propose_corrections`, prompt de ERRO), entregando os erros CONFIRMADOS pela
+referência e a lista do que JÁ FOI MEDIDO PIOR. Portão de sempre. Pendências em
+`refine_replica.json` (≠ `refine_edits.json`, que é do integrador), assinadas pela proposta CRUA —
+assinar depois do snap nunca casaria. Fica o **melhor estado entre rodadas**, por (menos defeito
+estrutural, depois mais Score); nunca pior que o de partida.
+
+**Achado no caminho — `snap_text_adds` tinha teto de 15pt:** um `text.add` de "the" com a caixa da
+própria referência (5,27×4,52cm; o pipeline o desenha a 100pt) saía a **15pt** numa caixa inflada
+para 7,7cm (o amarelo na borda da forma preta lido como tinta clara), e o portão rejeitava o
+colapso 0.9008→0.8056. **Nenhum `text.add` podia devolver um título.** Agora, quando o valor bateria
+no teto, o snap devolve o edit intacto ("não chute", a regra que já valia para o piso) e o
+`apply_edit` dimensiona pela caixa: 98,5pt.
+
+**Ao vivo (Gemini), dois casos de gabarito conhecido:**
+- **capa19 sem o "the":** rodada 1 propôs o `text.add` com caixa imprecisa → rejeitado; rodada 2,
+  recebendo "já tentado", repropôs em outra posição → **aceito**; rodada 3 (0 erros confirmados)
+  cresceu o "the" a 135,5pt. Fica o estado da rodada 2: veredito **REVISAR → ATENCAO**, Score
+  0.9008→0.9057. **OLHO: o título voltou inteiro, mas em peso regular e COLADO em "shining"** — ainda
+  pior que o elemento do próprio pipeline. O passe troca um defeito grave por um menor e DECLARADO.
+- **capa6 entregue:** o VLM **VIU três linhas que o OCR nunca leu** (`wednesday`, `october 6 1993` com
+  box_local 1.000, `east of mass. on 15th st.`) — o que nenhuma medida do pipeline vê. Mas as adições
+  colidiram com blocos existentes (erros confirmados 0→3→4) e nenhuma rodada terminou melhor que o
+  início: **entregável mantido intacto.**
+
+⚠️ **É ferramenta de RECUPERAÇÃO com o olho no fim, não promoção automática** — exatamente o que o
+desenho de 14/09 previa ao deixá-la fora do pipeline.
+
+## ✅ O CACHE DO VLM NUNCA REPRODUZIU AS CAPAS QUE GEROU (achado e corrigido 2026-09-18)
+
+**O sintoma:** o rebuild real de 17/09 (cache do VLM, zero API) subiu o Score em 7 de 8 capas e,
+no olho, piorou três: capa6 perdeu `with` / `and boy's life`, capa8 voltou a traçar "the velvet"
+como polígonos quebrados, capa19 colou "theshining". Eu atribuí a 6 e a 8 à minha mudança no snap.
+**Errado**, e a medição derrubou a hipótese em dois passos, cada um isolando UMA variável:
+1. snap neutralizado (0 de 45 `text.add` cacheados diferindo do código antigo) → capa6 **continua**
+   regredida;
+2. laço desligado (`--max-passes 0` × `3`, resto idêntico) → a MESMA lista de textos regredida nas
+   duas; capa19 dá 0.8877 nas duas; e o **código de ANTES de 17/09** (cópia no backup) dá
+   exatamente a mesma capa6 regredida, 0.9501.
+
+**A causa:** o `_vlm_pass` gravava o cache DEPOIS do `snap_text_adds`, e todo rebuild aplicava o snap
+de novo. O snap não é idempotente — re-aplicado, desloca x em −0,5cm e infla a caixa —, então um
+rebuild julgava uma geometria que o portão nunca tinha visto. **Nenhuma capa cujo entregável veio
+de uma rodada FRESCA do VLM podia ser reproduzida pelo próprio cache**, com nenhuma versão do código.
+A auditoria (`audit.py`) nunca viu isso porque re-renderiza o JSON guardado, não re-roda o VLM.
+
+**O conserto:** entrada que já passou pelo snap carrega `font_size_pt` (o schema do VLM não tem esse
+campo: 0 de 20 propostas cruas ao vivo, 19 de 22 entradas do cache) e é aplicada como está; o cache
+novo guarda a proposta CRUA — a regra "cache guarda PROPOSTA, nunca RESPOSTA" do pipeline-ideal §4.6.
+**Prova:** capa6 pelo cache, código novo, COM o laço → **7/7 textos idênticos ao entregue em todos os
+campos, Score 0.9524 = entregue, 0,06% dos pixels diferentes.**
+
+⚠️ **CORREÇÃO (18/09, medida): o alcance é MENOR do que eu escrevi.** Eu disse que "nenhum número do
+rebuild de 17/09 vale". Refeito o rebuild das 8 com o código corrigido e comparando pixel a pixel,
+**só a capa6 mudou** (0,64% dos pixels); as outras SETE saem **pixel-idênticas** ao rebuild de 17/09.
+O duplo-snap só alcança capa cujo cache tem `text.add`, e entre as do MVP isso é a capa6 (a capa8
+tem, mas o portão rejeita os dois jeitos). Os números e os vereditos de olho das outras sete
+continuam valendo — inclusive os defeitos da capa8 e da capa19, que **não** eram o cache.
+
+### O rebuild final e o que foi promovido (18/09)
+
+Rebuild das 8 automáticas com o código corrigido, cache do VLM, zero API. **Nenhuma capa perde
+texto** — a lista de elementos bate com a entregue nas oito. Decisão capa a capa, pelo OLHO na
+resolução da imagem-fonte (é onde a comparação é honesta):
+
+| capa | Score | decisão |
+|---|---|---|
+| capa4 | 0.9665 → **0.9702** | ✅ PROMOVIDA — legendas no corpo certo |
+| capa12 | 0.9562 → **0.9588** | ✅ PROMOVIDA — `1990s-2000s` e `new york city` no peso do original |
+| capa13 | 0.9299 → **0.9316** | ✅ PROMOVIDA — `YOU` no corpo e na altura do original |
+| capa6 | 0.9524 → 0.9524 | = entregue (0,06% dos pixels), fica como está |
+| capa2 | 0.7234 → 0.7618 | ❌ MISTA: acerta o corpo de "Versatus HPC Technical Books", mas **perde a "/" e cola** em "SÉRIE" |
+| capa16 | 0.9192 → 0.9202 | ❌ cola mais `new`+`york` que o entregue |
+| capa8 | 0.9380 → 0.9451 | ❌ `the velvet` vira `th v lvet` — **o Score sobe e está errado** |
+| capa19 | 0.9040 → 0.8877 | ❌ `theshining` colado + artefato oliva na cunha |
+
+**Média das nove: 0.9009 → 0.9017 · auditoria 9/9 · portão 7/9.** As cinco não promovidas seguem no
+entregue (restauradas do backup, auditoria delta 0).
+
+⚠️ **Três das quatro rejeições são COLISÃO entre palavras vizinhas**, e em tipo miúdo demais para o
+`word_collisions` medir (§D2). É o ponto cego do julgamento por caixa, agora com quatro ocorrências
+registradas — o próximo item da fila com evidência acumulada.
+
 ## Loop de auto-correção (replicate_cover.py)
+
+⚠️ **HISTÓRICO — descreve o laço ANTIGO, substituído em 17/09 pelo laço roteado (seção acima).**
 
 Cada passe: gera TikZ → compila → renderiza → compara (SSIM). Se não bateu a meta,
 propõe correções para o próximo passe:
@@ -903,17 +1124,22 @@ Diagnóstico (ad-hoc): **SSIM por zona** — gráfica (acima de y=8.63cm) vs tex
 **Teto realista do SSIM:** ~0.95. Acima disso é ruído de sub-pixel (vetor rasterizado
 vs foto). Mas o SSIM alto NÃO garante fidelidade — cruzar sempre com o content_match.
 
-## Estado do MVP — as 9 capas (2026-09-14)
+## Estado do MVP — as 9 capas (2026-09-14, portão revisto em 16/09)
 
-Rebuild completo, auditoria **9/9 reproduzem**, portão de aceite **8/9 OK**. Média **0.9003**.
+Rebuild completo, auditoria **9/9 reproduzem**, portão de aceite **7/9 OK**. Média **0.9017** (18/09: capa4/12/13 promovidas do rebuild com o laço roteado; as outras seis seguem como entregues).
+
+⚠️ **O portão era 8/9 e virou 7/9 em 16/09 sem nenhuma capa piorar** — o que mudou foi o JUIZ,
+que passou a enxergar ausência. A capa1 caiu para `ATENCAO` por um defeito que sempre esteve lá
+(o título com recall 0.25 contra a referência). **Número de portão só é comparável dentro da
+mesma versão do portão**, e este é o mesmo erro que o cache de arte cometeu em 11/09.
 
 | capa | Score | origem | situação |
 |---|---|---|---|
-| capa4 | 0.9665 | detectores | ✅ referência; a ÚNICA onde os detectores ainda ganham do leitor |
-| capa12 | 0.9560 | leitor | ✅ círculos sobrepostos (transparência chapada e mesmo assim casa) |
-| capa6 | 0.9531 | leitor | ✅ |
+| capa4 | **0.9702** | detectores + laço roteado | ✅ referência; a ÚNICA onde os detectores ainda ganham do leitor |
+| capa12 | **0.9588** | leitor + laço roteado | ✅ círculos sobrepostos (transparência chapada e mesmo assim casa) |
+| capa6 | 0.9524 | leitor | ✅ |
 | capa8 | 0.9373 | leitor + retraço | ✅ título voltou a ser legível com os buracos no traçado |
-| capa13 | 0.9299 | leitor + VLM | ✅ grade 4×4 + círculo. **0.490 antes da Fase 6** |
+| capa13 | **0.9316** | leitor + VLM + laço roteado | ✅ grade 4×4 + círculo. **0.490 antes da Fase 6** |
 | capa16 | 0.9192 | leitor + VLM | ✅ malha de losangos; o VLM **corrigiu o texto** que o OCR errava |
 | capa19 | 0.9040 | leitor + VLM | ✅ **+0.0672 na Fase E**, o maior ganho do passe fresco |
 | capa1 | 0.8132 | detectores + manual | ⚠️ **a exceção** — ver T3; o automático dá 0.7304 |
@@ -1522,9 +1748,31 @@ Score.
    Se a correção não generaliza, não entra.
 4. **Iteração rápida:** reusar `*_analysis.json` cacheado → regerar tikz → compilar →
    SSIM (pula EasyOCR, que leva ~40s). Só rodar o pipeline inteiro para validar CV/OCR.
-5. **Regressão:** as **20** capas em `capas_teste/` devem continuar rodando sem quebrar.
+5. **Regressão:** as **9** capas do MVP devem continuar rodando sem quebrar.
    Use `python automation/tools/run_batch.py` — ele escreve `_run_status.md` com progresso.
    ⚠️ **capa1 NUNCA em `plain`** (o `run_batch` recusa): sobrescreve a cirurgia manual.
+
+### ⚠️ Modos de falha MEDIDOS — cada um custou tempo nesta sessão (14/09)
+
+7. **BACKUP antes de qualquer rodada que sobrescreva.** `automation/output/` NÃO é versionado.
+   Uma rodada apagou os `analysis.json` das 9; recuperei por sorte do `_backup_analises`.
+8. **Renderizar um JSON guardado NÃO é rodar o pipeline.** Afirmei que a capa1 automática dava
+   **0.8567/0.8622** — era um `reader_analysis.json` parado em disco. O pipeline real dá
+   **0.7304**. Todo número citado tem que vir de uma rodada, e diga de qual.
+9. **OLHAR cada capa antes de promover.** Promovi as 9 por número; a folha de contato revelou
+   dois defeitos, um deles introduzido por mim na mesma sessão.
+10. **Isolar UMA variável por A/B.** Meu A/B do `half_ellipse` acusou **−0.0631** e quase o
+    descartou; as capas que "regrediam" tinham ZERO meios-discos — o que caía era o leitor
+    fresco descartando edits de VLM. Isolado (trocando só a forma na análise guardada), o
+    ganho apareceu limpo (+0.0007) e o olho confirmou.
+11. **Ao MOVER uma constante, imprima a do original e compare.** Quase troquei a miniatura do
+    k-means de 300×450 para 200×280 ao extrair `palette.py` — mudaria a paleta das 20 em
+    silêncio. A prova de que um move é neutro é a saída byte-idêntica.
+12. **Peça nova QUEBRA quem lê a forma antiga.** O `half_ellipse` entrou e a penalidade de
+    layout da capa8 pulou de 0.0 para 0.5 no mesmo minuto: o `_covers()` não conhecia a forma,
+    caía no teste de bbox, e como o domo tem bbox de página inteira todo ponto passou a
+    reportar amarelo. **Ao adicionar primitivo, procure todo lugar que faz dispatch por
+    `shape_type`.**
 6. **Depois de mexer no ORQUESTRADOR, rode a auditoria** (`automation/tools/audit.py`): o
    `analysis.json` guardado tem que reproduzir o `render.png` entregue. Essa família de bug
    é silenciosa — o número sobe, o arquivo mente, ninguém percebe.

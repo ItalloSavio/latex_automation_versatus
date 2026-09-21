@@ -56,7 +56,7 @@ def _load_tool(name):
 
 
 def run(image, brand="versatus", out_dir=None, rebuild=False, recompose=False,
-        vlm=False, max_passes=1, dpi=150, integrate=False):
+        vlm=False, max_passes=3, dpi=150, integrate=False):
     img = Path(image).resolve()
     if not img.exists():
         print(f"[erro] imagem nao encontrada: {img}")
@@ -84,7 +84,19 @@ def run(image, brand="versatus", out_dir=None, rebuild=False, recompose=False,
     try:
         import json as _json                            # noqa: PLC0415
         acc = _load_tool("accept")
-        found = acc.check(_json.loads(analysis.read_text(encoding="utf-8")))
+        an = _json.loads(analysis.read_text(encoding="utf-8"))
+        found = acc.check(an)
+        # A AUSENCIA e a metade que o `check` sozinho nao ve: olhando so a analise final, nao ha
+        # como saber o que sumiu. O `reference.json` (escrito pelo assembler no estagio 1) e a
+        # unica leitura do original que nenhum portao tocou — sem ele o veredito fica cego a
+        # meio titulo faltando, que foi exatamente como a capa19 saiu aprovada.
+        ref_p = acc.reference_for(d)
+        if ref_p:
+            found += acc.reference_findings(
+                an, _json.loads(ref_p.read_text(encoding="utf-8")), img, d / "render.png")
+        else:
+            print("  [aviso] sem reference.json — AUSENCIA nao verificada "
+                  "(rode com --rebuild para gera-lo)")
         v = acc.verdict(found)
         print(f"\n  veredito    : {v}")
         for lv, msg in found:
@@ -133,7 +145,13 @@ def main(argv=None):
                    help="recompoe e guarda no cache de arte se a penalidade melhorar "
                         "(entrada com \"locked\": true nunca e sobrescrita)")
     p.add_argument("--vlm", action="store_true", help="passe do VLM na replica")
-    p.add_argument("--max-passes", type=int, default=1)
+    # 3, nao 1 (pipeline-ideal.md §4.5). Com o laco antigo, max_passes=1 significava ZERO
+    # correcoes: a renderizacao inicial contava como passada e o laco quebrava antes de
+    # propor — o calibrador ficou inerte nas 9 capas do MVP. Agora conta RODADAS DE
+    # PROPOSTA, e o laco para sozinho quando uma rodada nao aceita nada. Tempo nao e
+    # restricao neste projeto; nao reduza para "ser rapido".
+    p.add_argument("--max-passes", type=int, default=3,
+                   help="rodadas de correcao (para antes se uma rodada nao aceita nada)")
     p.add_argument("--dpi", type=int, default=150)
     a = p.parse_args(argv)
     return run(a.image, brand=a.brand, out_dir=a.out_dir, rebuild=a.rebuild,

@@ -1,0 +1,90 @@
+{
+  "source_image": "capa_teste16.png",
+  "canvas": {
+    "width_cm": 21.0,
+    "height_cm": 29.54
+  },
+  "note": "OCR do estagio 1, antes de qualquer portao. A GEOMETRIA e o que mede; a string vai junto so como legenda humana.",
+  "text_boxes": [
+    {
+      "text": "1989",
+      "confidence": 0.99,
+      "bbox_cm": {
+        "x": 14.165,
+        "y": 11.061,
+        "w": 0.944,
+        "h": 0.315
+      }
+    },
+    {
+      "text": "only $6",
+      "confidence": 0.832,
+      "bbox_cm": {
+        "x": 16.773,
+        "y": 11.016,
+        "w": 1.394,
+        "h": 0.405
+      }
+    },
+    {
+      "text": "river rcck cafe",
+      "confidence": 0.879,
+      "bbox_cm": {
+        "x": 16.773,
+        "y": 9.802,
+        "w": 2.743,
+        "h": 0.315
+      }
+    },
+    {
+      "text": "wilh shades apart",
+      "confidence": 0.947,
+      "bbox_cm": {
+        "x": 11.872,
+        "y": 9.757,
+        "w": 3.507,
+        "h": 0.36
+      }
+    },
+    {
+      "text": "und shudder{0 Ihink",
+      "confidence": 0.295,
+      "bbox_cm": {
+        "x": 11.872,
+        "y": 9.217,
+        "w": 4.047,
+        "h": 0.315
+      }
+    },
+    {
+      "text": "bullala; new",
+      "confidence": 0.559,
+      "bbox_cm": {
+        "x": 16.773,
+        "y": 9.217,
+        "w": 2.338,
+        "h": 0.315
+      }
+    },
+    {
+      "text": "vision",
+      "confidence": 1.0,
+      "bbox_cm": {
+        "x": 0.764,
+        "y": 9.172,
+        "w": 9.263,
+        "h": 2.653
+      }
+    },
+    {
+      "text": "york",
+      "confidence": 0.643,
+      "bbox_cm": {
+        "x": 19.291,
+        "y": 9.172,
+        "w": 0.809,
+        "h": 0.36
+      }
+    }
+  ]
+}

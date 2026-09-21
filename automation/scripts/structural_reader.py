@@ -180,6 +180,22 @@ def _best_primitive(m: np.ndarray, bg: "np.ndarray | None" = None) -> "tuple[dic
     else:
         cands.append((_iou(m, ell), {"shape_type": "ellipse"}))
 
+    # A HALF-DISC has no primitive, and Swiss design is full of them. Without one, capa8's
+    # yellow dome — 21cm wide and half the page tall — falls through to a traced polygon of 23
+    # vertices, and 23 chords on a curve that long are VISIBLY faceted. The renderer could
+    # already draw it (an arc), so only the proposal was missing. The ellipse is centred on an
+    # EDGE of the bbox, so exactly half of it lands inside and the flat side is that edge.
+    for orient, (cx, cy, rx, ry) in (
+        ("top",    ((bw - 1) / 2.0, bh - 1,        max(bw // 2, 1), max(bh - 1, 1))),
+        ("bottom", ((bw - 1) / 2.0, 0,             max(bw // 2, 1), max(bh - 1, 1))),
+        ("left",   (bw - 1,        (bh - 1) / 2.0, max(bw - 1, 1),  max(bh // 2, 1))),
+        ("right",  (0,             (bh - 1) / 2.0, max(bw - 1, 1),  max(bh // 2, 1))),
+    ):
+        he = np.zeros_like(m, np.uint8)
+        cv2.ellipse(he, (int(round(cx)), int(round(cy))), (int(rx), int(ry)), 0, 0, 360, 1, -1)
+        cands.append((_iou(m, he.astype(bool)),
+                      {"shape_type": "half_ellipse", "_orient": orient}))
+
     # RETR_CCOMP, not RETR_EXTERNAL: a shape with a HOLE is not the same shape filled in.
     # Every counter in a letterform is a hole, so tracing outer contours only turned the
     # poster's own type into blobs — capa8's "the velvet" came back with its e/v/l closed up
@@ -398,4 +414,6 @@ def _region(shp: dict, sl: tuple, shape_px: tuple, hex_: str,
         r["holes_cm"] = [_to_cm(hp) for hp in holes]
     if "_radius_px" in shp:
         r["radius_cm"] = round(shp["_radius_px"] * sx, 3)
+    if "_orient" in shp:
+        r["orient"] = shp["_orient"]
     return r

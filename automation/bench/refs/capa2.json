@@ -1,0 +1,130 @@
+{
+  "source_image": "capa_teste2.png",
+  "canvas": {
+    "width_cm": 21.0,
+    "height_cm": 28.52
+  },
+  "note": "OCR do estagio 1, antes de qualquer portao. A GEOMETRIA e o que mede; a string vai junto so como legenda humana.",
+  "text_boxes": [
+    {
+      "text": "SERIE",
+      "confidence": 0.809,
+      "bbox_cm": {
+        "x": 7.63,
+        "y": 26.525,
+        "w": 0.875,
+        "h": 0.28
+      }
+    },
+    {
+      "text": "Versatus HPC Technical Bock",
+      "confidence": 0.822,
+      "bbox_cm": {
+        "x": 8.925,
+        "y": 26.525,
+        "w": 4.025,
+        "h": 0.21
+      }
+    },
+    {
+      "text": "versatus",
+      "confidence": 1.0,
+      "bbox_cm": {
+        "x": 3.045,
+        "y": 26.385,
+        "w": 3.255,
+        "h": 0.595
+      }
+    },
+    {
+      "text": "PROJETO",
+      "confidence": 0.964,
+      "bbox_cm": {
+        "x": 7.63,
+        "y": 22.571,
+        "w": 1.47,
+        "h": 0.21
+      }
+    },
+    {
+      "text": "DESCRIÇ-O",
+      "confidence": 0.296,
+      "bbox_cm": {
+        "x": 13.615,
+        "y": 22.466,
+        "w": 1.82,
+        "h": 0.35
+      }
+    },
+    {
+      "text": "Título do Livro",
+      "confidence": 0.771,
+      "bbox_cm": {
+        "x": 7.595,
+        "y": 21.241,
+        "w": 4.165,
+        "h": 0.42
+      }
+    },
+    {
+      "text": "Técnico",
+      "confidence": 1.0,
+      "bbox_cm": {
+        "x": 7.595,
+        "y": 20.331,
+        "w": 2.17,
+        "h": 0.42
+      }
+    },
+    {
+      "text": "Tipo",
+      "confidence": 0.537,
+      "bbox_cm": {
+        "x": 7.63,
+        "y": 18.337,
+        "w": 0.735,
+        "h": 0.21
+      }
+    },
+    {
+      "text": "Subtitulo cicntifico ou pro",
+      "confidence": 0.931,
+      "bbox_cm": {
+        "x": 7.63,
+        "y": 17.357,
+        "w": 4.585,
+        "h": 0.28
+      }
+    },
+    {
+      "text": "Brama dc Cstudos",
+      "confidence": 0.436,
+      "bbox_cm": {
+        "x": 7.63,
+        "y": 16.692,
+        "w": 2.94,
+        "h": 0.35
+      }
+    },
+    {
+      "text": "VERSATUS HPC VERSRO ,01",
+      "confidence": 0.263,
+      "bbox_cm": {
+        "x": 14.385,
+        "y": 3.604,
+        "w": 4.48,
+        "h": 0.21
+      }
+    },
+    {
+      "text": "Versatus HPC Uso interng",
+      "confidence": 0.61,
+      "bbox_cm": {
+        "x": 2.135,
+        "y": 3.569,
+        "w": 2.66,
+        "h": 0.28
+      }
+    }
+  ]
+}

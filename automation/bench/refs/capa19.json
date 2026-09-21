@@ -1,0 +1,70 @@
+{
+  "source_image": "capa_teste19.png",
+  "canvas": {
+    "width_cm": 21.0,
+    "height_cm": 29.81
+  },
+  "note": "OCR do estagio 1, antes de qualquer portao. A GEOMETRIA e o que mede; a string vai junto so como legenda humana.",
+  "text_boxes": [
+    {
+      "text": "stanley",
+      "confidence": 1.0,
+      "bbox_cm": {
+        "x": 1.31,
+        "y": 27.597,
+        "w": 3.884,
+        "h": 1.084
+      }
+    },
+    {
+      "text": "kubrick's",
+      "confidence": 1.0,
+      "bbox_cm": {
+        "x": 1.671,
+        "y": 26.603,
+        "w": 4.968,
+        "h": 1.039
+      }
+    },
+    {
+      "text": "the",
+      "confidence": 0.874,
+      "bbox_cm": {
+        "x": 3.884,
+        "y": 11.608,
+        "w": 5.274,
+        "h": 4.517
+      }
+    },
+    {
+      "text": "shining",
+      "confidence": 0.874,
+      "bbox_cm": {
+        "x": 9.158,
+        "y": 11.608,
+        "w": 10.984,
+        "h": 4.517
+      }
+    },
+    {
+      "text": "jack",
+      "confidence": 1.0,
+      "bbox_cm": {
+        "x": 1.355,
+        "y": 1.987,
+        "w": 2.348,
+        "h": 1.265
+      }
+    },
+    {
+      "text": "nicholson",
+      "confidence": 1.0,
+      "bbox_cm": {
+        "x": 1.219,
+        "y": 1.174,
+        "w": 5.239,
+        "h": 1.084
+      }
+    }
+  ]
+}

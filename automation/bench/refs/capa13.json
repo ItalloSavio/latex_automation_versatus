@@ -1,0 +1,90 @@
+{
+  "source_image": "capa_teste13.png",
+  "canvas": {
+    "width_cm": 21.0,
+    "height_cm": 29.67
+  },
+  "note": "OCR do estagio 1, antes de qualquer portao. A GEOMETRIA e o que mede; a string vai junto so como legenda humana.",
+  "text_boxes": [
+    {
+      "text": "YOU",
+      "confidence": 0.999,
+      "bbox_cm": {
+        "x": 5.107,
+        "y": 21.225,
+        "w": 10.272,
+        "h": 2.853
+      }
+    },
+    {
+      "text": "you are the best of them all.",
+      "confidence": 0.946,
+      "bbox_cm": {
+        "x": 5.792,
+        "y": 4.679,
+        "w": 9.387,
+        "h": 0.514
+      }
+    },
+    {
+      "text": "AtomGlide Essentials",
+      "confidence": 0.754,
+      "bbox_cm": {
+        "x": 1.455,
+        "y": 2.225,
+        "w": 3.538,
+        "h": 0.257
+      }
+    },
+    {
+      "text": "Directory Ctrl",
+      "confidence": 0.629,
+      "bbox_cm": {
+        "x": 17.376,
+        "y": 2.14,
+        "w": 2.168,
+        "h": 0.342
+      }
+    },
+    {
+      "text": "2026",
+      "confidence": 1.0,
+      "bbox_cm": {
+        "x": 18.461,
+        "y": 1.826,
+        "w": 0.77,
+        "h": 0.257
+      }
+    },
+    {
+      "text": "May",
+      "confidence": 0.894,
+      "bbox_cm": {
+        "x": 17.633,
+        "y": 1.74,
+        "w": 0.685,
+        "h": 0.342
+      }
+    },
+    {
+      "text": "Regie 308 Control Unit",
+      "confidence": 0.639,
+      "bbox_cm": {
+        "x": 1.455,
+        "y": 1.683,
+        "w": 3.738,
+        "h": 0.399
+      }
+    },
+    {
+      "text": "Dmitry Khorov",
+      "confidence": 1.0,
+      "bbox_cm": {
+        "x": 1.455,
+        "y": 1.369,
+        "w": 2.397,
+        "h": 0.428
+      }
+    }
+  ]
+}

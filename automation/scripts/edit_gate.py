@@ -357,6 +357,16 @@ def snap_text_adds(edits: list, image_path, canvas: dict) -> list:
     for e in edits:
         if e.get("op") != "text.add" or not e.get("bbox_cm"):
             out.append(e); continue
+        # UMA VEZ SÓ. Uma entrada que já passou por aqui carrega `font_size_pt` (o schema do VLM
+        # não tem esse campo: 0 de 20 propostas cruas ao vivo, 19 de 22 entradas do cache das 9).
+        # Este snap NÃO é idempotente — re-aplicado, desloca x em −0,5cm e infla a caixa — e o
+        # `_vlm_pass` gravava o cache DEPOIS dele, então todo rebuild julgava uma geometria que
+        # nunca foi a que o portão julgou na rodada original. Medido em 18/09: o código de ANTES
+        # de 17/09, rebuild da capa6 pelo cache, dá exatamente a mesma capa regredida que o novo
+        # (0.9501, sem "with" / "and boy's life") — o entregável NUNCA foi reproduzível pelo
+        # próprio cache. Entrada já processada é aplicada como está.
+        if "font_size_pt" in e:
+            out.append(e); continue
         hx = e.get("hex", "#000000").lstrip("#")
         bright = (int(hx[0:2], 16) + int(hx[2:4], 16) + int(hx[4:6], 16)) / 3 if len(hx) >= 6 else 0
         ink = light_ink if bright > 128 else dark_ink
@@ -440,7 +450,20 @@ def snap_text_adds(edits: list, image_path, canvas: dict) -> list:
         # font from the median glyph-component height (cap height ≈ 0.7·em), floored to body size.
         lbl, n = ndimage.label(win)
         gh = float(np.median([s[0].stop - s[0].start for s in ndimage.find_objects(lbl)])) if n else 10
-        pt = max(8.0, min(15.0, round(gh / hpx * H * _PT_PER_CM / 0.7, 1)))
+        raw_pt = round(gh / hpx * H * _PT_PER_CM / 0.7, 1)
+        # DISPLAY TYPE is outside this measurement's regime — same rule as the floor above:
+        # don't guess, hand the proposal back untouched. The 8–15pt clamp was calibrated on body
+        # copy; when either the measured glyph or the PROPOSED box says the line is bigger than
+        # that, the clamp does not refine the size, it destroys it. Measured 2026-09-17 on
+        # capa19: a text.add of "the" with the reference's own box (5.27×4.52cm, the pipeline
+        # sets it at 100pt) came out of here at 15pt in a 6.23×7.72cm box — the yellow ground
+        # at the edge of the black shape reads as "light ink" and inflated the extent — and the
+        # gate rightly rejected a Score collapse 0.9008→0.8056. Untouched, apply_edit sizes it
+        # from the box: 4.517cm → 98.5pt. Without this no text.add could ever restore a title.
+        proposed_pt = b["h"] * _PT_PER_CM / 1.3
+        if raw_pt > 15.0 or (len(real) <= 1 and proposed_pt > 15.0):
+            out.append(e); continue
+        pt = max(8.0, raw_pt)
         out.append({**e, "bbox_cm": nb, "font_size_pt": pt})
     return out
 

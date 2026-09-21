@@ -28,7 +28,7 @@ CLI usage:
 Options:
     --out-dir DIR      Output directory (default: automation/output/replicated/)
     --semantic         Enable VLM enrichment pass (requires GEMINI_API_KEY)
-    --max-passes N     Maximum correction passes (default: 5)
+    --max-passes N     Proposal rounds of the correction loop; stops early when a round lands nothing (default: 5)
     --ssim-threshold F Minimum acceptable SSIM (default: 0.95)
     --dpi N            PDF render DPI (default: 150)
     --width-cm F       Canvas width in cm (default: 21.0)
@@ -135,6 +135,13 @@ def _vlm_pass(analysis, image_path, render_path, cover_dir, score_fn, refresh):
         if not edits:
             break
 
+        # The cache keeps the PROPOSAL, never the processed edit (pipeline-ideal §4.6). This used
+        # to append the edits AFTER snapping, and every rebuild snapped them again — the snap is
+        # not idempotent, so a rebuild judged a geometry the gate never saw. Measured 18/09: even
+        # the pre-17/09 code rebuilds capa6 from its own cache into a DIFFERENT cover (0.9501,
+        # "with" / "and boy's life" gone). Legacy caches hold processed entries; snap_text_adds
+        # recognises them (they carry font_size_pt) and applies them as they are.
+        raw_edits = copy.deepcopy(edits)
         edits = eg.snap_text_adds(edits, image_path, canvas)          # ink-snap positions
         edits = eg.snap_region_colors(edits, image_path, canvas,
                                       best.get("colors", []))         # measure the fill
@@ -142,7 +149,7 @@ def _vlm_pass(analysis, image_path, render_path, cover_dir, score_fn, refresh):
         best = eg.dedup_text(best)
         for e in log:
             _log(f"    {e['verdict']:16} {e['op']:14} {e['info']}")
-        rounds_out.append(edits)
+        rounds_out.append(raw_edits)
         if not any(e["verdict"].startswith("✓") for e in log):
             _log("  [residuo] rodada sem nenhum edit aceito — parando")
             break
@@ -291,90 +298,19 @@ def replicate(
 
     analysis = _select_text(analysis, _score_of, _retrace)
 
-    # ── Stages 8–11: self-correcting loop ─────────────────────────────────
-    # Hill climbing on the SCORE: a pass is only kept when the Score improved
-    # (Score weights content over raw SSIM, so the loop can't "fix the background
-    # and wreck the content"). A worse pass is reverted and the loop stops.
-    quality       = None
-    pass_count    = 0
-    best_score    = -1.0
-    best_analysis = None
-    best_quality  = None
-
-    for _pass in range(1, max_passes + 1):
-        pass_count = _pass
-        _step(8, f"Gerando TikZ  (pass {_pass}/{max_passes})")
-        generator.generate(analysis, tikz_path)
-
-        _step(9, "Compilando LuaLaTeX")
-        _write_tex_wrapper(tex_path, tikz_path, analysis, width_cm, height_cm)
-        ok, err = _compile_lualatex(tex_path, pdf_path)
-        if not ok:
-            _log(f"  [!] Compilacao falhou: {err[:200]}")
-            break
-
-        _step(10, "Renderizando PDF → PNG")
-        rendered = _render_pdf(pdf_path, render_path, dpi)
-        if rendered is None:
-            _log("  [!] Render falhou — pymupdf nao instalado?")
-            break
-        render_path = rendered
-
-        _step(11, "Comparando qualidade (Score / SSIM / content)")
-        quality = comparator.compare(
-            image_path, render_path,
-            analysis=analysis,
-            output_dir=cover_dir,
-            ssim_threshold=ssim_threshold,
-        )
-        _rename_diff(cover_dir, diff_path)
-        score = quality["score"]
-
-        _log(f"  Score={score:.4f}  SSIM={quality['ssim_global']:.4f}  "
-             f"content={quality.get('content_match', 0):.3f}  "
-             f"IoU={quality.get('content_iou', 0):.3f}  "
-             f"color_dist={quality['color_dist_mean']:.1f}  "
-             f"regions={quality['region_match_rate']*100:.0f}%")
-
-        # ── Hill climbing on the SCORE: keep the best, never regress ───────
-        _EPS = 1e-4
-        if score > best_score + _EPS:
-            best_score    = score
-            best_analysis = copy.deepcopy(analysis)
-            best_quality  = quality
-        elif score >= best_score - _EPS:
-            _log(f"  [=] Convergiu (plateau em Score {best_score:.4f}) — parando")
-            analysis, quality = best_analysis, best_quality
-            break
-        else:
-            _log(f"  [!] Pass piorou (Score {best_score:.4f} → {score:.4f}) — revertendo")
-            analysis, quality = best_analysis, best_quality
-            _restore_best(generator, analysis, tex_path, tikz_path, pdf_path,
-                          render_path, width_cm, height_cm, dpi)
-            break
-
-        if quality["score_pass"]:
-            _log(f"  [PASS] Score >= {ssim_threshold}")
-            break
-        if _pass == max_passes:
-            break
-
-        # ── Propose the next candidate ────────────────────────────────────
-        _step(12, "Calibrando pelo render + patches de cor")
-        analysis, n_cal = calibrator.calibrate(analysis, image_path, render_path)
-        n_patch = len(quality["patch_hints"])
-        if n_patch:
-            analysis = _apply_patches(analysis, quality["patch_hints"])
-        _log(f"  {n_cal} texto(s) calibrado(s), {n_patch} patch(es) de cor")
-
-        if n_cal == 0 and n_patch == 0:
-            _log("  [OK] Convergiu — nenhuma correcao restante")
-            break
-
-        analysis_path.write_text(
-            json.dumps(analysis, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+    # ── Stages 8–11: self-correcting loop, the metric ROUTED by what changed ───────────
+    # See _correct. The loop used to bundle every calibration and every colour patch into ONE
+    # candidate and judge it by the global Score; measured on the 9 MVP covers that threw away
+    # 21 calibrations that improved their own line and kept 6 that made theirs worse.
+    best_analysis, best_quality, pass_count = _correct(
+        analysis, image_path, render_path, cover_dir, diff_path,
+        generator, comparator, calibrator, _score_of,
+        tikz_path, tex_path, pdf_path, width_cm, height_cm, dpi,
+        max_passes, ssim_threshold)
+    quality    = best_quality
+    best_score = (best_quality or {}).get("score", -1.0)
+    if best_analysis is not None:
+        analysis = best_analysis
 
     # ── Stage 13: VLM proposer on PLATEAU (Fase 5 — gated + cached) ───────────
     # The deterministic loop has settled. If still below the goal, run the VLM. The ADOPTED
@@ -382,7 +318,12 @@ def replicate(
     # rebuild is fast, reproducible, and free of OCR/id drift (the bug that made the VLM work
     # vanish from the deliverable). The gate is the AUTHORITY (grounding + per-edit measured
     # guard + eye-wanted _TRUST_OPS): its output IS the deliverable, no blind-Score veto.
-    if vlm and best_analysis is not None and not (best_quality or {}).get("score_pass"):
+    # ⚠️ `not score_pass` REMOVIDO daqui em 2026-09-14. Era o mesmo limiar cego travando o
+    # proponente mais capaz do sistema: as tres capas acima de 0.95 jamais receberam uma
+    # proposta do VLM, e uma delas tem defeito de texto que o usuario apontou a olho nu.
+    # Quem decide se um edit entra e o PORTAO (aterramento + medida por edit), nao o Score
+    # global de antes de propor.
+    if vlm and best_analysis is not None:
         _step(13, "VLM (Gemini) proponente de edits no PLATO")
         vlm_cache = cover_dir / "vlm_analysis.json"
         # There are two caches here and only ONE of them is safe. `vlm_edits.json` holds the
@@ -738,26 +679,212 @@ def _select_layers(analysis: dict, score_fn) -> dict:
     return {**analysis, "regions": best_regions}
 
 
-def _restore_best(
-    generator,
-    analysis:  dict,
-    tex_path:  Path,
-    tikz_path: Path,
-    pdf_path:  Path,
-    render_path: Path,
-    width_cm:  float,
-    height_cm: float,
-    dpi:       int,
-) -> None:
+_PASS_EPS = 1e-4          # a colour patch must raise the Score by at least this
+_TEXT_KEYS = ("font_size_pt", "hscale", "dx_cm", "dy_cm")   # what the calibrator writes
+
+
+def _log_quality(q: dict) -> None:
+    _log(f"  Score={q['score']:.4f}  SSIM={q['ssim_global']:.4f}  "
+         f"content={q.get('content_match', 0):.3f}  "
+         f"IoU={q.get('content_iou', 0):.3f}  "
+         f"color_dist={q['color_dist_mean']:.1f}  "
+         f"regions={q['region_match_rate']*100:.0f}%")
+
+
+def _correct(analysis, image_path, render_path, cover_dir, diff_path,
+             generator, comparator, calibrator, score_fn,
+             tikz_path, tex_path, pdf_path, width_cm, height_cm, dpi,
+             max_passes, ssim_threshold=0.95):
+    """Stages 8–11 — the self-correcting loop, with the metric ROUTED by what each proposal
+    changes. Returns (best_analysis, best_quality, passes); (None, None, 0) if the starting
+    state does not compile.
+
+    ⚠️ WHY IT IS SHAPED THIS WAY (pipeline-ideal.md §4.1, measured 2026-09-17). The loop used
+    to build ONE candidate per pass — every calibrator correction AND every colour patch — and
+    keep it only if the global Score rose. Two defects, both measured on the 9 MVP covers,
+    starting from each delivered analysis:
+
+      · it was a CONFOUNDED A/B by construction. capa1: calibration alone +0.0054 with all four
+        lines better on their own box; patches alone −0.0527; the bundle −0.0481 → rejected,
+        and four good corrections went with the two bad patches.
+      · a line of type was judged by the whole page. Of 60 calibrations, 51 improved the ink
+        match on their OWN box and 9 worsened it. The bundle-by-Score rule threw away 21 of the
+        good ones (capa1, 6, 13, 16) and ACCEPTED 6 of the bad ones (capa2, 4, 8, 12).
+
+    Now each proposer is judged on its own, by the metric that can see what it changed:
+
+      TYPE   (calibrator) → per element, the ink F1 inside THAT element's window — the same
+             window the calibrator measured in. A change stays only if its own box improved.
+             The Score is a catastrophe guard (edit_gate._GUARD_EPS), not the judge: on capa13
+             the six accepted lines cost −0.0036 and the eye confirmed every one is closer to
+             the original ('YOU' finally at the right size and height).
+      COLOUR (patches)    → the Score, which is the right judge for area colour.
+
+    Why per-box is not the "ruler from the defendant" problem found in accept.py: the calibrator
+    never moves `bbox_cm` — it is the search window, located on the ORIGINAL's ink — so before
+    and after are measured in the same frame.
+
+    Cross-talk between neighbouring lines is handled by CONFIRMATION: after reverting the losers
+    the candidate is re-rendered and every survivor re-checked against the old render, until no
+    loser remains (it terminates: the kept set only shrinks).
+
+    Termination is determined, not thresholded: the loop stops when a pass lands nothing, or at
+    `max_passes` proposal rounds. (It used to count the initial render as pass 1 and break before
+    proposing, so max_passes=1 meant ZERO corrections — which is how the calibrator sat inert
+    across the whole MVP.)
     """
-    Re-emit the best-scoring analysis so the .tikz/.pdf/.png on disk match the
-    metrics we report. Called when a pass regressed and we roll back to it.
-    """
+    import shutil                       # noqa: PLC0415
+    import tempfile                     # noqa: PLC0415
+    import numpy as np                  # noqa: PLC0415
+    from PIL import Image               # noqa: PLC0415
+
+    eg = _load("edit_gate")             # one source for the accept/guard epsilons
+
+    # ── the starting state, rendered explicitly so a compile error keeps its message ──────
+    _step(8, "Gerando TikZ  (estado inicial)")
     generator.generate(analysis, tikz_path)
+    _step(9, "Compilando LuaLaTeX")
     _write_tex_wrapper(tex_path, tikz_path, analysis, width_cm, height_cm)
-    ok, _ = _compile_lualatex(tex_path, pdf_path)
-    if ok:
-        _render_pdf(pdf_path, render_path, dpi)
+    ok, err = _compile_lualatex(tex_path, pdf_path)
+    if not ok:
+        _log(f"  [!] Compilacao falhou: {err[:200]}")
+        return None, None, 0
+    _step(10, "Renderizando PDF → PNG")
+    if _render_pdf(pdf_path, render_path, dpi) is None:
+        _log("  [!] Render falhou — pymupdf nao instalado?")
+        return None, None, 0
+    _step(11, "Comparando qualidade (Score / SSIM / content)")
+    best_q = comparator.compare(image_path, render_path, analysis=analysis,
+                                output_dir=cover_dir, ssim_threshold=ssim_threshold)
+    _rename_diff(cover_dir, diff_path)
+    _log_quality(best_q)
+    best = copy.deepcopy(analysis)
+
+    orig = np.asarray(Image.open(image_path).convert("RGB")).astype(int)
+    size = (orig.shape[1], orig.shape[0])
+    W = best.get("canvas", {}).get("width_cm", width_cm)
+    H = best.get("canvas", {}).get("height_cm", height_cm)
+    # The calibrator must measure against the render of the BEST state, and render_path is
+    # overwritten by every trial — so the best render is kept aside.
+    best_png = Path(tempfile.gettempdir()) / f"swiss_best_{cover_dir.name}.png"
+    shutil.copyfile(render_path, best_png)
+
+    def _arr(path):
+        return np.asarray(Image.open(path).convert("RGB").resize(size, Image.LANCZOS)).astype(int)
+
+    def _box_f1(rend, el):
+        b = el.get("bbox_cm") or {}
+        if not b.get("w") or not b.get("h"):
+            return None
+        h_px, w_px = orig.shape[:2]
+        x0 = max(0.0, b["x"] - calibrator._MARGIN_X_CM)
+        x1 = min(W, b["x"] + b["w"] + calibrator._MARGIN_X_CM)
+        y0 = max(0.0, b["y"] - calibrator._MARGIN_Y_CM)
+        y1 = min(H, b["y"] + b["h"] + calibrator._MARGIN_Y_CM)
+        return comparator._text_box_f1(orig, rend, (
+            int(x0 / W * w_px), int((H - y1) / H * h_px),
+            int(x1 / W * w_px), int((H - y0) / H * h_px)))
+
+    def _revert(dst, src):
+        for k in _TEXT_KEYS:
+            if k in src:
+                dst[k] = src[k]
+            else:
+                dst.pop(k, None)
+
+    passes = 0
+    for _pass in range(1, max_passes + 1):
+        passes = _pass
+        _step(12, f"Propondo correcoes  (pass {_pass}/{max_passes})")
+        landed = 0
+
+        # ── (a) TYPE, judged on each element's own box ────────────────────────────────────
+        cand, n_cal = calibrator.calibrate(best, image_path, best_png)
+        if n_cal:
+            b_els, c_els = best.get("text_elements", []), cand.get("text_elements", [])
+            changed = [i for i, (eb, ec) in enumerate(zip(b_els, c_els))
+                       if any(eb.get(k) != ec.get(k) for k in _TEXT_KEYS)]
+            q = score_fn(cand)
+            if q is None:
+                _log("  [tipo] render do candidato falhou — descartado")
+            else:
+                r_best = _arr(best_png)
+                before = {i: _box_f1(r_best, b_els[i]) for i in changed}
+                after, kept = {}, set(changed)
+                while kept:
+                    r_cand = _arr(render_path)
+                    losing = []
+                    for i in sorted(kept):
+                        after[i] = _box_f1(r_cand, c_els[i])
+                        if before[i] is None or after[i] is None \
+                                or after[i] <= before[i] + eg._ACCEPT_EPS:
+                            losing.append(i)
+                    if not losing:
+                        break
+                    for i in losing:
+                        _revert(c_els[i], b_els[i])
+                        kept.discard(i)
+                    if kept:
+                        q = score_fn(cand)          # confirm: neighbours may have leaked
+                        if q is None:
+                            kept = set()
+                for i in changed:
+                    name = (b_els[i].get("text") or "")[:24]
+                    fb, fa = before.get(i), after.get(i)
+                    nums = (f"{fb:.3f} -> {fa:.3f}" if fb is not None and fa is not None
+                            else "sem medida")
+                    _log(f"    {'✓' if i in kept else '↩'} {name!r:<27} caixa {nums}")
+                if kept and q is not None \
+                        and q["score"] >= best_q["score"] - eg._GUARD_EPS:
+                    # COLLATERAL: a kept change can push ink into a NEIGHBOUR's window. The
+                    # confirmation above re-checks only the kept lines, so report every other
+                    # line whose own box got worse (measurement only — see the 4.1 notes).
+                    r_final = _arr(render_path)
+                    for i, eb in enumerate(b_els):
+                        if i in kept:
+                            continue
+                        fb, fa = _box_f1(r_best, eb), _box_f1(r_final, c_els[i])
+                        if fb is not None and fa is not None and fa < fb - eg._ACCEPT_EPS:
+                            _log(f"    ⚠ COLATERAL {(eb.get('text') or '')[:24]!r} "
+                                 f"caixa {fb:.3f} -> {fa:.3f}")
+                    best, best_q = copy.deepcopy(cand), q
+                    shutil.copyfile(render_path, best_png)
+                    landed += len(kept)
+                    _log(f"  [tipo] {len(kept)}/{len(changed)} linha(s) aceitas pela propria "
+                         f"caixa (Score {best_q['score']:.4f})")
+                elif kept and q is not None:
+                    _log(f"  [tipo] {len(kept)} linha(s) melhoram na caixa mas o Score desabou "
+                         f"({best_q['score']:.4f} -> {q['score']:.4f}, guarda "
+                         f"{eg._GUARD_EPS}) — revertido")
+                else:
+                    _log(f"  [tipo] nenhuma das {len(changed)} correcao(oes) melhorou a propria "
+                         f"caixa — revertido")
+
+        # ── (b) COLOUR, judged by the Score ───────────────────────────────────────────────
+        hints = best_q.get("patch_hints") or []
+        if hints:
+            cand = _apply_patches(best, hints)
+            q = score_fn(cand)
+            if q is not None and q["score"] > best_q["score"] + _PASS_EPS:
+                best, best_q = cand, q
+                shutil.copyfile(render_path, best_png)
+                landed += len(hints)
+                _log(f"  [cor] {len(hints)} patch(es) aceitos (Score {best_q['score']:.4f})")
+            else:
+                got = f"{q['score']:.4f}" if q is not None else "falhou"
+                _log(f"  [cor] {len(hints)} patch(es) revertidos "
+                     f"(Score {best_q['score']:.4f} -> {got})")
+
+        if not landed:
+            _log("  [OK] Convergiu — nenhuma proposta aceita nesta passada")
+            break
+
+    try:
+        best_png.unlink()
+    except OSError:
+        pass
+    _log_quality(best_q)
+    return best, best_q, passes
 
 
 def _compile_lualatex(
@@ -939,7 +1066,7 @@ if __name__ == "__main__":
     parser.add_argument("--semantic",       action="store_true",
                         help="Habilitar passo VLM (requer GEMINI_API_KEY)")
     parser.add_argument("--max-passes",     type=int,   default=5,
-                        help="Numero maximo de passes de correcao (default: 3)")
+                        help="rodadas de proposta do laco de correcao; para antes se uma rodada nao aceita nada (default: 5)")
     parser.add_argument("--ssim-threshold", type=float, default=0.95,
                         help="SSIM minimo aceitavel (default: 0.95)")
     parser.add_argument("--dpi",            type=int,   default=150,

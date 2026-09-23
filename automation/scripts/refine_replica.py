@@ -185,15 +185,20 @@ def refine(image_path, cover_dir, analysis_path=None, rounds: int = 3,
             edits = mock_rounds[rnd] if rnd < len(mock_rounds) else []
             src = "mock"
         elif cached and rnd < len(cached):
-            edits, src = cached[rnd], "cache"
+            # Mesma razão do `_vlm_pass`: `id` é posicional e não sobrevive a uma re-análise.
+            edits, anchor_log = eg.resolve_anchors(best, cached[rnd])
+            for line in anchor_log:
+                log(f"   [ancora] {line}")
+            src = "cache"
         elif cached and not refresh:
             log(f"[refino] rodada {rnd+1}: cache esgotado — sem nova chamada (--refresh)")
             break
         else:
             log(f"[refino] rodada {rnd+1}: perguntando ao Gemini onde o sistema decidiu errado "
                 f"({len(confirmed)} erro(s) confirmado(s), {len(tried)} ja tentado(s))...")
-            edits, src = vp.propose_corrections(best, image_path, render,
-                                                confirmed=confirmed, tried=tried), "gemini"
+            edits = eg.anchor_edits(best, vp.propose_corrections(
+                best, image_path, render, confirmed=confirmed, tried=tried))
+            src = "gemini"
         rounds_out.append(edits)
         log(f"[refino] rodada {rnd+1}: {len(edits)} proposta(s) ({src})")
         if not edits:

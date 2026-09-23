@@ -732,6 +732,64 @@ entregue (restauradas do backup, auditoria delta 0).
 `word_collisions` medir (§D2). É o ponto cego do julgamento por caixa, agora com quatro ocorrências
 registradas — o próximo item da fila com evidência acumulada.
 
+### O endereçamento por ÍNDICE: uma guarda que ENTROU, e uma causa que eu ERREI (2026-09-18/21)
+
+⚠️ **Leia a correção antes do mecanismo.** Eu afirmei aqui que a capa19 caía 0.9040→0.8877 porque
+`assign_ids` numera por ORDEM (`r1`, `t2`…) e o cache guardava esse número: com uma peça a mais na
+análise fresca, o edit cairia na peça vizinha. **Medido nos arquivos reais, isso NÃO acontece.**
+
+```
+os 35 edits do cache ENTREGUE da capa19, contra a análise do rebuild de 17/09:
+   32  caem na MESMA peça (centro < 1cm, mesmo texto)
+    2  não têm id (region.add)
+    1  aponta para peça que SUMIU  → vira no-op, não cai no vizinho
+    0  caem em peça diferente
+```
+
+**Onde eu errei:** confundi *"a lista mudou de tamanho"* (21 → 23 regiões, isso é verdade) com
+*"os índices deslizaram"*. As três regiões novas entram DEPOIS na lista, então nenhum dos ids que o
+cache cita foi afetado. Eu inferi o deslize da contagem em vez de conferir peça por peça — e a
+conferência custa uma função. **É o mesmo erro do lattice da capa3: argumentar a partir de um número
+sem abrir o que ele descreve.**
+
+**O que continua valendo, e por que a guarda ENTROU assim mesmo:** o índice é um endereço frágil por
+construção — ele depende da ordem de uma lista que o leitor reescreve a cada versão. Hoje ele
+aguenta; nada garante que aguente na próxima mudança do leitor, e quando falhar o sintoma **não é
+erro**: é um `text.weight` caindo na legenda em vez do título, com o portão aceitando porque na caixa
+errada ele também mede alguma coisa. A guarda é barata e é um no-op nos dados de hoje:
+
+**ÂNCORA DE CONTEÚDO** (`edit_gate._anchor_for` / `anchor_edits` / `resolve_anchors`): a proposta é
+gravada com uma descrição do ALVO (centro em cm, tamanho, e a string para texto). No replay,
+`resolve_anchors` procura quem casa — `_ANCHOR_CENTER_CM = 1.0`, `_ANCHOR_SIZE_TOL = 0.35`, string
+igual para texto — e reescreve o id. Sem candidato, o edit é **descartado com log**, em vez de cair
+no vizinho.
+
+**Estado da validação, nos dois níveis:**
+- ✅ **Unitário** (`scratchpad/probe_anchor.py`): com uma peça inserida no MEIO da análise o id
+  desliza de verdade (`r1` deixa de ser o círculo vermelho) e a âncora reencontra os dois alvos
+  (`r1→r2`, `t1→t2`); alvo que sumiu é descartado com log. 3 âncoras, 2 de 3 resolvidos, 1 descarte.
+- ✅ **Ponta a ponta, ao vivo** (`scratchpad/anchor/`): capa19 FRESCA com API (12,5min) → replay do
+  cache novo (7,4min) reproduz **edit por edit, até a 4ª casa** (0.6515 / 0.6484 / 0.373 / 0.818 /
+  0.7326 / 0.6472 / 0.6502), Score 0.8368 nos dois, 6 textos e 18 regiões nos dois. O cache novo tem
+  **7 edits, 6 com âncora** (o `region.add` não tem alvo) e **zero com `font_size_pt`** — proposta
+  CRUA, que é o conserto do defeito #1 exercido ao vivo.
+- ✅ **Regressão do caminho LEGADO**: capa6 com o cache antigo (sem âncora) → **0.9524, 7 textos**,
+  idêntica à entregue. Edit sem âncora passa intacto, de propósito.
+- ⚠️ **O que a rodada ponta a ponta NÃO prova:** nenhum dos 7 edits foi ACEITO pelo portão (o Gemini
+  estava sobrecarregado e a cadeia caiu para `gemini-3.5-flash`), então o que se reproduziu foi o
+  caminho de REJEIÇÃO. E como as duas análises eram idênticas, a âncora não precisou re-endereçar
+  nada. **A prova do re-endereçamento é a unitária; a ponta a ponta prova a fidelidade do cache.**
+
+⚠️ **Cache LEGADO não ganha âncora retroativamente** — não há como saber o que uma proposta antiga
+mirava. Ele segue por índice até a capa receber uma rodada FRESCA.
+
+⚠️ **E a capa19 volta a ser um caso ABERTO.** Não é o laço (`mp=0` e `mp=3` dão 0.8877), não é o
+duplo-snap (o cache dela tem **zero** entradas pós-snap) e não é deslize de índice (32/35 na mesma
+peça). O que sobra, medido: a **análise-base mudou** — 21 → 23 regiões, uma régua fina (`r10`,
+6,87×0,04cm) que existia no entregue **não existe** no rebuild, e uma peça que era `rectangle` virou
+`polygon`. Ou seja, o leitor de hoje lê a capa19 diferente do leitor que produziu o entregável. É
+hipótese medida, não causa provada — o próximo passo é isolar o leitor, não o cache.
+
 ## Loop de auto-correção (replicate_cover.py)
 
 ⚠️ **HISTÓRICO — descreve o laço ANTIGO, substituído em 17/09 pelo laço roteado (seção acima).**
@@ -1138,11 +1196,11 @@ mesma versão do portão**, e este é o mesmo erro que o cache de arte cometeu e
 | capa4 | **0.9702** | detectores + laço roteado | ✅ referência; a ÚNICA onde os detectores ainda ganham do leitor |
 | capa12 | **0.9588** | leitor + laço roteado | ✅ círculos sobrepostos (transparência chapada e mesmo assim casa) |
 | capa6 | 0.9524 | leitor | ✅ |
-| capa8 | 0.9373 | leitor + retraço | ✅ título voltou a ser legível com os buracos no traçado |
+| capa8 | 0.9380 | leitor + retraço | ✅ título voltou a ser legível com os buracos no traçado |
 | capa13 | **0.9316** | leitor + VLM + laço roteado | ✅ grade 4×4 + círculo. **0.490 antes da Fase 6** |
 | capa16 | 0.9192 | leitor + VLM | ✅ malha de losangos; o VLM **corrigiu o texto** que o OCR errava |
 | capa19 | 0.9040 | leitor + VLM | ✅ **+0.0672 na Fase E**, o maior ganho do passe fresco |
-| capa1 | 0.8132 | detectores + manual | ⚠️ **a exceção** — ver T3; o automático dá 0.7304 |
+| capa1 | 0.8181 | detectores + manual | ⚠️ **a exceção** — ver T3; o automático dá 0.7304 |
 | capa2 | 0.7234 | leitor + VLM | ⏳ 96% fundo com tipo fino; o Score mente para baixo nela |
 
 **A prova do produto (refeita a frio em 14/09):** uma imagem inédita, sob nome novo, sem

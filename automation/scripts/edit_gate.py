@@ -76,6 +76,106 @@ def _find(items: list, _id) -> "dict | None":
     return next((it for it in items if it.get("_id") == _id), None)
 
 
+# ─── Âncoras: um endereço que sobrevive à RE-ANÁLISE ──────────────────────────────────────
+# `assign_ids` numera por ORDEM, e isso basta DENTRO de uma rodada. Entre rodadas é um endereço
+# FRÁGIL: ele depende da ordem de uma lista que o leitor reescreve a cada versão do código.
+# ⚠️ Isto entrou como GUARDA, não como conserto de um defeito observado. Eu havia atribuído a
+# queda da capa19 (0.9040 → 0.8877) ao deslize de índice; medido peça a peça em 21/09, NÃO era:
+# dos 35 edits cacheados, 32 caem na MESMA peça, 1 vira no-op e ZERO caem no vizinho — as 3
+# regiões novas do rebuild entram no FIM da lista. Nos dados de hoje a âncora é um no-op.
+# Vale mesmo assim porque a falha, quando vier, não aparece como erro: é um edit CORRETO aplicado
+# na peça errada, que o portão aceita porque na caixa errada ele também mede alguma coisa.
+# A âncora descreve o ALVO pelo conteúdo — o que o VLM de fato estava olhando.
+_ANCHOR_CENTER_CM = 1.0     # o alvo não se desloca mais que isto entre análises da MESMA imagem
+_ANCHOR_SIZE_TOL = 0.35     # e não muda de tamanho mais que 35%
+
+
+def _anchor_for(analysis: dict, _id) -> "dict | None":
+    """Descreve, pelo CONTEÚDO, o elemento que este `_id` aponta agora."""
+    el = _find(analysis.get("text_elements", []), _id)
+    if el is not None:
+        b = el.get("bbox_cm") or {}
+        return {"kind": "text", "text": el.get("text", ""),
+                "bbox": [round(b.get(k, 0.0), 2) for k in ("x", "y", "w", "h")]}
+    el = _find(analysis.get("regions", []), _id)
+    if el is not None:
+        b = el.get("bbox_cm") or {}
+        return {"kind": "region", "shape": el.get("shape_type"), "hex": el.get("color_hex"),
+                "bbox": [round(b.get(k, 0.0), 2) for k in ("x", "y", "w", "h")]}
+    return None
+
+
+def anchor_edits(analysis: dict, edits: list) -> list:
+    """Marca cada edit que endereça por `id` com a âncora do alvo. Chamado na rodada FRESCA,
+    antes de cachear — é o que torna a proposta re-endereçável depois."""
+    out = []
+    for e in edits:
+        if e.get("id") and "_anchor" not in e:
+            a = _anchor_for(analysis, e["id"])
+            if a:
+                e = {**e, "_anchor": a}
+        out.append(e)
+    return out
+
+
+def _match_anchor(analysis: dict, anchor: dict) -> "str | None":
+    """O `_id` do elemento que melhor corresponde à âncora NESTA análise, ou None.
+
+    Não chuta: exige mesma natureza (texto/região) e, dentro dela, o candidato mais próximo em
+    posição E tamanho dentro das tolerâncias. Texto casa primeiro pela STRING; região, por
+    forma+cor. Sem candidato aceitável, o edit é descartado com log — melhor perder uma
+    proposta que aplicá-la na peça errada.
+    """
+    ax, ay, aw, ah = anchor.get("bbox", [0, 0, 0, 0])
+    acx, acy = ax + aw / 2.0, ay + ah / 2.0
+    items = (analysis.get("text_elements", []) if anchor.get("kind") == "text"
+             else analysis.get("regions", []))
+    best, best_d = None, None
+    for it in items:
+        b = it.get("bbox_cm") or {}
+        if not b:
+            continue
+        if anchor.get("kind") == "text":
+            same = (it.get("text", "") or "").strip() == (anchor.get("text", "") or "").strip()
+        else:
+            same = (it.get("shape_type") == anchor.get("shape")
+                    and (it.get("color_hex") or "").upper() == (anchor.get("hex") or "").upper())
+        if not same:
+            continue
+        cx, cy = b.get("x", 0) + b.get("w", 0) / 2.0, b.get("y", 0) + b.get("h", 0) / 2.0
+        d = ((cx - acx) ** 2 + (cy - acy) ** 2) ** 0.5
+        if d > _ANCHOR_CENTER_CM:
+            continue
+        if aw > 0 and ah > 0:
+            if (abs(b.get("w", 0) - aw) / aw > _ANCHOR_SIZE_TOL
+                    or abs(b.get("h", 0) - ah) / ah > _ANCHOR_SIZE_TOL):
+                continue
+        if best_d is None or d < best_d:
+            best, best_d = it.get("_id"), d
+    return best
+
+
+def resolve_anchors(analysis: dict, edits: list) -> "tuple[list, list]":
+    """Re-endereça edits cacheados contra ESTA análise. Devolve (edits, log).
+
+    Edit sem âncora (cache legado) passa intacto — não há como saber o que ele mirava, e é
+    exatamente por isso que o cache legado não reproduz a capa que gerou (ver capa19)."""
+    out, log = [], []
+    for e in edits:
+        anc = e.get("_anchor")
+        if not anc or not e.get("id"):
+            out.append(e); continue
+        new_id = _match_anchor(analysis, anc)
+        if new_id is None:
+            log.append(f"ancora sem alvo nesta analise ({anc.get('kind')} "
+                       f"{anc.get('text', anc.get('shape'))!r}) — {e.get('op')} descartado")
+            continue
+        if new_id != e["id"]:
+            log.append(f"{e.get('op')}: {e['id']} -> {new_id} (re-endereçado pela ancora)")
+        out.append({**e, "id": new_id})
+    return out, log
+
+
 def _rgb(hx: str) -> "tuple[int,int,int]":
     hx = hx.lstrip("#")
     return int(hx[0:2], 16), int(hx[2:4], 16), int(hx[4:6], 16)

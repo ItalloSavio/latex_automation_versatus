@@ -51,6 +51,13 @@ REGRAS QUE NÃO SE NEGOCIAM NESTE PROJETO:
 7. ATUALIZE O handoff_state.md ENQUANTO TRABALHA, não no fim.
    Se o contexto reiniciar no meio, o próximo tem que saber onde a mão parou.
 
+8. REPRODUZIR É PARTE DE TERMINAR.
+   Depois de mexer em qualquer coisa que o cache do VLM atravessa, refaça UMA capa pelo cache
+   e compare a LISTA DE TEXTOS e o Score com o entregue. Duas vezes o cache devolveu outra capa
+   em silêncio (proposta já processada pelo snap; edit endereçado por índice de lista).
+   Regra: o cache guarda a PROPOSTA CRUA, endereçada por CONTEÚDO — nunca geometria
+   pós-processada, nunca `t3`/`r12`.
+
 Quando terminar qualquer bloco de trabalho, me diga:
   - o que mudou e em quais arquivos
   - o número ANTES e DEPOIS, de rodada real
@@ -71,17 +78,29 @@ Quando terminar qualquer bloco de trabalho, me diga:
 | 5 · isolar variável | A/B do `half_ellipse` acusou −0.0631 com a causa em outro lugar |
 | 6 · determinismo | o `[PASS]` de 0.95 **bloqueia o VLM** em 3 das 9 capas — inclusive numa com texto borrado |
 | 7 · atualizar o handoff | o `handoff_state.md` ficou **um mês vencido**, descrevendo 20 capas e um plano concluído |
+| 8 · reproduzir é terminar | o cache do VLM **nunca reproduziu as capas que gerou** — duas causas, meio dia perdido atribuindo a regressão à mudança errada |
 
 ## Se a sessão for retomar o trabalho técnico
 
-O próximo passo acordado com o usuário, em ordem:
+**A fila de 14/09 foi CUMPRIDA** (16–18/09) — não a re-execute:
 
-1. **Remover o `[PASS]` de 0.95** como condição de parada (ver `pipeline-ideal.md` §4.2 e o
-   achado de 14/09: capa4, capa6 e capa12 estão travadas fora do VLM).
-2. **Passe de refinamento pós-build** (`pipeline-ideal.md` §4.7) — separado do pipeline,
-   de propósito. É o desenho do usuário.
-3. **Roteamento de métrica dentro do laço** (§4.1).
-4. **`max_passes` = 3** — só depois de (3).
+| passo | estado |
+|---|---|
+| `judge_bench.py` reescrito, 3 pares isolados | ✅ 16/09 (empate conta como `CEGA`) |
+| Juiz enxerga conteúdo AUSENTE (§4.3) | ✅ 16/09 — quadro congelado em `automation/bench/refs/` |
+| Palavras coladas em tipo de display | ✅ 17/09 — `accept.word_collisions` |
+| Roteamento de métrica no laço (§4.1) | ✅ 17/09 — `replicate_cover._correct()` |
+| `max_passes` = 3 (§4.5) | ✅ 17/09 |
+| Passe de refinamento pós-build (§4.7) | ✅ 17/09 — `refine_replica.py`, opt-in |
+| Cache do VLM reproduzível (§4.6) | ✅ 18/09 — proposta crua + âncora de conteúdo |
 
-⚠️ Antes de mexer no juiz, **reescrever o `judge_bench.py`** (`pos-mvp.md` §A2). Ele não existe,
-e mexer no Score sem banco de provas já quebrou quatro capas uma vez.
+⚠️ O `[PASS]` de 0.95 **continua aberto** (§4.2) — era o item 1 da fila antiga e não foi feito.
+
+**Os próximos, na ordem em que eu atacaria (evidência em `pos-mvp.md`):**
+
+1. **Palavras coladas em tipo MIÚDO** — 4 ocorrências medidas, abaixo do piso de 16px do
+   `word_collisions`. É o ponto cego do julgamento caixa a caixa: janelas vizinhas se sobrepõem,
+   a linha melhora na própria caixa e encosta na de baixo.
+2. **capa8: `the velvet` traçado** — teto conhecido do traçado, é um dos dois `ATENCAO` do portão.
+3. **Gradiente no vocabulário** (§B1) — bloqueia qualquer pôster com fundo em degradê.
+4. **Aterramento recusar edit que não muda nada** — uma linha, economiza render por proposta.

@@ -177,6 +177,34 @@ era lido de volta como resposta pronta e congelou nove capas. A regra que sobrev
 **número guardado**, então quando a penalidade ganhou um termo, toda entrada velha virou
 incomparavelmente boa. Corrigido re-medindo o cache com o juiz de hoje.
 
+`FECHADO 18/09` — **a regra estava escrita aqui e o `vlm_edits.json` a violava DUAS vezes.**
+Achado partindo de duas capas que o rebuild regrediu:
+
+1. **O cache guardava a proposta já PROCESSADA.** O `_vlm_pass` gravava depois do
+   `snap_text_adds`, e o rebuild aplicava o snap de novo. O snap **não é idempotente** (desloca x
+   em −0,5cm e infla a caixa), então o portão julgava uma geometria que nunca tinha visto. Efeito:
+   **nenhuma capa cujo entregável veio de uma rodada fresca do VLM podia ser reproduzida pelo
+   próprio cache**, com nenhuma versão do código.
+2. **A proposta citava a peça pelo ÍNDICE na lista** (`t3`, `r12`, de `assign_ids`).
+   ⚠️ **CORRIGIDO 21/09:** eu afirmei que isso derrubava a capa19. **Medido peça a peça, não derruba** —
+   dos 35 edits do cache entregue, 32 caem na MESMA peça, 1 vira no-op e ZERO caem no vizinho; eu
+   havia inferido o deslize de a lista ter crescido de 21 para 23, mas as regiões novas entram depois.
+   A guarda entrou assim mesmo, como guarda: índice depende da ordem de uma lista que o leitor
+   reescreve a cada versão, e o sintoma da falha é um edit CORRETO aplicado na peça errada, que o
+   portão aceita. Custo zero hoje (no-op nos dados reais).
+
+**A regra, agora no seu formato final:**
+
+> **Cache guarda PROPOSTA CRUA, endereçada por CONTEÚDO.** Nada de geometria pós-processada,
+> nada de índice de lista. Se o alvo não existe mais na análise de hoje, o edit é DESCARTADO com
+> log — nunca reaproveitado no vizinho.
+
+O endereço virou uma âncora (centro em cm + tamanho + string), resolvida na releitura por
+`edit_gate.resolve_anchors`; sem alvo, o edit é descartado com log. Provas: capa6 pelo cache devolve
+**7/7 textos idênticos ao entregue e Score 0.9524** (0,06% dos pixels); e, ao vivo, uma rodada FRESCA
+da capa19 seguida do replay do cache novo reproduz **edit por edit até a 4ª casa decimal**, com o
+cache guardando 7 propostas cruas (6 com âncora, zero com geometria pós-snap).
+
 ---
 
 ---

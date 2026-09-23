@@ -1,7 +1,7 @@
 # Swiss Cover Replicator — Revisão do Projeto
 
 > Documento executivo. Estado atual, como funciona, como medimos, o que está pronto e o que falta.
-> **Atualizado em 2026-09-16.** A versão anterior era de julho e descrevia 7 capas e um sistema
+> **Atualizado em 2026-09-18.** A versão anterior era de julho e descrevia 7 capas e um sistema
 > sem integração de conteúdo — as duas coisas mudaram.
 
 ---
@@ -108,19 +108,25 @@ recusa sozinho uma classe de defeito que antes passava batida.
 
 ## 5. Estado atual — as 9 capas do MVP
 
-**Média 0.90 · auditoria 9/9 · veredito estrutural 7/9 · oito das nove saem de um comando.**
+**Média 0.902 · auditoria 9/9 · veredito estrutural 7/9 · oito das nove saem de um comando.**
 
 | Capa | Score | Situação |
 |---|---|---|
-| capa4 (david bowie) | **0.967** | Referência. Praticamente indistinguível da original. |
-| capa12 (Friends) | **0.956** | Círculos sobrepostos com transparência. |
+| capa4 (david bowie) | **0.970** | Referência. Praticamente indistinguível da original. |
+| capa12 (Friends) | **0.959** | Círculos sobrepostos com transparência. |
 | capa6 (rancid) | **0.952** | O modelo de visão corrigiu 6 linhas de texto que o OCR errava. |
 | capa8 (velvet underground) | **0.938** | Entrou "fria" no conjunto e já marcou 0.93. |
-| capa13 (YOU) | **0.930** | Era 0.49 antes da reescrita do leitor. |
+| capa13 (YOU) | **0.932** | Era 0.49 antes da reescrita do leitor. |
 | capa16 (vision) | **0.919** | Malha de losangos; era 0.41. |
 | capa19 (the shining) | **0.904** | Ganhou 0.067 num único passe de visão. |
 | capa1 (mosaico Versatus) | **0.818** | **A exceção** — depende de ajuste manual (ver §8). |
 | capa2 (Versatus texto) | **0.723** | 96% fundo com tipografia fina; o número mente para baixo. |
+
+> **Atualização de 18/09.** Três capas subiram depois de uma correção no laço de auto-ajuste
+> (capa4, capa12 e capa13, números já refletidos acima). As outras seis foram **mantidas como
+> estavam**: o número subia em algumas delas, mas a comparação lado a lado mostrou defeito novo
+> — palavras coladas, um título voltando a sair quebrado. **Onde o número e o olho discordaram,
+> seguimos o olho**, e as capas ficaram como entregues.
 
 ### A prova do produto
 
@@ -141,6 +147,13 @@ sozinho o único defeito real. É o produto exercido como um usuário o exerceri
 - **Segunda camada, opcional** — a mesma arte recebendo o conteúdo do livro (títulos do
   metadata e a marca real), com direção de arte fixável à mão quando o designer quiser.
 - **Auditoria automática** — o arquivo entregue corresponde à análise que o gerou.
+- **Reprodutibilidade, agora provada (18–21/09).** Refazer uma capa tem que devolver *aquela*
+  capa. Descobrimos que não devolvia: as sugestões do modelo de visão ficam guardadas para não
+  pagar a API de novo, e o registro era gravado **já processado** — na volta era processado de
+  novo, então a repetição julgava algo diferente do que havia sido aprovado. Corrigido e
+  verificado em duas frentes: refazer a capa6 devolve **os mesmos 7 blocos de texto e a mesma
+  nota**, e uma capa rodada do zero seguida da sua repetição dá **a mesma decisão item por item**.
+  Isso não aparece em nenhum número do relatório, e é o que sustenta todos eles.
 
 ## 7. Como isto entra no livro
 
@@ -180,34 +193,40 @@ movimento que quebrou quatro capas em agosto. Ganhamos o alarme; falta a decisã
 
 ## 9. Próximos passos
 
-Em ordem, com a justificativa de cada um:
+**Concluídos desde a última versão deste documento:**
 
-**1 · Um juiz que enxergue conteúdo ausente** — ✅ **FEITO em 16/09** (§4). O verificador passou
-a medir contra uma referência congelada e agora recusa sozinho a capa que perde conteúdo.
-O banco de provas do juiz foi reescrito antes de tocar em qualquer coisa, como exigido.
+**1 · Um juiz que enxergue conteúdo ausente** — ✅ **16/09** (§4). Recusa sozinho a capa que
+perde conteúdo, e passou também a acusar **palavras coladas** em títulos.
 
-⚠️ **Duas ressalvas honestas.** (a) A nota (o Score) **não** foi alterada — o juiz novo entrou
-como *portão*, não como função objetivo. Repesar a nota foi testado e **não** resolve o caso da
-capa1, porque ali o mecanismo do erro é outro; e três casos de teste são poucos para calibrar
-pesos, exatamente o erro que quebrou quatro capas em agosto. (b) Um caso do banco continua sem
-solução: quando o texto original é *ilegível para o OCR*, não há referência para cobrar, e só o
-modelo de visão resolve.
+**2 · Passe de refinamento pós-construção** — ✅ **17/09**. Um processo separado abre a imagem
+original ao lado da capa pronta e pergunta ao modelo de visão *onde o sistema decidiu errado*.
+Ele **viu três linhas que o OCR nunca leu** — coisa que nenhuma medida interna enxerga. ⚠️ É
+ferramenta de recuperação, com o olho no fim: numa das provas ele devolveu o título que faltava,
+mas em peso errado e colado na palavra seguinte. Por isso é opcional e não promove nada sozinho.
 
-**2 · Passe de refinamento pós-construção**
-Um processo separado que abre a imagem original ao lado da capa gerada, identifica **onde o
-sistema decidiu errado** (ex.: recusou um texto que claramente existe), e corrige. Fica
-deliberadamente **fora** do pipeline principal: o detector interno é cego a tipografia fina
-por construção, e um modelo de visão comparando as duas imagens não é.
+**3 · Confiabilidade do reaproveitamento** — ✅ **18/09** (§6, último item).
 
-**3 · Gradiente como primitivo**
+**Abertos, na ordem em que eu atacaria:**
+
+**4 · Palavras coladas em tipografia miúda**
+Quatro ocorrências medidas nesta semana. Em título o sistema já detecta; em texto pequeno o
+espaço entre palavras tem 1 a 3 pixels na imagem de origem, e ali a medição simplesmente não
+existe. É consequência de julgar cada linha isoladamente — a linha melhora, e encosta na vizinha.
+
+**5 · Gradiente como primitivo**
 Bloqueia qualquer pôster com fundo em degradê. Desenho conhecido, ainda não construído.
 
-**4 · Provar a capa dentro do livro** 
+**6 · Provar a capa dentro do livro**
 Fechar o único elo não demonstrado da cadeia.
 
-**5 · Identificação de fonte**
+**7 · Identificação de fonte**
 O sistema reportaria *"esta capa pede Akzidenz-Grotesk"* — informação acionável para decidir
 sobre licenciamento, mesmo sem ter o arquivo.
+
+⚠️ **O que continua valendo como ressalva:** a nota (o Score) **não** foi alterada. O juiz novo
+entrou como *portão*, não como função objetivo — repesar a nota foi testado, acerta 2 de 3 casos
+do banco de provas e não resolve a capa1. Três casos de teste são poucos para calibrar pesos, e
+foi exatamente esse atalho que quebrou quatro capas em agosto.
 
 ### Restrições que orientam as decisões
 

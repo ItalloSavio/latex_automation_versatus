@@ -2,7 +2,7 @@
 
 > ## ⚠️ DOCUMENTO SUPERADO — retrato de 2026-09-10
 > O MVP fechou em **2026-09-14** com escopo e números diferentes: **9 capas** (não 10),
-> **média 0.9003** (não 0.9026), comando único, portão de aceite e cache de arte.
+> **média 0.9017** em 18/09 (não 0.9026), comando único, portão de aceite e cache de arte.
 > Para o estado atual use **`CLAUDE.md`**; para o que falta, **`pos-mvp.md`**.
 >
 > **Duas recomendações deste documento foram MEDIDAS E REPROVADAS depois** — estão corrigidas

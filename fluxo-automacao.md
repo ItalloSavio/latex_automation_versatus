@@ -3,6 +3,18 @@
 Documentação do sistema de automação de capas para o template LaTeX `versatus-template-book`.  
 Última atualização: julho de 2026.
 
+> ## ⚠️ DOCUMENTO SUPERADO — descreve o fluxo de JULHO, anterior ao replicador
+> Ele documenta o caminho `build_cover` / `vision_extractor` (imagem + marca → fundo com as
+> **cores da marca**). O replicador atual faz o oposto por decisão explícita do usuário: a
+> **paleta do pôster é o ponto** e as cores da marca **não entram** (ver `CLAUDE.md`, "FASE 7").
+>
+> Para o estado atual: **`CLAUDE.md`** (memória de trabalho) · **`doc-pipe.md`** (explicação do
+> pipeline) · **`pos-mvp.md`** (fila com evidência).
+>
+> O que deste documento continua VIVO: `svg_to_tikz.py` e `convert_logos.py`, que geram os
+> logos TikZ usados pela Fase 7 (ver R2 na TO-DO do `CLAUDE.md` — quase foram apagados como
+> "órfãos" e teriam quebrado a integração).
+
 ---
 
 ## Visão Geral

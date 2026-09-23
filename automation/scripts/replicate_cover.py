@@ -124,7 +124,13 @@ def _vlm_pass(analysis, image_path, render_path, cover_dir, score_fn, refresh):
                  f"{b['orig_hex']} -> {b['render_hex']}")
 
         if cached_rounds is not None and rnd < len(cached_rounds):
-            edits = cached_rounds[rnd]
+            # Re-ENDEREÇA a proposta cacheada contra ESTA análise. O `_id` é posicional, então
+            # uma análise com outro número de peças faz `region.remove r1` remover outra forma —
+            # medido na capa19: 23 regiões contra as 21 de quando a proposta foi feita, e a capa
+            # cai 0.9040 → 0.8877. Cache sem âncora (anterior a 18/09) passa intacto.
+            edits, anchor_log = eg.resolve_anchors(best, cached_rounds[rnd])
+            for line in anchor_log:
+                _log(f"    [ancora] {line}")
         elif cached_rounds is not None:
             break                                   # cache exhausted, don't spend API
         else:
@@ -132,6 +138,7 @@ def _vlm_pass(analysis, image_path, render_path, cover_dir, score_fn, refresh):
             edits = vp.propose(best, image_path, render_path,
                                zones=vp.zones_for(image_path, render_path), blobs=blobs)
             _log(f"  [VLM] Gemini propos {len(edits)} edits")
+            edits = eg.anchor_edits(best, edits)     # o que cada proposta MIRAVA, para o replay
         if not edits:
             break
 

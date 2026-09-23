@@ -47,12 +47,16 @@ Essa distinção é a decisão de arquitetura mais importante do projeto. Ver §
                                             ◄───────────────────────────────────┘
 ```
 
-Duas regras governam o loop inteiro:
+Três regras governam o loop inteiro:
 
-1. **Hill-climbing.** Um passe só é aceito se o Score subiu. Regressão reverte, platô para.
-   **O resultado nunca piora.**
-2. **Medir, não confiar.** Nenhum detector é aceito por parecer certo; ele entra se o Score
-   medido melhora. Isso já reverteu várias peças que "pareciam certas" (§10).
+1. **Medir, não confiar.** Nenhum detector é aceito por parecer certo; ele entra se a medição
+   melhora. Isso já reverteu várias peças que "pareciam certas" (§10).
+2. **Cada proposta é julgada pela métrica que CONSEGUE vê-la** (desde 17/09). Uma correção de
+   tipografia é julgada pela tinta DENTRO da caixa daquela linha; uma cor de área, pelo Score
+   global. Antes, tudo ia junto num candidato só julgado pelo Score — um A/B confundido por
+   construção, que nas 9 capas descartava 21 correções boas e aceitava 6 ruins.
+3. **O resultado nunca piora.** Quem não melhora é revertido, e o laço para quando uma rodada
+   não aceita nada — por razão determinada, não porque um número cruzou um limiar.
 
 ---
 
@@ -276,6 +280,37 @@ significa que a métrica roteada não consegue vê-lo. Isso aconteceu **três ve
 - **`snap_region_colors`** — repinta o polígono proposto com a cor **medida** dentro dele.
   Foi isso que fez o 4º setor da capa5 entrar: a forma estava certa, a cor é que reprovava.
 
+### O cache guarda PROPOSTA — e uma proposta precisa de endereço (18/09)
+
+Chamar o VLM custa API, então as propostas de cada capa ficam em `vlm_edits.json` e um rebuild
+as re-julga sem gastar nada. Isso só é honesto se o replay reproduzir a decisão original, e
+**duas coisas quebravam isso em silêncio** — as duas achadas medindo, não olhando:
+
+1. **O cache guardava o edit DEPOIS do snap**, e o rebuild aplicava o snap de novo. O snap não é
+   idempotente (re-aplicado desloca a caixa 0,5cm e a infla), então o portão julgava uma
+   geometria que nunca tinha visto. A capa6 pelo cache vinha 0.9501 e sem duas linhas; hoje vem
+   **7/7 textos idênticos ao entregue e 0.9524**.
+2. **O endereço do alvo era o ÍNDICE** (`r1`, `t2`, numerados por ordem). Uma análise nova com
+   outro número de peças pode fazer `region.remove r1` remover **outra forma**.
+   ⚠️ **Eu disse que era isso que derrubava a capa19, e a medição me desmentiu:** conferindo peça a
+   peça, dos 35 edits do cache entregue **32 caem na mesma peça**, 1 vira no-op e **nenhum** cai no
+   vizinho. Eu tinha inferido o deslize do fato de a lista ter crescido de 21 para 23 regiões — mas
+   as novas entram no fim, então os ids citados não se mexem. **Inferir de um número sem abrir o que
+   ele descreve é o erro; a conferência custava uma função.**
+   A guarda entrou como guarda, não como conserto: índice depende da ordem de uma lista que o leitor
+   reescreve a cada versão, e quando falhar o sintoma não é erro visível — é um edit certo na peça
+   errada, que o portão aceita. Cada proposta agora guarda uma **âncora de conteúdo** (o texto, ou
+   forma+cor+caixa do alvo) e é re-endereçada na análise atual; se o alvo não existe mais, o edit é
+   **descartado com log**. Nos dados de hoje é um no-op — custo zero.
+
+**A regra geral:** cache guarda o que foi PROPOSTO, nunca o que foi decidido, e guarda junto
+o suficiente para reencontrar o alvo depois.
+
+**A prova, ao vivo:** uma rodada FRESCA da capa19 (12,5 min, com API) seguida do replay do cache que
+ela gravou (7,4 min, sem API) reproduz a decisão **edit por edit, até a quarta casa decimal** — mesmo
+Score, mesmos 6 textos, mesmas 18 regiões. E a capa6 com o cache LEGADO (sem âncora) continua
+devolvendo a capa entregue, 0.9524 com os 7 textos: o caminho velho não foi quebrado.
+
 ---
 
 ## 7. Auto-correção guiada por RESÍDUO (a peça de autonomia)
@@ -319,18 +354,18 @@ ou em 3 rodadas. A capa7 devolve **zero manchas** — ela diz sozinha que está 
 ## 8. Estado do MVP — as 9 capas
 
 Escopo fechado em 9 (a capa7 saiu em 11/09: era a única fraca nas DUAS camadas, e está em
-`MVP/_fora/`). Auditoria: **9/9 reproduzem o entregável**. **Média 0.9003.**
+`MVP/_fora/`). Auditoria: **9/9 reproduzem o entregável**. **Média 0.9017** (18/09).
 
 | capa | Score | origem | sai de um comando? |
 |---|---|---|---|
-| capa4 | 0.9665 | detectores | ✅ |
-| capa12 | 0.9560 | leitor | ✅ |
-| capa6 | 0.9531 | leitor | ✅ |
-| capa8 | 0.9373 | leitor + retraço | ✅ |
+| capa4 | **0.9702** | detectores + laço roteado | ✅ |
+| capa12 | **0.9588** | leitor + laço roteado | ✅ |
+| capa6 | 0.9524 | leitor (texto corrigido pelo VLM) | ✅ |
+| capa8 | 0.9380 | leitor + retraço | ✅ |
 | capa19 | 0.9040 | leitor + VLM | ✅ |
-| capa13 | 0.9299 | leitor + VLM | ✅ |
+| capa13 | **0.9316** | leitor + VLM + laço roteado | ✅ |
 | capa16 | 0.9192 | leitor + VLM | ✅ |
-| capa1 | 0.8132 | detectores + cirurgia manual | ❌ **a exceção** |
+| capa1 | 0.8181 | detectores + cirurgia manual | ❌ **a exceção** |
 | capa2 | 0.7234 | leitor + VLM | ✅ |
 
 **A prova do produto foi refeita a frio em 14/09**, e desta vez do jeito certo: uma imagem
@@ -593,6 +628,22 @@ texto medidas. Veredito `OK` / `ATENCAO` / `REVISAR`, com código de saída 1 em
 **Validado nos dois sentidos**, que é o que separa um juiz de um alarme: diz `REVISAR` na
 capa1 AUTOMÁTICA que rejeitamos e `OK` na manual que entregamos.
 
+### Duas perguntas que ele passou a fazer, e as duas precisaram de uma REFERÊNCIA (16–17/09)
+
+O portão acima só olhava a análise final, e assim **não havia como saber o que sumiu**. A capa19
+entregue com metade do título era aprovada. O que faltava não era regra, era **referência**: o
+que o OCR leu na imagem ORIGINAL, congelado antes de qualquer portão (`make_reference.py`).
+
+- **Conteúdo ausente** — *"o original tem tinta aqui; o entregável põe tinta parecida aqui?"*.
+  A capa19 pela metade vai de `OK` para **`REVISAR`**, dizendo o nome do que falta.
+- **Palavras coladas** — *"o original tem um espaço entre estas duas palavras; o render ainda
+  tem?"*. Só opina em tipo de display (linha ≥ 16px na imagem-fonte); em tipo miúdo o espaço
+  tem 1–3px e a medição não existe — teto de resolução, registrado como tal.
+
+⚠️ **Por que isso não virou nota:** a régua vinha do réu. O `text_match` só cobrava as caixas da
+própria análise julgada, então **apagar um elemento era de graça**. Medindo os dois lados no
+MESMO quadro, sem mudar uma linha da fórmula, o par da capa19 inverte de `ERRA` para `OK`.
+
 O **layout** tem o seu próprio juiz, e pela mesma razão: a composição não tem alvo (ela DEVE
 divergir do pôster), então o que se mede é se a página está quebrada — sobreposição, texto fora
 da página, contraste WCAG, colisão e fundo e tamanho da marca. Média das 9: **0.0006**.
@@ -604,17 +655,28 @@ mesmo quando a automática pontuaria melhor.
 ## 13. O que vem a seguir
 
 Está em **`pos-mvp.md`**, na raiz do projeto — cada item com a motivação, a evidência medida e
-o tamanho estimado. Os três maiores, em resumo:
+o tamanho estimado.
 
-1. **Gradiente como primitivo** — o teste frio de 14/09 mostrou um fundo em degradê virando
+**Fechado desde 14/09** (detalhe e números no `CLAUDE.md`):
+- ✅ **O banco de provas do juiz** (`judge_bench.py`) foi reescrito com pares isolados, e empate
+  lá conta como `CEGA`, não como erro.
+- ✅ **O juiz enxerga conteúdo AUSENTE e palavras COLADAS** — como PORTÃO, não como nota. O
+  Score **não** foi trocado: repesar acerta 2 de 3 casos do banco, e três casos não calibram peso.
+- ✅ **O laço passou a rotear a métrica** e `max_passes` voltou a contar rodadas de proposta.
+- ✅ **O passe de refinamento** (`refine_replica.py`) — opt-in, fora do pipeline.
+- ✅ **O cache do VLM voltou a ser fiel** (snap uma vez só + âncora de conteúdo no lugar do índice).
+
+**Aberto, na ordem em que eu atacaria:**
+
+1. **Colisão entre palavras vizinhas em tipo miúdo.** Quatro ocorrências medidas; o detector
+   atual só enxerga tipo de display. É o ponto cego de julgar cada linha na própria caixa.
+2. **Gradiente como primitivo** — o teste frio de 14/09 mostrou um fundo em degradê virando
    manchas. Atinge qualquer pôster com degradê.
-2. **Um juiz que enxergue texto ausente** — é o que destrava a capa1 e o que evitaria os
-   quatro defeitos da tabela acima. Hoje o portão de aceite cobre o buraco por fora.
 3. **Provar a capa dentro do livro** — a fiação existe (`frontmatter/cover.tex` prefere
    `\VSBookCoverDynamic`), mas `styles/versatus-dynamic-cover.tex` ainda contém uma capa de
    outra marca. É o único elo da cadeia nunca demonstrado.
 4. **Largura de texto com métrica real.** A Fase 7 estima ~0.52em por caractere; serve para
    posicionar e quebrar linha, não para justificação fina. O caminho é medir a caixa no
    próprio LuaLaTeX, não refinar a constante.
-5. **`judge_bench.py` não existe mais.** O banco de provas do juiz precisa ser reescrito
-   antes de qualquer nova tentativa de mexer no Score.
+5. **Um Score que enxergue tipografia.** Continua sendo a causa-raiz: o portão cobre o buraco
+   por fora, mas quem guia a otimização é a nota, e ela segue quase cega a texto.

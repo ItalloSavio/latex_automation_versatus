@@ -79,6 +79,7 @@ def assemble(
     text_elements = _run_ocr(image_path, width_cm, height_cm)
     print(f"         {len(text_elements)} elemento(s) de texto detectado(s)")
     _write_reference(output_path, image_path, width_cm, height_cm, text_elements)
+    source_res = _report_resolution(image_path, width_cm, text_elements)
     text_boxes_px = _text_boxes_px(text_elements, image_path, width_cm, height_cm)
 
     # ── Stage 2: CV analysis (grid masks the text zones) ─────────────────────
@@ -124,6 +125,7 @@ def assemble(
         text_elements = text_elements,
         width_cm      = width_cm,
         height_cm     = height_cm,
+        source_res    = source_res,
     )
 
     # ── Write JSON ────────────────────────────────────────────────────────────
@@ -243,6 +245,59 @@ def _write_reference(output_path: Path, image_path: Path,
         print(f"         [!] reference.json nao escrito: {type(exc).__name__}: {str(exc)[:60]}")
 
 
+# Piso de resolucao: abaixo disto a LEITURA nao e confiavel, e o sistema deve dizer isso em vez
+# de entregar tipo corrompido como se fosse o seu teto. Medido em 2026-09-23 sobre as 9 do MVP e
+# o poster de 1728px: agrupando as 73 linhas de texto por altura, ate 16px a confianca media do
+# OCR fica em 0.70-0.81 e ate 25% das strings saem com marca de leitura ruim; a partir de 16px a
+# confianca media e 0.99 e NENHUMA string sai corrompida. O corte e limpo.
+#
+# A prova de que o limite e a FONTE e nao o sistema: a mesma capa2, reexportada a 2.93x, foi de
+# 12 para 18 elementos com a confianca media subindo de 0.70 para 0.91 — e a versao em alta SEM
+# o VLM superou a versao em baixa COM o VLM.
+#
+# ⚠️ Isto AVISA, nao conserta. Ampliar a imagem por interpolacao ja foi medido e REPROVADO
+# (Score 0.9386 -> 0.9279, ver "Fase A"), e super-resolucao por IA e pior por um motivo
+# estrutural: a imagem original E o gabarito, entao alterar a imagem move o alvo.
+_RES_MIN_LINE_PX = 16
+_RES_WARN_FRAC   = 0.30   # avisa quando mais de 30% das linhas caem abaixo do piso
+
+
+def _report_resolution(image_path: Path, width_cm: float, text_elements: list) -> dict:
+    """Mede a resolucao efetiva da imagem-fonte e AVISA quando ela e o teto.
+
+    Nao altera imagem, nao altera decisao, nao descarta nada: devolve o retrato e imprime.
+    """
+    out = {"dpi_equivalente": None, "linhas": 0, "linhas_abaixo_do_piso": 0, "piso_px": _RES_MIN_LINE_PX}
+    try:
+        from PIL import Image                                     # noqa: PLC0415
+        w_px, h_px = Image.open(image_path).size
+    except Exception:
+        return out
+
+    dpi = w_px / (width_cm / 2.54) if width_cm else 0.0
+    out["dpi_equivalente"] = round(dpi, 1)
+    out["largura_px"], out["altura_px"] = w_px, h_px
+
+    px_por_cm = w_px / width_cm if width_cm else 0.0
+    alturas = [el["bbox_cm"]["h"] * px_por_cm for el in text_elements
+               if (el.get("bbox_cm") or {}).get("h")]
+    baixas = [a for a in alturas if a < _RES_MIN_LINE_PX]
+    out["linhas"] = len(alturas)
+    out["linhas_abaixo_do_piso"] = len(baixas)
+
+    print(f"         fonte: {w_px}x{h_px}px  ({dpi:.0f} dpi numa pagina de {width_cm}cm)")
+    if alturas and len(baixas) / len(alturas) > _RES_WARN_FRAC:
+        pct = 100 * len(baixas) / len(alturas)
+        print(f"         [!] {len(baixas)}/{len(alturas)} linhas de texto ({pct:.0f}%) abaixo de "
+              f"{_RES_MIN_LINE_PX}px — espere tipo corrompido.")
+        print(f"         [!] O limite aqui e a IMAGEM-FONTE, nao o sistema. Reexportar a "
+              f"~{_RES_MIN_LINE_PX / max(min(alturas), 1):.1f}x resolve mais que qualquer ajuste.")
+        out["teto_de_resolucao"] = True
+    else:
+        out["teto_de_resolucao"] = False
+    return out
+
+
 def _run_ocr(image_path: Path, width_cm: float, height_cm: float) -> list:
     try:
         mod = _load_local("ocr_extractor")
@@ -301,6 +356,7 @@ def _build_schema(
     text_elements: list,
     width_cm:      float,
     height_cm:     float,
+    source_res:    "dict | None" = None,
 ) -> dict:
     colors     = (cv_data or {}).get("colors",     [])
     layout     = (cv_data or {}).get("layout",     {})
@@ -334,6 +390,9 @@ def _build_schema(
         },
         "cv_available":  cv_ok,
         "ocr_available": len(text_elements) > 0,
+
+        # Resolucao da IMAGEM-FONTE — reporta, nao decide. Ver _report_resolution.
+        "source_resolution": source_res or {},
 
         # ── Color palette ─────────────────────────────────────────────────────
         # Sorted descending by coverage. Each: {hex, rgb, coverage}

@@ -61,6 +61,44 @@ _DESCENDER_RATIO  = 0.21    # baseline → descender bottom, as a fraction of em
 _BOLD_STROKE_RATIO = 0.125
 _INK_LUMA_THRESH   = 100    # pixels darker than this (0–255 luma) count as ink
 
+# -- A caixa nao pode ser mais alta que o PASSO do proprio paragrafo -----------------------
+# O quad do EasyOCR e frouxo na vertical: numa coluna de texto corrido ele frequentemente
+# inclui os DESCENDENTES da linha de cima, e como o _measure_ink procura tinta DENTRO do
+# quad, essa tinta alheia entra na caixa. O erro e invisivel em baixa resolucao e salta aos
+# olhos quando ha pixel: medido no poster de 1728px (2026-09-23), um unico paragrafo
+# uniforme deu alturas de 22, 23, 28, 29, 29, 42, 43 e 48px enquanto o PASSO entre as linhas
+# se manteve constante em ~33px. As tres caixas acima do passo invadiam a linha de cima em
+# 4-11px, e o render empilhava as linhas umas sobre as outras.
+#
+# A invariante e barata e local: num paragrafo nenhuma caixa e mais alta que o passo, e o
+# passo se mede nas vizinhas. So a BASE e confiavel (a contaminacao entra por CIMA), entao a
+# correcao recorta o topo e re-mede a tinta na banda restante.
+_PITCH_MIN_LINES = 3     # sem 3 linhas nao ha passo: uma reta por 2 pontos nao decide nada
+# ⚠️ A primeira versao comparava a altura da caixa com o PASSO, e estava ERRADA: medido, a
+# coluna esquerda do poster tem tinta de ~40px com passo de 34px — entrelinha mais apertada
+# que a tinta e composicao normal —, e a regra acusou 9 de 10 linhas SAS. O discriminador
+# certo e ser OUTLIER dentro do proprio paragrafo, e o limiar sai da tipografia em vez de
+# ajuste: entre duas linhas do MESMO corpo, a maior razao legitima e ascendente+descendente
+# sobre ascendente-so = 0.945/0.735 = 1.29. Acima disso a caixa contem tinta que nao e dela.
+_PITCH_TOL       = 1.35  # margem pequena sobre o maximo tipografico de 1.29
+_PITCH_LEFT_TOL  = 0.02  # fracao da LARGURA: quao alinhadas em X duas linhas do mesmo bloco
+_PITCH_GAP_MAX   = 3.0   # salto vertical maximo, em alturas de linha, antes de quebrar o bloco
+_PITCH_SIZE_RAT  = 1.6   # um paragrafo tem CORPO uniforme: linha muito maior/menor quebra o bloco
+_PITCH_SPREAD    = 0.25  # passo irregular (>25% de dispersao) = nao e paragrafo; nao mexe
+# ⚠️ PISO DE RESOLUCAO, achado pelo A/B isolado nas 3 capas afetadas (2026-09-25).
+# Medido, com os dois lados na mao: capa19 ZERO diferenca (o VLM sobrescreve o elemento de
+# qualquer jeito), capa8 um unico elemento a 13.53->13.43pt (0.7%, invisivel) e capa12 os
+# quatro nomes do elenco — onde a regra PIOROU, no olho e no numero (0.9588 -> 0.9579): no
+# original os cinco tem o mesmo corpo, sem a regra ficam quase uniformes, e COM ela
+# 'david schwimmer' salta maior e 'matthew perry' encolhe.
+# A causa e que aqueles nomes tem 7-10px de linha: a regra estava inferindo "paragrafo" a
+# partir de medicao que nao existe. Ela precisa da propria pre-condicao, e o piso e o MESMO
+# que o `accept.word_collisions` ja usa e que o estagio de aviso mede — abaixo de 16px a
+# leitura nao e confiavel. E a regra da capa5: quando nao da pra medir, NAO CHUTE.
+# Efeito: inerte nas 9 do MVP (todas abaixo do piso), ativa nos posteres em alta, onde
+# conserta 3 caixas genuinamente contaminadas.
+_PITCH_MIN_LINE_PX = 16
+
 
 # ─── Public entry point ───────────────────────────────────────────────────────
 
@@ -195,11 +233,137 @@ def _run_ocr(path: Path, width_cm: float, height_cm: float) -> "list[dict]":
             "stroke_ratio":  round(stroke_ratio, 3),
             "confidence":    round(conf, 3),
             "color_hex":     color_hex,
+            "_px":           (px0, py0, px1, py1),   # temporario: ver _cap_to_line_pitch
         })
+
+    _cap_to_line_pitch(elements, gray, arr, w_px, h_px, width_cm, height_cm)
+    for e in elements:
+        e.pop("_px", None)
 
     # Sort top-to-bottom (descending TikZ y), then left-to-right
     elements.sort(key=lambda e: (-e["bbox_cm"]["y"], e["bbox_cm"]["x"]))
     return elements
+
+
+def _paragraphs(elements: "list[dict]", w_px: int) -> "list[list[dict]]":
+    """Agrupa linhas de um mesmo BLOCO de texto: alinhadas a esquerda e verticalmente seguidas.
+
+    ⚠️ A primeira versao agrupava por sobreposicao em X contra a extensao ACUMULADA da coluna.
+    Medido no poster: o titulo 'design' e largo, entra no grupo, a coluna herda a largura dele
+    e passa a engolir a pagina — 30 das 31 linhas num grupo so. Um paragrafo se reconhece pela
+    MARGEM ESQUERDA, que e a mesma linha a linha, nao por area compartilhada.
+    """
+    tol = _PITCH_LEFT_TOL * w_px
+    blocos: list[list[dict]] = []
+    for el in sorted(elements, key=lambda e: e["_px"][3]):      # por BASE da tinta, de cima p/ baixo
+        x0, y0, _, y1 = el["_px"]
+        alt = max(y1 - y0, 1)
+        for b in blocos:
+            lx0, ly0, _, ly1 = b[-1]["_px"]
+            lalt = max(ly1 - ly0, 1)
+            if (abs(x0 - lx0) <= tol
+                    and 0 < (y1 - ly1) <= _PITCH_GAP_MAX * max(alt, lalt)
+                    and (1 / _PITCH_SIZE_RAT) <= alt / lalt <= _PITCH_SIZE_RAT):
+                b.append(el)
+                break
+        else:
+            blocos.append([el])
+    return blocos
+
+
+def _cap_to_line_pitch(elements, gray, arr, w_px, h_px, width_cm, height_cm) -> None:
+    """Recorta o TOPO da caixa que passa do passo do paragrafo e re-mede a tinta.
+
+    Age no lugar. Ver o bloco de constantes para a medicao que motivou a regra.
+    """
+    for col in _paragraphs(elements, w_px):
+        if len(col) < _PITCH_MIN_LINES:
+            continue
+        passos = [col[i + 1]["_px"][3] - col[i]["_px"][3] for i in range(len(col) - 1)]
+        passos = [p for p in passos if p > 0]
+        if len(passos) < _PITCH_MIN_LINES - 1:
+            continue
+        passos.sort()
+        pitch = passos[len(passos) // 2]
+        # passo irregular nao descreve um paragrafo — nao ha invariante para aplicar
+        disp = sum(abs(p - pitch) for p in passos) / (len(passos) * max(pitch, 1))
+        if pitch <= 0 or disp > _PITCH_SPREAD:
+            continue
+
+        # a regua e a ALTURA MEDIANA do proprio paragrafo, nao o passo (ver _PITCH_TOL)
+        alturas = sorted(e["_px"][3] - e["_px"][1] for e in col)
+        alvo = alturas[len(alturas) // 2]
+        # abaixo do piso de resolucao nao ha medicao para sustentar a regra (ver _PITCH_MIN_LINE_PX)
+        if alvo < _PITCH_MIN_LINE_PX:
+            continue
+        if alvo <= 0:
+            continue
+
+        for el in col:
+            px0, py0, px1, py1 = el["_px"]
+            if (py1 - py0) <= alvo * _PITCH_TOL:
+                continue
+            novo_py0 = max(0, py1 - alvo)
+            ink = _measure_ink(gray[novo_py0:py1, px0:px1])
+            if ink is None:
+                continue
+            ix0, iy0, ix1, iy1, stroke_ratio = ink
+            qx0, qy0, qx1, qy1 = px0 + ix0, novo_py0 + iy0, px0 + ix1, novo_py0 + iy1
+            ink_h_px = qy1 - qy0
+            if ink_h_px <= 0 or (ink_h_px / h_px * height_cm) < _MIN_HEIGHT_CM:
+                continue
+
+            has_desc = any(c in _DESCENDER_CHARS for c in el["text"].lower())
+            em_px    = ink_h_px / (_ASC_DESC_RATIO if has_desc else _ASCENDER_RATIO)
+            desc_px  = (em_px * _DESCENDER_RATIO) if has_desc else 0.0
+
+            el["bbox_cm"] = {
+                "x": round(qx0 / w_px * width_cm, 3),
+                "y": round((h_px - qy1) / h_px * height_cm, 3),
+                "w": round((qx1 - qx0) / w_px * width_cm, 3),
+                "h": round(ink_h_px / h_px * height_cm, 3),
+            }
+            el["baseline_y_cm"] = round((h_px - (qy1 - desc_px)) / h_px * height_cm, 3)
+            el["font_size_pt"]  = round(em_px / h_px * height_cm * _CM_TO_PT, 1)
+            el["stroke_ratio"]  = round(stroke_ratio, 3)
+            el["color_hex"]     = _estimate_text_color(arr[qy0:qy1, qx0:qx1])
+            el["_px"]           = (qx0, qy0, qx1, qy1)
+
+        _uniform_body(col)
+
+
+def _uniform_body(col: "list[dict]") -> None:
+    """Num paragrafo o CORPO e o mesmo em todas as linhas: use a mediana do bloco.
+
+    O em sai de `ink / ratio`, e o `ratio` e escolhido por LINHA conforme ela tenha ou nao
+    descendente (0.735 vs 0.945). Medido no poster de 1728px (2026-09-23), as duas leituras
+    nao convergem para o mesmo em: no MESMO paragrafo, 'Dolor sit amet, consectetur' (sem
+    descendente) sai a 18.7pt e 'labore et dolore magna' a 15.3pt, 22% de diferenca onde o
+    desenho tem zero. A altura da tinta e ruidosa em +-1px e a razao amplifica esse ruido; a
+    mediana do bloco nao.
+
+    Mesmo principio que o `edit_gate` ja aplica no snap por bandas ("fonte pela mediana do
+    bloco: no Swiss o header difere em PESO, nao em tamanho"). So age com >= _PITCH_MIN_LINES.
+    """
+    if len(col) < _PITCH_MIN_LINES:
+        return
+    pts = sorted(e["font_size_pt"] for e in col if e.get("font_size_pt"))
+    if not pts or pts[0] <= 0:
+        return
+    # ⚠️ Guard achado por REGRESSAO nas 9 (2026-09-23). Sem ele a regra unificava blocos que
+    # NAO sao paragrafos — linhas de imprint soltas que por acaso partilham margem esquerda e
+    # ficam perto: capa1 'DATA: 12 de junho' 16.4 -> 21.0pt e 'VERSAO: v0.1' 24.0 -> 21.0pt,
+    # capa13 'AtomGlide Essentials' 7.7 -> 12.0pt, capa8 'held over...' 19.9 -> 15.5pt,
+    # capa19 'the' 174.2 -> 135.5pt. Quatro capas entregues alteradas por uma regra que so
+    # deveria remover RUIDO.
+    # O criterio sai da mesma tipografia que justifica _PITCH_TOL: se o bloco fosse um corpo
+    # so, a divergencia entre suas linhas nao passaria de 0.945/0.735 = 1.29. Acima disso as
+    # linhas tem tamanhos DIFERENTES de propria, e nao ha o que unificar.
+    if pts[-1] / pts[0] > _PITCH_TOL:
+        return
+    alvo = pts[len(pts) // 2]
+    for e in col:
+        e["font_size_pt"] = alvo
 
 
 # ─── Ink geometry ─────────────────────────────────────────────────────────────

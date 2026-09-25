@@ -393,6 +393,7 @@ def main(argv):
         for p in OUT.glob("capa_teste*") if p.is_dir())
 
     report, bad, sem_ref = {}, 0, []
+    no_teto: list[str] = []
     for n in nums:
         d = OUT / f"capa_teste{n}"
         aj = d / "analysis.json"
@@ -410,8 +411,18 @@ def main(argv):
         else:
             sem_ref.append(f"capa{n}")
         v = verdict(f)
+        # Teto de RESOLUCAO: contexto, nunca achado. Uma fonte de 56 dpi entrega tipo corrompido
+        # por falta de pixel, e chamar isso de defeito do sistema manda consertar o lugar errado.
+        # Medido (2026-09-23): a capa2 reexportada a 2.93x foi de 12 para 18 elementos com a
+        # confianca media do OCR subindo de 0.70 para 0.91 — e a versao em alta SEM VLM superou a
+        # versao em baixa COM VLM. O conserto e a fonte, nao o codigo.
+        res = (analysis.get("source_resolution") or {})
         report[f"capa{n}"] = {"veredito": v, "achados": [m for _, m in f],
-                              "ausencia_verificada": bool(ref_p)}
+                              "ausencia_verificada": bool(ref_p),
+                              "teto_de_resolucao": bool(res.get("teto_de_resolucao"))}
+        if res.get("teto_de_resolucao"):
+            no_teto.append(f"capa{n} ({res.get('dpi_equivalente', '?')} dpi, "
+                           f"{res.get('linhas_abaixo_do_piso')}/{res.get('linhas')} linhas)")
         bad += v == "REVISAR"
 
     if as_json:
@@ -425,6 +436,11 @@ def main(argv):
                 print(f"{'':>7}  {'':<9} {extra}")
         ok = sum(1 for v in report.values() if v["veredito"] == "OK")
         print(f"\n{ok}/{len(report)} sem defeito estrutural detectado.")
+        if no_teto:
+            print(f"\n⚠️  NO TETO DA IMAGEM-FONTE (o limite e a fonte, nao o sistema): "
+                  f"{', '.join(no_teto)}")
+            print("    Reexportar a imagem em resolucao maior rende mais que qualquer ajuste de "
+                  "codigo. Ampliar a existente NAO serve: ja foi medido e reprovado.")
         if sem_ref:
             print(f"⚠️  sem quadro de referencia, AUSENCIA nao verificada em: "
                   f"{', '.join(sem_ref)}  "

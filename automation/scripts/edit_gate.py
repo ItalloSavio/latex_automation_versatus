@@ -634,6 +634,9 @@ def ground_edit(analysis: dict, edit: dict) -> "tuple[bool, str]":
                 return False, "rotation_deg fora de [-180, 180]"
         if op == "text.weight" and edit.get("value") not in _TEXT_WEIGHTS:
             return False, f"weight fora de {_TEXT_WEIGHTS}"
+        nop = _noop_reason(el, edit)
+        if nop:
+            return False, nop
         return True, "ok"
 
     if op == "region.add":
@@ -890,6 +893,42 @@ def _drop_traced_under(a: dict, box: dict) -> int:
     if fora:
         a["regions"] = keep
     return fora
+
+
+# ── Edit que nao muda nada e recusado ANTES do render ────────────────────────────────────
+# O portao medido custa um render POR EDIT. Um edit cujo valor ja e o valor atual do elemento
+# nao pode mudar nada — e o render so confirma o obvio, sempre com delta exatamente zero.
+# Medido nos logs reais desta semana: **48 renders** gastos assim, dominados por `text.weight`
+# propondo "bold" para elemento que ja e bold (o log mostra `box[0] 0.912->0.912`).
+# O aterramento e a camada BARATA (sem render) e e onde isto pertence.
+#
+# ⚠️ So recusa quando a igualdade e EXATA (ou, em numero, dentro do ruido de arredondamento do
+# proprio schema). Um edit que muda pouco continua passando: quem decide se pouco e suficiente
+# e a medicao, nao esta funcao.
+_NOOP_EPS = 1e-6
+_SEM_COMPARACAO = object()
+
+
+def _noop_reason(el: dict, edit: dict) -> "str | None":
+    """Devolve o motivo quando o edit deixaria o elemento exatamente como esta."""
+    op, v = edit.get("op"), edit.get("value")
+    atual = {
+        "text.string": el.get("text"),
+        "text.size":   el.get("font_size_pt"),
+        "text.hscale": el.get("hscale"),
+        "text.weight": el.get("weight_hint"),
+        "text.rotate": el.get("rotation_deg"),
+    }.get(op, _SEM_COMPARACAO)
+    if atual is _SEM_COMPARACAO:
+        if op == "text.move" and abs(edit.get("dx_cm", 0)) < _NOOP_EPS \
+                and abs(edit.get("dy_cm", 0)) < _NOOP_EPS:
+            return "text.move de zero"
+        return None
+    if atual is None:
+        return None                                   # sem valor atual: o edit informa algo
+    if isinstance(atual, (int, float)) and isinstance(v, (int, float)):
+        return f"{op} ja vale {atual}" if abs(float(atual) - float(v)) < _NOOP_EPS else None
+    return f"{op} ja vale {atual!r}" if atual == v else None
 
 
 def _remove_text(a: dict, edit: dict) -> "dict | None":

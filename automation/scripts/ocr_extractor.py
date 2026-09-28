@@ -99,6 +99,36 @@ _PITCH_SPREAD    = 0.25  # passo irregular (>25% de dispersao) = nao e paragrafo
 # conserta 3 caixas genuinamente contaminadas.
 _PITCH_MIN_LINE_PX = 16
 
+# ── A REGUA DA GRADE VIRA LETRA FANTASMA NA LEITURA ──────────────────────────────────────
+# Medido no poster de 1728px (2026-09-28): ha uma linha vertical de 2px em x=118-119 com 100%
+# de cobertura ao longo de toda a coluna de texto, e as caixas do OCR comecam em x=117 — a
+# regua fica DENTRO da caixa. O EasyOCR a le como glifo e devolve 'Jadipiscing', 'Iod tempor',
+# 'Meniam', 'Itation', 'Jut aliquip', 'kconsequat', 'ITIPOGRAFIA'. Sete das 31 linhas.
+#
+# ⚠️ Duas medicoes derrubaram consertos mais simples antes deste:
+#   (a) "ha tinta a ESQUERDA da caixa" — nao ha: 0% nos dois grupos, porque o _measure_ink ja
+#       encolheu a caixa ATE a regua, entao ela esta a direita de x0, dentro;
+#   (b) "a regua distingue linha fantasma de linha limpa" — NAO distingue: ela atravessa a
+#       coluna inteira, entao aparece em 100% das linhas, fantasma ou nao. Cortar o primeiro
+#       caractere transformaria 'Dolor' em 'olor'.
+# O que resta e tirar a regua da ENTRADA do OCR — nao da imagem de comparacao, que continua
+# sendo o gabarito. E a mesma divisao que o mapa de layout ja faz mascarando caixas de texto
+# antes da projecao Sobel.
+#
+# ⚠️ A classe e ZERO nas 9 capas do MVP e 7/31 no poster: ela CHEGA COM A RESOLUCAO, porque a
+# regua so fica grossa o bastante para virar glifo acima de ~150 dpi.
+# ⚠️ PISO DE RESOLUCAO, e ele foi achado por REGRESSAO. Sem ele a mascara DESTROI texto nas
+# capas em baixa: capa6 perdeu 3 dos 4 elementos, capa8 virou "upstairs at max's I==== city",
+# capa2 truncou 'Versatus HPC Technical Bock' para 'Versatus HPC Tane'. A causa e a mesma da
+# regra de paragrafo: a 56-89 dpi a HASTE DE UMA LETRA tambem tem 1-2px, e a sonda de 4px nao
+# consegue separar haste de regua. Acima de ~150 dpi a haste engorda e a separacao volta.
+# As 9 do MVP estao em 56-89 dpi e o poster em 209 — 1.7x de folga para cada lado.
+_RULE_MIN_DPI     = 150    # abaixo disto a mascara NAO roda: nao da para separar, entao nao chuta
+_RULE_MAX_W       = 3      # px — mais largo que isto e desenho, nao regua
+_RULE_MIN_LEN     = 0.04   # fracao da dimensao: uma regua e LONGA
+_RULE_UNIFORM     = 12.0   # desvio maximo ao longo da regua para ela contar como uma linha
+_RULE_CONTRAST    = 40.0   # distancia minima ao que ha dos DOIS lados
+
 
 # ─── Public entry point ───────────────────────────────────────────────────────
 
@@ -166,7 +196,12 @@ def _run_ocr(path: Path, width_cm: float, height_cm: float) -> "list[dict]":
     #     lost both its text and its traced fallback and left a hole.
     # Score 0.9386 -> 0.9279 and the eye agrees it is worse. Re-attempt only after the text
     # gate stops deleting legitimate lines and fragments are re-joined.
-    result = reader.readtext(str(path), width_ths=0.8)
+    # ⚠️ SEMPRE um CAMINHO, nunca o array. Medido (2026-09-28): com a mascara INERTE (0 px
+    # alterados), trocar `readtext(path)` por `readtext(array)` sozinho derruba a capa6 de 4
+    # para 1 elemento, quebra strings da capa2 e come o acento de 'RASCUNHO TÉCNICO' — o
+    # EasyOCR pre-processa os dois caminhos de forma diferente. Eu havia atribuido esse dano
+    # a mascara; era a troca de entrada.
+    result = reader.readtext(_ocr_input_path(path, arr), width_ths=0.8)
     scale = 1
 
     elements: list[dict] = []
@@ -364,6 +399,83 @@ def _uniform_body(col: "list[dict]") -> None:
     alvo = pts[len(pts) // 2]
     for e in col:
         e["font_size_pt"] = alvo
+
+
+def _ocr_input_path(path: Path, arr) -> str:
+    """O caminho que o OCR deve ler: o original, ou uma copia sem as reguas quando ha o que tirar."""
+    try:
+        import numpy as np                                        # noqa: PLC0415
+        from PIL import Image as _Im                              # noqa: PLC0415
+    except Exception:
+        return str(path)
+    m = _mask_rules(arr)
+    if not np.any(np.abs(m.astype(float) - arr).sum(axis=2) > 10):
+        return str(path)                                          # nada a mascarar: intocado
+    try:
+        import tempfile                                           # noqa: PLC0415
+        tmp = Path(tempfile.gettempdir()) / f"_ocr_sem_reguas_{path.stem}.png"
+        _Im.fromarray(m).save(tmp)
+        return str(tmp)
+    except Exception:
+        return str(path)
+
+
+def _mask_rules(arr):
+    """Devolve uma COPIA da imagem com as reguas finas pintadas com o que ha ao lado.
+
+    So a ENTRADA do OCR muda; a imagem original segue intocada como gabarito.
+
+    ⚠️ A primeira versao exigia a COLUNA INTEIRA uniforme e nao disparava nunca: medido, a
+    regua do poster cobre 89% da coluna (corrida continua de 2204px de 2464), entao o desvio
+    da coluna toda da 49.7 contra um limiar de 12. O teste certo e por CORRIDA.
+
+    Um pixel e "fino" quando difere dos dois lados a `_RULE_MAX_W+1` px de distancia; uma
+    REGUA e uma corrida longa de pixels finos. A haste de uma letra tambem e fina, mas sua
+    corrida tem a altura do glifo (~30px), nao 25% da pagina — e o comprimento que separa.
+    """
+    try:
+        import numpy as np                                        # noqa: PLC0415
+    except Exception:
+        return arr.astype("uint8") if hasattr(arr, "astype") else arr
+
+    out = np.array(arr, dtype=float, copy=True)
+    h, w, _ = out.shape
+    # abaixo do piso a sonda nao separa haste de regua (ver _RULE_MIN_DPI)
+    if w / (21.0 / 2.54) < _RULE_MIN_DPI:
+        return out.astype("uint8")
+    d = _RULE_MAX_W + 1
+
+    for eixo in (0, 1):                       # 0 = reguas VERTICAIS, 1 = HORIZONTAIS
+        n_len = h if eixo == 0 else w         # comprimento ao longo da regua
+        minrun = max(8, int(_RULE_MIN_LEN * n_len))
+        A = out if eixo == 0 else out.transpose(1, 0, 2)   # sempre "regua corre no eixo 0"
+        H, Wd, _ = A.shape
+        if Wd <= 2 * d:
+            continue
+        esq, dir_ = A[:, :-2 * d, :], A[:, 2 * d:, :]
+        meio = A[:, d:-d, :]
+        fino = ((np.abs(meio - esq).max(axis=2) >= _RULE_CONTRAST)
+                & (np.abs(meio - dir_).max(axis=2) >= _RULE_CONTRAST))
+        for j in range(fino.shape[1]):
+            col = fino[:, j]
+            if not col.any():
+                continue
+            # corridas continuas de pixel fino
+            idx = np.flatnonzero(np.diff(np.r_[0, col.view(np.int8), 0]))
+            for a, b in zip(idx[::2], idx[1::2]):
+                if b - a < minrun:
+                    continue
+                x = j + d
+                novo = (A[a:b, x - d, :] + A[a:b, x + d, :]) / 2.0
+                for k in range(-(_RULE_MAX_W // 2), _RULE_MAX_W // 2 + 1):
+                    xx = x + k
+                    if 0 <= xx < Wd:
+                        A[a:b, xx, :] = novo
+        if eixo == 1:
+            out = A.transpose(1, 0, 2)
+        else:
+            out = A
+    return out.astype("uint8")
 
 
 # ─── Ink geometry ─────────────────────────────────────────────────────────────

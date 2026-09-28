@@ -170,6 +170,43 @@ As fontes são miniaturas: **0,3 a 0,8 MP** (capa16 é 467×657; a capa3, fora d
 **Motivação para registrar:** se algum dia houver acesso às imagens em resolução alta, vários
 tetos se movem de uma vez — e nenhuma engenharia no código atual os move.
 
+### ✅ MEDIDO E CONFIRMADO (2026-09-23/25) — e o efeito é maior do que este item previa
+
+O "se algum dia houver acesso" aconteceu: o usuário reexportou a capa2 a **2,93×**
+(600×815 → 1760×2390) e mandou um pôster inédito a 209 dpi. Resultado do A/B de leitura:
+
+```
+capa2, so o estagio 1        BAIXA (73 dpi)   ALTA (213 dpi)
+elementos lidos                     12             18
+confianca media                   0.70           0.91
+conf >= 0.90                    4 (33%)       12 (67%)
+conf < 0.50                          3              0
+```
+
+Nove strings corrompidas foram corrigidas **sem VLM nenhum**, e três estavam irreconhecíveis
+(`'Brama dc Cstudos'` → `'Material técnico de formação; referência'`).
+
+⚠️ **A conclusão que inverte a intuição, e que este item não previa: a capa2 em ALTA SEM VLM
+supera a capa2 em BAIXA COM VLM.** Resolução compra mais que a API — e se paga uma vez.
+
+**O piso está medido:** agrupando as 73 linhas das 9 por altura, até 16px a confiança fica em
+0,70–0,81 com até 25% de strings corrompidas; a partir de 16px é 0,99 e **zero** corrompidas.
+É o mesmo 16px que o `word_collisions` achou por outro caminho.
+
+**8 das 9 capas estão no teto** (56–89 dpi; 50 a 92% das linhas abaixo do piso). A capa19
+marca 0% e é engano: as linhas pequenas dela nunca foram lidas.
+
+**O que entrou:** `cover_assembler._report_resolution` mede e AVISA (não conserta), e o
+`accept` reporta como contexto sem mexer no veredito. Ver a seção correspondente no `CLAUDE.md`.
+
+**O que NÃO entra, e é decisão fechada:** processar a imagem para "melhorá-la". Ampliar por
+interpolação já está medido e reprovado (§G), e super-resolução por IA é pior por motivo
+estrutural — **a imagem original É o gabarito**, então alterá-la move o alvo, e o pipeline
+deriva corpo/peso/cor MEDINDO a tinta. O caminho é reexportar a fonte.
+
+**A decisão de produto que fica aberta:** reexportar as outras capas. capa1 e capa2 são nossas
+e saem de graça; as de música dependem de existir scan melhor. Com número: 8 de 9 no teto.
+
 ---
 
 ## E · Integração e ferramental
@@ -211,7 +248,7 @@ fluxo deveria decidir.
 | ~~O cache do VLM guarda propostas JÁ processadas pelo snap~~ ✅ **FECHADO 18/09 — era a causa-raiz de três "regressões"** | No `_vlm_pass`, o cache era gravado DEPOIS do `snap_text_adds` e todo rebuild aplicava o snap de novo (não idempotente). Consequência medida: **nenhuma capa cujo entregável veio de uma rodada fresca do VLM podia ser reproduzida pelo próprio cache** — nem com o código de antes de 17/09 (capa6 pelo cache: 0.9501, sem `with`/`and boy's life`, contra 0.9524 entregue). Foi isso que fez o rebuild de 17/09 parecer regredir a 6, a 8 e a 19. Corrigido: entrada que já tem `font_size_pt` é aplicada como está, e o cache novo guarda a proposta CRUA. Prova: capa6 pelo cache com o código novo → 7/7 textos idênticos ao entregue, Score 0.9524, 0,06% dos pixels diferentes | ✅ |
 | **Endereçamento por ÍNDICE** — guarda ENTROU; a CAUSA que liguei a ela estava ERRADA | Eu escrevi que a capa19 caía 0.9040→0.8877 porque `assign_ids` numera por ORDEM e o cache guardava o índice. **Medido peça a peça nos arquivos reais, não procede:** dos 35 edits do cache entregue, **32 caem na MESMA peça**, 2 não têm id, **1** aponta para peça que sumiu (vira no-op) e **ZERO** caem no vizinho. Eu inferi o deslize de a lista ter mudado de 21 para 23 regiões — as três novas entram DEPOIS, então nenhum id citado foi afetado. **A guarda entrou assim mesmo** porque índice é endereço frágil por construção e o sintoma da falha não é erro, é um edit correto na peça errada: `anchor_edits` grava centro+tamanho+string e `resolve_anchors` re-endereça, descartando com log quando não há alvo. Custo zero nos dados de hoje (no-op). Provado em unitário; ao vivo, o replay reproduz a rodada fresca edit por edit até a 4ª casa | ✅ guarda |
 | **capa19: −0.0163 no rebuild, causa ainda NÃO estabelecida** (reaberto 21/09) | Três hipóteses MORTAS por medição: não é o laço (`mp=0` e `mp=3` dão 0.8877), não é o duplo-snap (o cache dela tem **zero** entradas pós-snap) e não é deslize de índice (32/35 na mesma peça). O que sobra, medido: a **análise-base mudou** — 21 → 23 regiões, a régua fina `r10` (6,87×0,04cm) existe no entregue e **não existe** no rebuild, e uma peça `rectangle` virou `polygon`. O leitor de hoje lê a capa19 diferente do que a produziu. **Próximo passo: isolar o LEITOR, não o cache** | médio |
-| **Palavras coladas em tipo MIÚDO são invisíveis** (achado 17/09) | O `accept.word_collisions` só opina com linha ≥ 16px na imagem-fonte. No cabeçalho da capa2 (~7px de linha) um rebuild colou `"SÉRIE /"` em `"Versatus HPC…"` — visível no render, abaixo da resolução da medição (§D2). Mesma causa-raiz das colisões grandes: cada linha julgada na PRÓPRIA janela, e janelas vizinhas se sobrepõem | médio |
+| **Palavras coladas em tipo MIÚDO são invisíveis** (achado 17/09) — ⚠️ **REENQUADRADO 25/09: é TETO DE FONTE, não defeito do detector** (§D2: 8 das 9 capas abaixo do piso; com a fonte em alta o detector passou a funcionar sozinho em corpo de texto) | O `accept.word_collisions` só opina com linha ≥ 16px na imagem-fonte. No cabeçalho da capa2 (~7px de linha) um rebuild colou `"SÉRIE /"` em `"Versatus HPC…"` — visível no render, abaixo da resolução da medição (§D2). Mesma causa-raiz das colisões grandes: cada linha julgada na PRÓPRIA janela, e janelas vizinhas se sobrepõem | médio |
 | Aterramento aceita edit que não muda nada | Ao vivo na capa19, o VLM propôs `text.weight bold` para cinco elementos que JÁ eram bold; cada um custou um render para ser rejeitado com delta zero. Recusar no aterramento (valor igual ao atual) é uma linha | pequeno |
 | capa2: wordmark traçado e placeholder se sobrepõem | O `logo.mark` escreveu `Versatus (Logo)` mas o `vers` traçado pelo leitor continua embaixo | pequeno |
 | capa6: três linhas que o OCR NUNCA leu | `wednesday`, `october 6 1993`, `east of mass. on 15th st.` — não estão nem na referência, então nenhuma medida as cobra. O passe de refinamento as VIU e adicionou (`october 6 1993` com box_local 1.000), mas as adições colidiram com blocos existentes e a rede de segurança reverteu tudo. É o caso-alvo da próxima iteração do refinamento | médio |

@@ -440,6 +440,97 @@ glifo (legendas a 18,5pt contra 14,6pt medidos); e o texto recuperado era APAGAD
 Score 0.9386→0.9279. ⚠️ **Escala fixa 3× lê melhor que a adaptativa** que eu escrevi (ela dava
 2× na capa8). Reatacar só depois que fragmentos forem re-unidos.
 
+## ✅ O TETO É A IMAGEM-FONTE — 8 das 9 capas (2026-09-23/25)
+
+**O maior achado desta semana não é código: é que o gargalo de tipografia das nossas capas
+está na IMAGEM, não no sistema.** Isso reenquadra vários itens da fila que estavam
+classificados como defeito de algoritmo.
+
+**A medição que abre o assunto.** Agrupando as 73 linhas de texto das 9 por altura em pixels:
+
+| altura da linha | linhas | confiança média do OCR | strings com marca de leitura ruim |
+|---|---|---|---|
+| até 8px | 12 | 0,73 | 25% |
+| 8–12px | 22 | 0,70 | 9% |
+| 12–16px | 18 | 0,81 | 17% |
+| **16–30px** | 8 | **0,99** | **0%** |
+| acima de 30px | 13 | 0,91 | **0%** |
+
+O corte é limpo em **16px** — e é o mesmo piso que o `accept.word_collisions` já tinha
+encontrado por outro caminho, medindo espaço entre palavras. Duas medições independentes
+chegando no mesmo número é o sinal de que ele descreve o sensor, não o caso.
+
+**As nossas fontes têm 56–89 dpi numa página de 21cm** (um scan de impressão tem 300), e
+**8 das 9 estão no teto**: capa2 92% das linhas abaixo do piso, capa16 88%, capa12 89%,
+capa4 86%, capa13 75%, capa6 75%, capa8 71%, capa1 50%. ⚠️ A capa19 marca 0% e **é engano**:
+as linhas pequenas dela nunca foram lidas, então não entram na conta.
+
+**A prova, com A/B real (capa2 reexportada a 2,93×, 600×815 → 1760×2390):**
+
+```
+elementos lidos      12  ->  18        confianca media   0.70  ->  0.91
+conf >= 0.90      4 (33%) ->  12 (67%) conf < 0.50          3  ->  0
+'Brama dc Cstudos'       ->  'Material tecnico de formacao; referencia' + 'estudo'
+'Subtitulo cicntifico'   ->  'Subtitulo cientifico ou pro-' + 'grama de estudos'
+'VERSATUS HPC VERSRO,01' ->  'VERSATUS HPC VERSAO vO.1'
+```
+
+⚠️ **E a conclusão que inverte a intuição: a capa2 em ALTA resolução SEM VLM supera a versão
+em BAIXA COM VLM.** Resolução compra mais que a API, e se paga uma vez. O Score não enxerga
+isso — caiu de 0.7234 para 0.7061 enquanto a capa melhorou muito, porque 96% dela é fundo.
+Folhas de comparação em `automation/output/replicated/_comparacao_capa2.png` e
+`_comparacao_poster.png`.
+
+**O que ENTROU (`cover_assembler._report_resolution`):** mede o dpi-equivalente e quantas
+linhas caem abaixo do piso, grava em `analysis["source_resolution"]` e avisa na rodada. O
+`accept` reporta como **CONTEXTO, nunca como achado** — não muda veredito, pela mesma regra
+que já valia para "ausência não verificada": *transformar "não medi" em "achei algo" é a forma
+mais rápida de um portão virar ruído*.
+
+⚠️ **NÃO tente consertar a imagem.** Ampliar por interpolação já foi medido e reprovado
+(Score 0.9386→0.9279, ver "Fase A"), e super-resolução por IA é pior por motivo ESTRUTURAL,
+não de qualidade: **a imagem original É o gabarito**. Alterá-la move o alvo, e o pipeline
+inteiro deriva corpo, peso e cor MEDINDO a tinta — detalhe inventado entra como dado
+confiante e errado. O caminho é reexportar a fonte, não processá-la.
+
+⚠️ **Itens da fila que isto reenquadra** (eram "defeito do sistema", são teto de fonte):
+palavras coladas em tipo miúdo, A11 (capa14/15 "alinhamento e escrita ruins"), A9 (capa9
+"textos pequenos não localizados") e boa parte da capa2. **Antes de atacar qualquer um deles,
+olhe o dpi.**
+
+### A regra de PARÁGRAFO no OCR, e o piso que ela precisou (commit `78a6c0a`)
+
+O quad do EasyOCR é frouxo na vertical e engole os descendentes da linha de cima. Medido no
+pôster de 1728px: um parágrafo uniforme deu alturas de **22 a 48px** com o passo constante em
+~33px, e o render empilhou as linhas umas sobre as outras. `_paragraphs` agrupa por margem
+esquerda + corpo uniforme + continuidade vertical; `_cap_to_line_pitch` recorta o **topo** da
+caixa que excede a mediana do bloco (a base é confiável; a contaminação entra por cima);
+`_uniform_body` uniformiza o corpo pela mediana — o mesmo princípio que o `edit_gate` já usa
+no snap por bandas.
+
+**O limiar 1.35 sai da tipografia, não de ajuste:** a maior razão legítima entre duas linhas
+do mesmo corpo é ascendente+descendente ÷ ascendente-só = **0,945/0,735 = 1,29**.
+
+⚠️ **TRÊS hipóteses minhas morreram medindo, e vale mais que a regra:**
+1. *"As caixas infladas são as que encostam na barra azul"* — **falso**, uma caixa correta
+   também encosta (100% de forma à direita nas duas).
+2. *"Nenhuma caixa pode ser mais alta que o PASSO"* — **errado**: entrelinha mais apertada que
+   a tinta é composição normal, e a regra acusou **9 de 10 linhas sãs**. O discriminador certo
+   é ser outlier da mediana do próprio parágrafo.
+3. O primeiro agrupamento comparava contra a extensão **acumulada** da coluna — o título
+   largo entrava, a coluna herdava a largura dele e engolia **30 das 31 linhas**.
+
+**O piso de 16px na regra veio do A/B, não do raciocínio.** Sem ele a regra alcançava as 9, e
+o A/B isolado (capa8/12/19, 6 rodadas, o lado de controle reproduzindo os três valores
+conhecidos exatamente) mostrou: **capa19 zero diferença** (o VLM sobrescreve o elemento de
+qualquer jeito — minha previsão de que `'the'` iria de 174,2 para 135,5pt vinha da saída CRUA
+do estágio 1, não do entregável), **capa8** 0,7% num elemento, e **capa12 PIOROU** no olho e no
+número (0.9588→0.9579): no original os cinco nomes do elenco têm o mesmo corpo, sem a regra
+ficam quase uniformes, e com ela `david schwimmer` salta maior e `matthew perry` encolhe.
+A causa é que aqueles nomes têm **7–10px** de linha — inferir parágrafo dali é chutar.
+Com o piso: **zero correções nas 9** (verificado na saída real do estágio 1, idêntica ao
+controle), 3 no pôster em alta. Auditoria 9/9 delta zero.
+
 ## O PORTÃO DE ACEITE DA RÉPLICA (`automation/tools/accept.py`, 2026-09-11)
 
 O Score diz **quanto a réplica se parece** com o original. Ele não diz **se ela está quebrada**,
@@ -1625,6 +1716,16 @@ Em `ocr_extractor.py`:
   mantém "A / B" numa string só.
 - `_ASCENDER_RATIO 0.735` / `_ASC_DESC_RATIO 0.945` — em a partir da tinta medida.
 - `_BOLD_STROKE_RATIO = 0.125` — bold pela espessura de traço medida.
+- **`_PITCH_TOL = 1.35`** — quanto uma caixa pode passar da mediana do parágrafo antes de ser
+  considerada contaminada. Vem da tipografia: 0.945/0.735 = 1.29 é o máximo legítimo.
+- **`_PITCH_MIN_LINE_PX = 16`** — a regra de parágrafo não opina abaixo do piso de resolução.
+  Sem ele a capa12 piorava (nomes de 7–10px). Mesmo piso do `accept.word_collisions`.
+- `_PITCH_MIN_LINES = 3` · `_PITCH_LEFT_TOL = 0.02` · `_PITCH_GAP_MAX = 3.0` ·
+  `_PITCH_SIZE_RAT = 1.6` · `_PITCH_SPREAD = 0.25` — o que define "isto é um parágrafo".
+
+Em `cover_assembler.py` (estágio de aviso):
+- **`_RES_MIN_LINE_PX = 16`** / **`_RES_WARN_FRAC = 0.30`** — abaixo do piso a leitura não é
+  confiável; acima de 30% das linhas nessa situação, a rodada AVISA que o teto é a fonte.
 
 Em `image_analyzer.py`:
 - gate de diagonal usa **std do canal MÁXIMO > 15** (a média dos 3 canais mascara

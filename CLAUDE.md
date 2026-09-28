@@ -1,7 +1,11 @@
 # Swiss Cover Replicator — escopo do sistema
 
-> ## 🟢 MVP FECHADO — 2026-09-14
-> **9 capas · média 0.9017 · auditoria 9/9 · portão de aceite 7/9 OK · 8 das 9 saem de um comando.**
+> ## 🟢 MVP FECHADO — 2026-09-14 · atualizado 28/09
+> **9 capas · média 0.9034 · auditoria 9/9 · portão de aceite 8/9 OK · QUATRO em ≥0.95.**
+>
+> 28/09: capa6 **0.9541** e capa8 **0.9511** promovidas (a capa8 saiu de `ATENCAO` para `OK`
+> quando o medidor de tinta passou a enxergar polaridade). O único `ATENCAO` restante é o
+> título da capa1 — mesma causa, e ela pede tratamento próprio por ser cirurgia manual.
 >
 > ⚠️ O portão era 8/9 até 16/09 e virou **7/9 sem nenhuma capa piorar** — ele passou a enxergar
 > conteúdo AUSENTE e a capa1 acusou um defeito que sempre esteve lá. Ver "O PASSO 1".
@@ -1345,8 +1349,8 @@ mesma versão do portão**, e este é o mesmo erro que o cache de arte cometeu e
 |---|---|---|---|
 | capa4 | **0.9702** | detectores + laço roteado | ✅ referência; a ÚNICA onde os detectores ainda ganham do leitor |
 | capa12 | **0.9588** | leitor + laço roteado | ✅ círculos sobrepostos (transparência chapada e mesmo assim casa) |
-| capa6 | 0.9524 | leitor | ✅ |
-| capa8 | 0.9380 | leitor + retraço | ✅ título voltou a ser legível com os buracos no traçado |
+| capa6 | **0.9541** | leitor | ✅ (28/09) |
+| capa8 | **0.9511** | leitor + retraço | ✅ (28/09) título como TIPO, não como arte — ver polaridade |
 | capa13 | **0.9316** | leitor + VLM + laço roteado | ✅ grade 4×4 + círculo. **0.490 antes da Fase 6** |
 | capa16 | 0.9192 | leitor + VLM | ✅ malha de losangos; o VLM **corrigiu o texto** que o OCR errava |
 | capa19 | 0.9040 | leitor + VLM | ✅ **+0.0672 na Fase E**, o maior ganho do passe fresco |

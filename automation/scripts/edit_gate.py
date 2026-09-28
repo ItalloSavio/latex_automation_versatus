@@ -712,6 +712,7 @@ def apply_edit(analysis: dict, edit: dict) -> "dict | None":
         b = edit.get("bbox_cm")
         if not b:
             return None
+        _drop_traced_under(a, b)
         rows = [ln.strip() for ln in edit.get("value", "").replace("\\n", "\n").split("\n")]
         while rows and not rows[0]:            # trim leading/trailing blanks…
             rows.pop(0)
@@ -844,6 +845,51 @@ def apply_edit(analysis: dict, edit: dict) -> "dict | None":
     elif op == "region.remove":
         a["regions"] = [r for r in regions if r.get("_id") != edit["id"]]
     return a
+
+
+# ── text.add NAO desenha por cima da arte tracada da MESMA palavra ───────────────────────
+# Medido no poster de 1728px (2026-09-28): 'design' e 'suico' foram convertidos em ARTE pelo
+# `_select_text` (o portao mediu RETRACADO=0.7936 > COM=0.7467 e a conversao esta certa), e
+# depois o VLM os re-adicionou como texto. Os dois foram desenhados: 5 regioes tracadas
+# `source=reader` cor #981819 debaixo de cada text.add, resultando em "dlesign" empastelado —
+# o elemento mais visivel do poster, e o Score subiu 0.8456 -> 0.8457 achando isso bom.
+#
+# ⚠️ A causa nao e "esqueceram de remover": e que o `box_local` do text.add mede TINTA DENTRO
+# DA CAIXA, e a arte tracada ja tinha posto tinta ali. A metrica creditou ao texto uma tinta
+# que nao era dele — a mesma familia do "a regua vinha do reu" do §PASSO 1.
+#
+# O conserto nao decide qual representacao e melhor: ele torna as duas MUTUAMENTE EXCLUSIVAS
+# e deixa o portao por-edit que ja existe medir o resultado. Se apagar a arte e escrever o
+# texto for pior, o edit inteiro e revertido, como qualquer outro.
+# Criterio identico ao `cover_integrator._drop_traced_type`, pelo mesmo motivo medido la:
+# por CONTENCAO nao funciona (a letra tracada e mais larga que a caixa reportada), por
+# SOBREPOSICAO >= 55% da area da peca, funciona.
+_TRACED_UNDER_COV = 0.55
+_TRACED_UNDER_MAX_AREA = 12.0   # cm2 — peca grande sob um texto e arte, nao letra
+
+
+def _drop_traced_under(a: dict, box: dict) -> int:
+    """Remove as pecas TRACADAS PELO LEITOR que ficariam sob `box`. Devolve quantas saíram."""
+    regs = a.get("regions") or []
+    if not regs or not box:
+        return 0
+    keep, fora = [], 0
+    for r in regs:
+        rb = r.get("bbox_cm") or {}
+        area = rb.get("w", 0) * rb.get("h", 0)
+        # so arte do LEITOR: bloco de grade e regiao do VLM tem outro dono
+        if r.get("source") != "reader" or area <= 0 or area > _TRACED_UNDER_MAX_AREA:
+            keep.append(r)
+            continue
+        ov = (max(0.0, min(rb["x"] + rb["w"], box["x"] + box["w"]) - max(rb["x"], box["x"]))
+              * max(0.0, min(rb["y"] + rb["h"], box["y"] + box["h"]) - max(rb["y"], box["y"])))
+        if ov / area >= _TRACED_UNDER_COV:
+            fora += 1
+        else:
+            keep.append(r)
+    if fora:
+        a["regions"] = keep
+    return fora
 
 
 def _remove_text(a: dict, edit: dict) -> "dict | None":

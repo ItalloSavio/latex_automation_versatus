@@ -531,6 +531,65 @@ A causa é que aqueles nomes têm **7–10px** de linha — inferir parágrafo d
 Com o piso: **zero correções nas 9** (verificado na saída real do estágio 1, idêntica ao
 controle), 3 no pôster em alta. Auditoria 9/9 delta zero.
 
+## ✅ A POLARIDADE DA TINTA — a causa dos DOIS `ATENCAO` do portão (2026-09-28)
+
+`_measure_ink` só procurava pixel **escuro** (`gray_roi < 100`). Num título **claro sobre fundo
+escuro** os "escuros" são o FUNDO, então a caixa abraça a janela inteira em vez de apertar no
+glifo — e o corpo sai calculado de uma altura que não é a da letra.
+
+**Medido nas 9:** 19 de 73 elementos estão sobre fundo escuro.
+
+| elemento | caixa medida | tinta real | em |
+|---|---|---|---|
+| capa8 `'the velvet'` | 55px | **38px** | 79,6pt → **54,0pt** |
+| capa8 `'underground'` | 66px | 46px | 93,8 → 63,9pt |
+| capa1 `'TéulodoLivro'` | 84px | 62px | — |
+
+⚠️ **Os dois `ATENCAO` do portão eram isto, e os dois estavam catalogados como outra coisa.**
+O `_select_text` apagava o título da capa8 (`SEM=0.9311 > COM=0.9280`) porque desenhá-lo 48%
+grande é pior que não desenhar, e o retraço depois o quebrava em polígonos — o que a fila
+chamava de "teto do traçado". E o título da capa1 "sai maior, com entrelinha larga", que estava
+como A11. **Um medidor cego a polaridade produzia dois sintomas com nomes diferentes.**
+
+O `snap_text_adds` já era DIREÇÃO-CIENTE desde 03/08; o medidor do OCR nunca foi.
+A peça entra **ao lado** do caminho velho: fundo claro segue no limiar absoluto, verbatim.
+
+**Medido em capa8** (cache do VLM, zero API): Score **0.9380 → 0.9511 (PASS)**, veredito
+**`ATENCAO` → `OK`** (o portão vai a **8/9**), `'the velvet'` MANTIDO pelo portão a 54,0pt e
+desenhado como tipo limpo, e `'wednesday thru sunday'` recupera o `/ 11 pm & 1 am` que faltava.
+⚠️ capa1 também muda (9 elementos) e **não foi rodada** — o entregável dela é cirurgia manual.
+⚠️ Um defeito PRÉ-EXISTENTE veio junto: um `text.string` errado do cache do VLM, antes rejeitado,
+passou a entrar (a linha de y=9.29 lê `'213 park avenue south'` onde devia ler `"upstairs at
+max's kansas city"`).
+
+### Mais três consertos da mesma rodada
+
+**`text.add` não desenha sobre a arte traçada da mesma palavra** (`_drop_traced_under`). No
+pôster, `'design'` e `'suíço'` viraram ARTE pelo `_select_text` e o VLM os re-adicionou como
+texto: os dois eram desenhados. A causa não era esquecimento — **o `box_local` mede tinta DENTRO
+da caixa, e a arte traçada já tinha posto tinta ali**, então a métrica creditou ao texto uma
+tinta alheia. Agora são mutuamente exclusivos e o portão mede. Pôster 0.8453→**0.8472** (os dois
+`text.add` revertidos pela rede de segurança, e quem acusou foi o termo de TEXTO 0.7991→0.7228);
+capa6 0.9524→**0.9541**; capa8 +0.0071 com as legendas no corpo certo.
+
+**Réguas mascaradas na ENTRADA do OCR.** A linha vertical da grade vira letra: `'Jadipiscing'`,
+`'Iod tempor'`, `'kconsequat'`, `'ITIPOGRAFIA'`. Medido: régua de 2px em x=118-119 com 100% de
+cobertura, e a caixa começa em x=117 — a régua fica DENTRO. Conserta 3 de 8 no pôster, as 9 saem
+IDÊNTICAS. ⚠️ **Quatro hipóteses morreram medindo**, e a última corrige uma atribuição minha: o
+dano que eu culpei na máscara era **trocar `readtext(caminho)` por `readtext(array)`** — com a
+máscara inerte, isso sozinho derrubava a capa6 de 4 para 1 elemento. `_RULE_MIN_DPI = 150` veio
+de regressão: a 56–89 dpi a haste de uma letra também tem 1–2px.
+
+**Aterramento recusa edit no-op.** 48 renders gastos nos logs da semana com `text.weight`
+propondo "bold" para quem já é bold. Recusa na camada barata. capa12 termina em 0.9588 idêntico.
+
+⚠️ **`[PASS]` de 0.95 NÃO é condição de parada — a fila estava desatualizada.** Conferido no
+código: o estágio 13 não consulta `score_pass` (removido em 14/09) e o laço só para quando
+nenhuma proposta é aceita. Prova ao vivo: capa8 fechou em 0.9511 (PASS) e rodou o VLM.
+⚠️ **Gradiente (§B1) segue BLOQUEADO por falta de caso de teste** — a imagem do teste frio de
+14/09 não está mais no repositório, e construir primitivo que não dá para medir contraria o
+portão.
+
 ## O PORTÃO DE ACEITE DA RÉPLICA (`automation/tools/accept.py`, 2026-09-11)
 
 O Score diz **quanto a réplica se parece** com o original. Ele não diz **se ela está quebrada**,

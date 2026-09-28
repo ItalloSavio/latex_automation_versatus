@@ -60,6 +60,26 @@ _DESCENDER_RATIO  = 0.21    # baseline → descender bottom, as a fraction of em
 # Helvetica regular stems land near 0.10, bold near 0.15+; 0.125 separates them.
 _BOLD_STROKE_RATIO = 0.125
 _INK_LUMA_THRESH   = 100    # pixels darker than this (0–255 luma) count as ink
+# ── TINTA CLARA SOBRE FUNDO ESCURO ───────────────────────────────────────────────────────
+# O medidor so procurava pixel ESCURO. Num titulo claro sobre fundo escuro os "escuros" sao o
+# FUNDO, entao a caixa abraca a janela inteira em vez de apertar no glifo, e o corpo sai
+# calculado a partir de uma altura que nao e a da letra.
+#
+# Medido nas 9 (2026-09-28): 19 de 73 elementos estao sobre fundo escuro, e a diferenca e
+# grande — capa8 'the velvet' 55px medidos contra 38px reais (em de 79.6pt contra 54.0pt,
+# 48% grande demais), 'underground' 66 -> 46, capa19 'the' 100 -> 75, capa1 'TéulodoLivro'
+# 84 -> 62.
+#
+# ⚠️ Isto e a CAUSA dos dois ATENCAO do portao de aceite, e os dois estavam catalogados como
+# outra coisa: o `_select_text` apaga o titulo da capa8 (`SEM=0.9311 > COM=0.9280`) porque
+# desenha-lo 48% grande e pior que nao desenhar — e o retraco depois o quebra em poligonos,
+# o que a fila chamava de "teto do tracado"; e o titulo da capa1 "sai maior, com entrelinha
+# larga", catalogado como A11.
+#
+# O `snap_text_adds` ja era DIRECAO-CIENTE desde 03/08; o medidor do OCR nunca foi.
+# A peca entra AO LADO do caminho velho: fundo claro segue no limiar absoluto, verbatim.
+_INK_DARK_BG      = 110    # mediana da BORDA abaixo disto = fundo escuro
+_INK_REL_DELTA    = 55     # distancia ao fundo para o pixel contar como tinta (mesmo 55 do snap)
 
 # -- A caixa nao pode ser mais alta que o PASSO do proprio paragrafo -----------------------
 # O quad do EasyOCR e frouxo na vertical: numa coluna de texto corrido ele frequentemente
@@ -492,7 +512,7 @@ def _measure_ink(gray_roi: "np.ndarray") -> "tuple[int,int,int,int,float] | None
 
     if gray_roi.size == 0:
         return None
-    mask = gray_roi < _INK_LUMA_THRESH
+    mask = _ink_mask(gray_roi, np)
     rows = np.where(mask.any(axis=1))[0]
     cols = np.where(mask.any(axis=0))[0]
     if rows.size == 0 or cols.size == 0:
@@ -504,6 +524,19 @@ def _measure_ink(gray_roi: "np.ndarray") -> "tuple[int,int,int,int,float] | None
     runs  = _dark_run_lengths(mask[y0:y1, x0:x1])
     stroke_ratio = (float(np.median(runs)) / ink_h) if runs else 0.0
     return x0, y0, x1, y1, stroke_ratio
+
+
+def _ink_mask(gray_roi, np):
+    """A mascara de TINTA, ciente da polaridade. Ver o bloco de constantes."""
+    if gray_roi.shape[0] < 2 or gray_roi.shape[1] < 2:
+        return gray_roi < _INK_LUMA_THRESH
+    borda = np.concatenate([gray_roi[0, :], gray_roi[-1, :],
+                            gray_roi[:, 0], gray_roi[:, -1]])
+    if float(np.median(borda)) < _INK_DARK_BG:          # fundo ESCURO -> tinta CLARA
+        m = gray_roi > float(np.median(borda)) + _INK_REL_DELTA
+        if m.any():
+            return m
+    return gray_roi < _INK_LUMA_THRESH                  # caminho velho, verbatim
 
 
 def _dark_run_lengths(mask: "np.ndarray") -> "list[int]":

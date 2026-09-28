@@ -218,125 +218,6 @@ _BG_SAMPLES   = 16     # points probed across a line to find where the ground ch
 _BG_SPLIT_MIN = 80.0   # luminance step that counts as a real edge, not a shade
 
 
-def _ensure_contrast(analysis: dict, image_path=None) -> None:
-    """Recolour a line only when its own colour would make it unreadable where it now sits.
-
-    Our strings are longer than the poster's, so a slot that sat entirely on yellow can end
-    up crossing the black shape — capa19's title inherits #2B2A25 from "theshining" and half
-    of it disappears. The colour is judged against the WORST background the line touches, not
-    the average: a mid-grey can beat the mean and still vanish at both ends.
-
-    A line that still reads is left exactly as measured. This is a readability floor, not a
-    restyling — the poster's palette is what the user asked to keep.
-    """
-    def lum_hex(h):
-        h = (h or "").lstrip("#")
-        try:
-            r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
-        except Exception:
-            return None
-        return 0.299 * r + 0.587 * g + 0.114 * b
-
-    # The background is taken from the REGIONS, not from the source image: the image still
-    # carries the poster's own ink, so sampling it reads the old type as "background" and
-    # flips colours that were perfectly readable. The regions are the paint layer, which is
-    # what will actually sit behind our text.
-    regions = [r for r in (analysis.get("regions") or []) if r.get("bbox_cm")]
-    page_bg = None
-    for c in sorted((analysis.get("colors") or []),
-                    key=lambda c: -(c.get("coverage") or 0)):
-        page_bg = lum_hex(c.get("hex"))
-        if page_bg is not None:
-            break
-    if page_bg is None:
-        page_bg = 255.0
-
-    palette = []
-    for c in (analysis.get("colors") or []):
-        L = lum_hex(c.get("hex"))
-        if L is not None:
-            palette.append((c["hex"], L))
-    palette += [("#FFFFFF", 255.0), ("#000000", 0.0)]
-
-    def bg_at(px, py):
-        top = page_bg
-        for r in regions:                       # later regions paint over earlier ones
-            rb = r["bbox_cm"]
-            if (rb["x"] <= px <= rb["x"] + rb["w"]
-                    and rb["y"] <= py <= rb["y"] + rb["h"]):
-                L = lum_hex(r.get("color_hex"))
-                if L is not None:
-                    top = L
-        return top
-
-    def pick(lo, hi):
-        return max(palette, key=lambda p: min(abs(p[1] - lo), abs(p[1] - hi)))[0]
-
-    out = []
-    for el in (analysis.get("text_elements") or []):
-        b = el.get("bbox_cm") or {}
-        if not b.get("w"):
-            out.append(el)
-            continue
-        py = b["y"] + b.get("h", 0.2) * 0.5
-        seen = [bg_at(b["x"] + b["w"] * (i + 0.5) / _BG_SAMPLES, py)
-                for i in range(_BG_SAMPLES)]
-
-        # A line that crosses a hard edge cannot be served by ONE colour: the best single
-        # choice for black-and-yellow is a mid olive that reads poorly on both. Split it
-        # where the ground actually changes and let each part contrast with its own.
-        jump, at = 0.0, None
-        for i in range(1, len(seen)):
-            d = abs(seen[i] - seen[i - 1])
-            if d > jump:
-                jump, at = d, i
-        # SPLITTING A LINE IN TWO IS OFF, and the reason is measurement, not design.
-        # Positioning the second half requires knowing the exact width of the first, and the
-        # only width we have is ~0.52em per character — an average that is several percent
-        # wrong on narrow glyphs. At caption sizes that error hides in a word space; on
-        # capa19's 76pt title it opened a visible gulf inside the word ("Título    do").
-        # _prefer_legible_wrap now handles the underlying problem — type on mixed ground —
-        # by moving the type to calm ground instead, which needs no width estimate at all.
-        # Re-enable this only with real font metrics measured in LuaLaTeX.
-        if False and jump >= _BG_SPLIT_MIN and at is not None:
-            frac = at / len(seen)
-            n = max(1, min(len(el["text"]) - 1, round(frac * len(el["text"]))))
-            # Prefer to change colour at a SPACE. The per-character width estimate is a few
-            # percent off on narrow glyphs, so a mid-word boundary leaves a visible sliver
-            # inside the word; the same error inside a word gap reads as ordinary spacing.
-            near = [i for i, c in enumerate(el["text"]) if c == " "
-                    and abs(i - n) <= max(2, 0.25 * len(el["text"]))]
-            if near:
-                n = min(near, key=lambda i: abs(i - n))
-            # Position the halves by CHARACTER count, not by the sampling fraction: the two
-            # disagree by a fraction of a glyph and the parts drift apart, leaving a visible
-            # gap mid-word. Splitting the box in the same proportion the text was split makes
-            # them butt exactly.
-            cut = _text_w_cm(el["text"][:n], el.get("font_size_pt") or 0.0, el)
-            left, right = seen[:at], seen[at:]
-            for text, x, w, side in (
-                (el["text"][:n], b["x"], cut, left),
-                (el["text"][n:], b["x"] + cut, b["w"] - cut, right),
-            ):
-                if not text:
-                    continue
-                part = dict(el)
-                part["text"] = text
-                part["bbox_cm"] = {**b, "x": round(x, 3), "w": round(w, 3)}
-                cl = lum_hex(part.get("color_hex"))
-                if cl is None or min(abs(cl - min(side)), abs(cl - max(side))) < _MIN_CONTRAST:
-                    part["color_hex"] = pick(min(side), max(side))
-                out.append(part)
-            continue
-
-        lo, hi = min(seen), max(seen)
-        cur_l = lum_hex(el.get("color_hex"))
-        if cur_l is not None and min(abs(cur_l - lo), abs(cur_l - hi)) < _MIN_CONTRAST:
-            el["color_hex"] = pick(lo, hi)
-        out.append(el)
-    analysis["text_elements"] = out
-
-
 _LOGO_TEXT_GAP_CM = 0.3     # breathing room demanded between the mark and any type
 
 
@@ -550,18 +431,6 @@ def _boxes_hit(a: dict, b: dict) -> bool:
 
 _TEX_SPECIAL = {"&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#",
                 "_": r"\_", "{": r"\{", "}": r"\}"}
-
-
-def tex_escape(text: str) -> str:
-    r"""Make a metadata string safe inside a TikZ node.
-
-    Book titles are user data and will eventually contain an ampersand or a percent. Macros
-    are left alone on purpose: \today is a legitimate metadata value, so a leading backslash
-    is treated as intent rather than escaped into visible text.
-    """
-    if "\\" in text:
-        return text
-    return "".join(_TEX_SPECIAL.get(c, c) for c in text)
 
 
 # ─── Layout penalty ───────────────────────────────────────────────────────────
@@ -1044,12 +913,6 @@ def _calm_runs(calm, H, rows=120):
     return sorted(runs, key=lambda t: -t[2])
 
 
-def _fit_size(text: str, column_cm: float, el_proto: dict, lines: int = 1) -> float:
-    """Largest point size at which `text` fills the column in `lines` lines."""
-    per_line = max(1, -(-len(text) // lines))
-    return column_cm * _PT_PER_CM / (per_line * _CHAR_EM * (el_proto.get("hscale") or _HSCALE))
-
-
 def _ink_for(analysis: dict, x, y, w, h) -> str:
     """The palette colour with the most contrast against the ground under this box."""
     def lum_hex(hx):
@@ -1129,50 +992,6 @@ def _register_colour(analysis: dict, hex_: str) -> str:
     if not any((c.get("hex") or "").upper() == h for c in cols):
         cols.append({"hex": h, "coverage": 0.0, "source": "compose"})
     return h
-
-
-def _panel_colour(analysis: dict, panel: dict) -> str:
-    """Choose the panel's colour from the design's own significant colours.
-
-    Contrast alone is not enough: on capa19 the most contrasting entry was an olive that
-    covers a fraction of a percent of the poster — a colour nobody would say the design is
-    made of. Restricting the choice to colours with real coverage keeps the panel looking
-    like part of the same object, and among those we still take the one that separates best
-    from the artwork it sits on.
-    """
-    def lum_hex(hx):
-        hx = (hx or "").lstrip("#")
-        try:
-            r, g, b = (int(hx[i:i + 2], 16) for i in (0, 2, 4))
-        except Exception:
-            return None
-        return 0.299 * r + 0.587 * g + 0.114 * b
-
-    cands = [(c["hex"], lum_hex(c.get("hex")))
-             for c in (analysis.get("colors") or [])
-             if (c.get("coverage") or 0) >= _PANEL_MIN_COVERAGE and lum_hex(c.get("hex")) is not None]
-    if not cands:
-        return _ink_for(analysis, panel["x"], panel["y"], panel["w"], panel["h"])
-
-    # what the panel covers, by area
-    covered = []
-    for r in (analysis.get("regions") or []):
-        rb = r.get("bbox_cm") or {}
-        if not rb:
-            continue
-        ov = (max(0.0, min(rb["x"] + rb["w"], panel["x"] + panel["w"]) - max(rb["x"], panel["x"]))
-              * max(0.0, min(rb["y"] + rb["h"], panel["y"] + panel["h"]) - max(rb["y"], panel["y"])))
-        L = lum_hex(r.get("color_hex"))
-        if ov > 0 and L is not None:
-            covered.append((ov, L))
-    if not covered:
-        covered = [(1.0, lum_hex(cands[0][0]) or 128.0)]
-    total = sum(o for o, _ in covered) or 1.0
-    mean_under = sum(o * L for o, L in covered) / total
-
-    # separate from the art, and leave room for type to contrast against the panel itself
-    return max(cands, key=lambda c: abs(c[1] - mean_under) + min(c[1], 255 - c[1]) * 0.35)[0]
-
 
 
 def compose(analysis: dict, meta: dict, render_path, brand: str = "versatus") -> dict:

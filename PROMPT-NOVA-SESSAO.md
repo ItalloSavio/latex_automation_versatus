@@ -15,8 +15,8 @@ Projeto: Swiss Cover Replicator. Você vai continuar um trabalho em andamento.
 ANTES DE QUALQUER COISA, leia nesta ordem:
   1. handoff_state.md (na sua memória)  — estado atual, restrições, o que está decidido
   2. CLAUDE.md, seção "RESTRIÇÕES DO PROJETO" e "Protocolo de trabalho"
-  3. pipeline-ideal.md  — o desenho acordado e ainda não construído
-  4. pos-mvp.md         — a fila, com a evidência medida de cada item
+  3. pos-mvp.md         — a fila, com a evidência medida de cada item e o PLANO EM FASES
+  4. pipeline-ideal.md  — o desenho original (a maior parte já construída; histórico)
 
 Depois de ler, me diga em 5 linhas o que você entendeu do estado atual e qual você
 acha que é o próximo passo. NÃO comece a trabalhar até eu confirmar.
@@ -48,8 +48,11 @@ REGRAS QUE NÃO SE NEGOCIAM NESTE PROJETO:
    Parar porque não há mais o que propor é resposta válida. Parar porque um número cruzou
    um limiar arbitrário, não. Se é teto, meça o teto e registre.
 
-7. ATUALIZE O handoff_state.md ENQUANTO TRABALHA, não no fim.
-   Se o contexto reiniciar no meio, o próximo tem que saber onde a mão parou.
+7. DOCUMENTAÇÃO SEMPRE ATUALIZADA — a cada bloco de trabalho, não no fim.
+   Fechou um item? Na MESMA rodada atualize: pos-mvp.md (estado do item), o handoff_state.md,
+   e o número/veredito no CLAUDE.md. Este arquivo aqui também envelhece — confira-o contra o
+   código ao fim de cada fase. Antes de afirmar que algo está "aberto", dê grep no código:
+   este arquivo já afirmou que o [PASS] de 0.95 estava aberto duas semanas depois de fechado.
 
 8. REPRODUZIR É PARTE DE TERMINAR.
    Depois de mexer em qualquer coisa que o cache do VLM atravessa, refaça UMA capa pelo cache
@@ -76,31 +79,46 @@ Quando terminar qualquer bloco de trabalho, me diga:
 | 3 · backup | uma rodada apagou os `analysis.json` das 9; recuperados por sorte |
 | 4 · olhar antes de promover | as 9 foram promovidas por número; a folha revelou 2 defeitos, 1 introduzido na mesma sessão |
 | 5 · isolar variável | A/B do `half_ellipse` acusou −0.0631 com a causa em outro lugar |
-| 6 · determinismo | o `[PASS]` de 0.95 **bloqueia o VLM** em 3 das 9 capas — inclusive numa com texto borrado |
-| 7 · atualizar o handoff | o `handoff_state.md` ficou **um mês vencido**, descrevendo 20 capas e um plano concluído |
+| 6 · determinismo | o `[PASS]` de 0.95 **bloqueava o VLM** em 3 das 9 capas — inclusive numa com texto borrado (corrigido em 14/09: o estágio 13 não consulta mais o limiar) |
+| 7 · docs sempre atualizados | o `handoff_state.md` ficou **um mês vencido**; e em 30/09 este próprio arquivo afirmava que o `[PASS]` de 0.95 estava aberto (fechado desde 14/09) e tinha a lista de próximos passos **inteira** já resolvida |
 | 8 · reproduzir é terminar | o cache do VLM **nunca reproduziu as capas que gerou** — duas causas, meio dia perdido atribuindo a regressão à mudança errada |
 
 ## Se a sessão for retomar o trabalho técnico
 
-**A fila de 14/09 foi CUMPRIDA** (16–18/09) — não a re-execute:
+### Onde o projeto está (30/09)
 
-| passo | estado |
+**MVP: 9 capas · média 0.9034 · 4 em ≥ 0.95 · portão 8/9 OK · auditoria 9/9.** O único
+`ATENCAO` é o título da capa1 (mesma causa de polaridade que já foi corrigida na capa8; a capa1
+tem cirurgia manual e pede tratamento próprio).
+
+**O motor de replicação atingiu platô NESTE corpus — medido:** 8 das 9 capas estão no teto da
+imagem-fonte (56–89 dpi; 50–92% das linhas abaixo do piso de 16px), os últimos ganhos vieram
+todos de BUGS e não de capacidade nova, e o que resta do motor está bloqueado ou rende pouco.
+⚠️ **As capas NÃO podem ser reexportadas** ("foram entregues assim") — o teto é permanente para
+estas 9. Não proponha de novo.
+
+**O produto NÃO atingiu platô.** O trabalho agora é robustez + produto, em três fases acordadas
+com o usuário em 30/09:
+
+| fase | o quê | estado |
+|---|---|---|
+| **1** | fechar a cadeia do produto: capa DENTRO do livro · `--dpi` automático · quantizador em blocos · progresso visível no `cover_pipeline` | ▶️ em execução |
+| **2** | limpeza e documentação oficial (9 markdowns na raiz → conjunto claro) | ⏸️ **aguarda orientação do usuário** |
+| **3** | sistema amigável: **CLI guiada** — o usuário conhece CLI mas não sabe que comando rodar | ⏸️ **aguarda orientação do usuário** |
+
+⚠️ **Ao terminar a Fase 1, REPORTE e ESPERE.** O usuário quer orientar as fases 2 e 3.
+
+### Já feito — não refaça
+
+| item | quando |
 |---|---|
-| `judge_bench.py` reescrito, 3 pares isolados | ✅ 16/09 (empate conta como `CEGA`) |
-| Juiz enxerga conteúdo AUSENTE (§4.3) | ✅ 16/09 — quadro congelado em `automation/bench/refs/` |
-| Palavras coladas em tipo de display | ✅ 17/09 — `accept.word_collisions` |
-| Roteamento de métrica no laço (§4.1) | ✅ 17/09 — `replicate_cover._correct()` |
-| `max_passes` = 3 (§4.5) | ✅ 17/09 |
-| Passe de refinamento pós-build (§4.7) | ✅ 17/09 — `refine_replica.py`, opt-in |
-| Cache do VLM reproduzível (§4.6) | ✅ 18/09 — proposta crua + âncora de conteúdo |
+| juiz enxerga AUSÊNCIA (quadro congelado) · palavras coladas em display · laço roteado · `max_passes`=3 · passe de refinamento · cache do VLM fiel | 16–18/09 |
+| teto de resolução medido + estágio de aviso (`_report_resolution`) · regra de parágrafo no OCR | 23–25/09 |
+| `text.add` não desenha sobre arte traçada · réguas mascaradas no OCR (parcial) · aterramento recusa no-op · **polaridade da tinta** (capa8 `ATENCAO`→`OK`) · 249 linhas mortas removidas | 28/09 |
+| `[PASS]` de 0.95 como parada — **não existe mais** (removido em 14/09; o laço só para quando nada é aceito) | conferido 28/09 |
 
-⚠️ O `[PASS]` de 0.95 **continua aberto** (§4.2) — era o item 1 da fila antiga e não foi feito.
+### Bloqueado, com motivo
 
-**Os próximos, na ordem em que eu atacaria (evidência em `pos-mvp.md`):**
-
-1. **Palavras coladas em tipo MIÚDO** — 4 ocorrências medidas, abaixo do piso de 16px do
-   `word_collisions`. É o ponto cego do julgamento caixa a caixa: janelas vizinhas se sobrepõem,
-   a linha melhora na própria caixa e encosta na de baixo.
-2. **capa8: `the velvet` traçado** — teto conhecido do traçado, é um dos dois `ATENCAO` do portão.
-3. **Gradiente no vocabulário** (§B1) — bloqueia qualquer pôster com fundo em degradê.
-4. **Aterramento recusar edit que não muda nada** — uma linha, economiza render por proposta.
+- **Gradiente (§B1)** — sem caso de teste; a imagem do teste frio de 14/09 sumiu do repositório.
+- **capa1** — a correção de polaridade muda 9 elementos dela, mas o entregável é cirurgia manual.
+- **4 letras fantasma no pôster** — a régua da grade encosta no glifo; a sonda não separa.

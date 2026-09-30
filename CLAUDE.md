@@ -91,6 +91,7 @@ Regra: fechar item ABERTO de causa conhecida e correção barata ANTES de atacar
 | F1 | Fase 7 — integração capa + conteúdo do metadata | todas | ✅ FEITO (09/09) — `cover_integrator.py`. **129 slots** recebem conteúdo Versatus nas 20 capas, 7 mantêm o texto original, 3 capas usam bbox de logo MEDIDA e 17 a zona mais vazia. Zero vazamento de texto nas 20 |
 | F2 | `\VSLogoEscolhida` indefinido — os 4 layouts em `covers/` não compilavam | — | ✅ FECHADO (09/09) — cada arquivo se declarava como O pacote `styles/versatus-covers` E definia `\VSBookCover`, então eram 4 cópias rivais das quais só uma podia carregar. Viraram `\VSCoverLayoutA..D`, carregados pelo pacote; `\VSCoverOption` aceita `LayoutA..LayoutD`. A/B do pacote **intactos**. Provado: livro compila (exit 0) e os 4 layouts rendem 4 páginas |
 | F3 | `audit.py` e `judge_bench.py` NÃO EXISTIAM | — | ✅ FECHADO (16/09) — `audit.py` reconstruído em 09/09 (eu havia "corrigido" o caminho deles aqui numa sessão anterior, mas os arquivos viviam no scratchpad e sumiram: a doc apontava para um fantasma). **`judge_bench.py` reescrito em 16/09** com 3 pares ISOLADOS congelados em `automation/bench/cases/` — ⚠️ o primeiro par que montei comparava duas RODADAS do pipeline (confundido); o par tem que diferir em UM elemento. Empate agora conta como **`CEGA`**, não como erro: somar "não distingue" a "inverteu" faz uma métrica muda parecer invertida, e as duas coisas pedem respostas diferentes |
+| T7 | título claro sobre fundo escuro sai grande demais e é APAGADO | 8, 1 | ✅ **FECHADO (28/09) na capa8, pendente na capa1** — `_measure_ink` só via pixel escuro e media o FUNDO; 19 de 73 elementos afetados. capa8 0.9380→**0.9511**, `ATENCAO`→**`OK`**. A capa1 muda 9 elementos e não foi rodada (cirurgia manual). Era a causa dos DOIS `ATENCAO` do portão, catalogados como outra coisa |
 | F4 | o juiz não via conteúdo AUSENTE | 19, 8 | ✅ **FECHADO (16/09) — era erro de REFERENCIAL, não de fórmula.** `accept.missing_content()` + quadro congelado (`make_reference.py`). A capa19 entregue pela metade vai de `OK` para `REVISAR`; o portão nas 9 vai de 8/9 para 7/9 (a capa1 cai para `ATENCAO` por defeito REAL). Ver a seção do portão de aceite |
 
 ## Direção estratégica (o reframe — LER ISTO)
@@ -137,9 +138,13 @@ FASE 6  ✅ FEITO (branch `new_covers`, 2026-08-16/18) — a REESCRITA DO LEITOR
 o mosaico da capa18 e a malha da capa16 são alta-frequência e renderizam bem. O teto era
 o `triangle` não conseguir carregar a própria orientação. Ver "## FASE 6".
 
-**Ranking do MVP (2026-09-18):** capa4 **0.9702** | capa12 **0.9588** | capa6 0.9524 |
-capa8 0.9380 | capa13 **0.9316** | capa16 0.9192 | capa19 0.9040 | capa1 0.8181 (manual) |
-capa2 0.7234. **Média 0.9017, SETE em ≥0.90, auditoria 9/9.**
+**Ranking do MVP (2026-09-28):** capa4 **0.9702** | capa12 **0.9588** | capa6 **0.9541** |
+capa8 **0.9511** | capa13 **0.9316** | capa16 0.9192 | capa19 0.9040 | capa1 0.8181 (manual) |
+capa2 0.7234. **Média 0.9034, QUATRO em ≥0.95, SETE em ≥0.90, auditoria 9/9, portão 8/9.**
+
+**Estado do projeto (30/09):** o motor atingiu platô NESTE corpus — medido: 8 das 9 no teto de
+resolução da fonte, e as capas **não podem ser reexportadas** (decisão do usuário). O trabalho
+agora é de produto, em três fases (ver `pos-mvp.md`, "Plano em fases").
 
 ⚠️ O ranking das 20 (média 0.857, de 02/09) está VENCIDO e foi removido daqui: onze daquelas
 capas saíram do escopo em 10–11/09 e os números das nove mudaram desde então. As outras onze
@@ -688,9 +693,10 @@ Tipo miúdo fica como teto de resolução (§D2 do `pos-mvp.md`), não como fals
 
 **Validado nos dois sentidos, que é o que importa num juiz:** diz `REVISAR` na capa1
 AUTOMÁTICA que rejeitamos (pegando o `"6"` a 411pt e o título desenhado como manchas) e `OK`
-na versão manual que entregamos. Hoje: **7/9 OK**, e os dois `ATENCAO` são reais — os 5
-polígonos do `'the velvet'` da capa8 (o teto conhecido do traçado) e o título da capa1 fora de
-escala, que só passou a aparecer com a verificação de ausência de 16/09.
+na versão manual que entregamos. **Hoje (28/09): 8/9 OK.** O `ATENCAO` da capa8 — os polígonos
+do `'the velvet'`, que eu chamava de "teto do traçado" — **fechou**: a causa era o medidor de tinta
+cego a polaridade (ver "A POLARIDADE DA TINTA"). O que resta é o título da capa1, **mesma causa**,
+pendente porque o entregável dela é cirurgia manual.
 
 ⚠️ O limiar de 25% da altura foi escolhido com os dois lados na mão: o `"6"` da capa1 ocupa
 46%, e o título mais generoso do conjunto (135pt na capa19) ocupa 16%.
@@ -1338,7 +1344,8 @@ vs foto). Mas o SSIM alto NÃO garante fidelidade — cruzar sempre com o conten
 
 ## Estado do MVP — as 9 capas (2026-09-14, portão revisto em 16/09)
 
-Rebuild completo, auditoria **9/9 reproduzem**, portão de aceite **7/9 OK**. Média **0.9017** (18/09: capa4/12/13 promovidas do rebuild com o laço roteado; as outras seis seguem como entregues).
+Auditoria **9/9 reproduzem**, portão de aceite **8/9 OK**, média **0.9034** (28/09: capa6 e capa8
+promovidas após a correção de polaridade; 18/09: capa4/12/13 promovidas do laço roteado).
 
 ⚠️ **O portão era 8/9 e virou 7/9 em 16/09 sem nenhuma capa piorar** — o que mudou foi o JUIZ,
 que passou a enxergar ausência. A capa1 caiu para `ATENCAO` por um defeito que sempre esteve lá

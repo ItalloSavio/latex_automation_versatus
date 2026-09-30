@@ -5,8 +5,11 @@
 > ele saiu de uma rodada real — e onde uma hipótese morreu na medição, isso está registrado,
 > porque saber o que **não** fazer vale tanto quanto a fila.
 >
-> Estado na entrega: 9 capas, média **0.9003**, auditoria **9/9**, portão de aceite **8/9 OK**,
-> penalidade de layout **0.0006**, e **8 das 9** saindo de um comando a partir do PNG.
+> Estado na entrega (14/09): 9 capas, média **0.9003**, auditoria **9/9**, portão **8/9 OK**.
+>
+> **Estado em 30/09: média 0.9034 · QUATRO em ≥ 0.95 · portão 8/9 OK · auditoria 9/9.**
+> O motor atingiu platô **neste corpus** (8 das 9 no teto de resolução da fonte, e as capas NÃO
+> podem ser reexportadas). O trabalho agora é robustez + produto — ver **"Plano em fases"** no fim.
 
 ---
 
@@ -54,6 +57,10 @@ troca de pesos (`ssim 0.75 / structural 0.25`) ordenava melhor e **apagou texto 
 capas**. Qualquer juiz novo precisa de **dois termos**: algo que ordene como o olho
 (`ssim`/`structural`) **e** algo que puna conteúdo AUSENTE. Só o primeiro degenera.
 
+> **Estado em 28/09:** o `ATENCAO` da capa8 FECHOU — a causa não era o juiz nem o traçado, era o
+> `_measure_ink` cego a polaridade (título claro sobre fundo escuro medido pelo fundo, 48% grande
+> demais, e por isso apagado pelo `_select_text`). O `ATENCAO` da capa1 é a mesma causa.
+>
 > **Estado em 17/09:** A2 ✅ feito (16/09). A1 **parcial, por decisão**: o `accept.py` passou a ver
 > conteúdo AUSENTE (16/09, contra a referência congelada) e palavras COLADAS em tipo de display
 > (17/09). O Score **não** foi trocado — repesar deu 2/3 no banco e três casos não calibram peso.
@@ -124,6 +131,13 @@ Mesmo assim piorou o entregável (0.9386 → 0.9279), por **três causas downstr
 **Motivação:** o bloco de tipo vazio é o que o olho vê primeiro, e este é o único caminho
 barato para preenchê-lo. Resolvido o A1 e a re-união de fragmentos, ele passa a render.
 
+> **Reenquadrado em 25–28/09:** o que o upscale tentava comprar, a **resolução real** entrega —
+> capa2 a 2,93× leu 18 elementos contra 12, com confiança 0,91 contra 0,70 (§D2). E das três
+> causas downstream, uma caiu: a regra de parágrafo + a correção de polaridade fazem o
+> `_measure_ink` parar de pegar mais que o glifo. Restam os fragmentos e o portão de texto.
+> ⚠️ Como as 9 NÃO podem ser reexportadas, este item volta a ser o único caminho de recall
+> nelas — mas o ganho esperado é pequeno, porque o limite é o pixel, não o detector.
+
 ⚠️ **Escala fixa 3× lê melhor que a fórmula adaptativa** que escrevi (ela escolhia 2× na capa8,
 e foi isso que fragmentou). Começar por 3×.
 
@@ -141,7 +155,7 @@ quem vai licenciar.
 
 ## D · Escala e robustez
 
-### D1 · Memória do quantizador  `pequeno` · **bloqueia pôster em resolução real**
+### D1 · Memória do quantizador  `pequeno` · **bloqueia pôster em resolução real** · ▶️ FASE 1
 
 `((a[:,:,None,:] - pal)**2).sum(3)` materializa `h × w × k × 3` em float32 de uma vez:
 
@@ -204,14 +218,16 @@ interpolação já está medido e reprovado (§G), e super-resolução por IA é
 estrutural — **a imagem original É o gabarito**, então alterá-la move o alvo, e o pipeline
 deriva corpo/peso/cor MEDINDO a tinta. O caminho é reexportar a fonte.
 
-**A decisão de produto que fica aberta:** reexportar as outras capas. capa1 e capa2 são nossas
-e saem de graça; as de música dependem de existir scan melhor. Com número: 8 de 9 no teto.
+**~~A decisão de produto que fica aberta: reexportar as outras capas.~~ FECHADA em 30/09:**
+as capas **não podem** ser reexportadas ("foram entregues assim"). O teto de resolução é
+**permanente para estas 9**. Ganho de resolução só vale para capas NOVAS que já cheguem em alta
+— e é por isso que D1 e o `--dpi` automático viraram prioridade: é exatamente onde elas mordem.
 
 ---
 
 ## E · Integração e ferramental
 
-### E1 · Provar a capa DENTRO do livro  `pequeno` · **o único elo nunca demonstrado**
+### E1 · Provar a capa DENTRO do livro  `pequeno` · **o único elo nunca demonstrado** · ▶️ FASE 1 (autorizado 30/09: backup + teste)
 
 A fiação existe: `frontmatter/cover.tex` prefere `\VSBookCoverDynamic`, que renderiza
 `\RenderDynamicCover` — exatamente o comando que o `tikz_generator` emite. Mas
@@ -249,7 +265,10 @@ fluxo deveria decidir.
 | **Endereçamento por ÍNDICE** — guarda ENTROU; a CAUSA que liguei a ela estava ERRADA | Eu escrevi que a capa19 caía 0.9040→0.8877 porque `assign_ids` numera por ORDEM e o cache guardava o índice. **Medido peça a peça nos arquivos reais, não procede:** dos 35 edits do cache entregue, **32 caem na MESMA peça**, 2 não têm id, **1** aponta para peça que sumiu (vira no-op) e **ZERO** caem no vizinho. Eu inferi o deslize de a lista ter mudado de 21 para 23 regiões — as três novas entram DEPOIS, então nenhum id citado foi afetado. **A guarda entrou assim mesmo** porque índice é endereço frágil por construção e o sintoma da falha não é erro, é um edit correto na peça errada: `anchor_edits` grava centro+tamanho+string e `resolve_anchors` re-endereça, descartando com log quando não há alvo. Custo zero nos dados de hoje (no-op). Provado em unitário; ao vivo, o replay reproduz a rodada fresca edit por edit até a 4ª casa | ✅ guarda |
 | **capa19: −0.0163 no rebuild, causa ainda NÃO estabelecida** (reaberto 21/09) | Três hipóteses MORTAS por medição: não é o laço (`mp=0` e `mp=3` dão 0.8877), não é o duplo-snap (o cache dela tem **zero** entradas pós-snap) e não é deslize de índice (32/35 na mesma peça). O que sobra, medido: a **análise-base mudou** — 21 → 23 regiões, a régua fina `r10` (6,87×0,04cm) existe no entregue e **não existe** no rebuild, e uma peça `rectangle` virou `polygon`. O leitor de hoje lê a capa19 diferente do que a produziu. **Próximo passo: isolar o LEITOR, não o cache** | médio |
 | **Palavras coladas em tipo MIÚDO são invisíveis** (achado 17/09) — ⚠️ **REENQUADRADO 25/09: é TETO DE FONTE, não defeito do detector** (§D2: 8 das 9 capas abaixo do piso; com a fonte em alta o detector passou a funcionar sozinho em corpo de texto) | O `accept.word_collisions` só opina com linha ≥ 16px na imagem-fonte. No cabeçalho da capa2 (~7px de linha) um rebuild colou `"SÉRIE /"` em `"Versatus HPC…"` — visível no render, abaixo da resolução da medição (§D2). Mesma causa-raiz das colisões grandes: cada linha julgada na PRÓPRIA janela, e janelas vizinhas se sobrepõem | médio |
-| Aterramento aceita edit que não muda nada | Ao vivo na capa19, o VLM propôs `text.weight bold` para cinco elementos que JÁ eram bold; cada um custou um render para ser rejeitado com delta zero. Recusar no aterramento (valor igual ao atual) é uma linha | pequeno |
+| ~~Aterramento aceita edit que não muda nada~~ ✅ **FECHADO 28/09** (`debc681`) | `_noop_reason` recusa no aterramento, sem render. 48 renders desperdiçados só nos logs daquela semana. capa12 termina em 0.9588 idêntico, com as 2 recusas esperadas | ✅ |
+| **capa8: um `text.string` ERRADO do cache do VLM passou a entrar** (28/09) | Com a polaridade corrigida, a caixa mudou, o `text_match` mudou, e um edit já gravado no cache — antes rejeitado — foi aceito: a linha de y=9.29 lê `'213 park avenue south, new york city'` onde deveria ler `"upstairs at max's kansas city"`. Não colide, mas é conteúdo errado. O cache guarda propostas antigas; uma rodada FRESCA do VLM provavelmente não repropõe isso | pequeno |
+| **capa1: correção de polaridade pendente** | Muda 9 elementos dela, inclusive o título que é o último `ATENCAO`. Não foi rodada porque o entregável é cirurgia manual e pede tratamento próprio (`merge_capa1`) | médio |
+| **4 letras fantasma no pôster em alta** | A máscara de réguas (28/09) consertou 3 de 8; nas restantes a régua da grade encosta no glifo e a sonda de 4px não separa. Só aparece acima de ~150 dpi | médio |
 | capa2: wordmark traçado e placeholder se sobrepõem | O `logo.mark` escreveu `Versatus (Logo)` mas o `vers` traçado pelo leitor continua embaixo | pequeno |
 | capa6: três linhas que o OCR NUNCA leu | `wednesday`, `october 6 1993`, `east of mass. on 15th st.` — não estão nem na referência, então nenhuma medida as cobra. O passe de refinamento as VIU e adicionou (`october 6 1993` com box_local 1.000), mas as adições colidiram com blocos existentes e a rede de segurança reverteu tudo. É o caso-alvo da próxima iteração do refinamento | médio |
 | `text.add` de uma linha nasce regular e assentado no fundo da caixa | `apply_edit` segue a convenção "linha solta = regular" e usa a base da caixa como linha de base. Para uma palavra de título isso dá peso e altura errados, que só `text.weight`/`text.move` seguintes corrigem — e na capa19 a correção de corpo que veio depois sobrecorrigiu | pequeno |
@@ -287,14 +306,24 @@ traçadas dentro de caixas de texto existem em 3 de 20 capas, cobrindo 2–9% de
 
 ---
 
-## Sequência sugerida
+## Plano em fases — acordado com o usuário em 30/09
 
-1. **A2** (banco de provas) → **A1** (o juiz). Nesta ordem, porque o histórico mostra o que
-   acontece quando o Score muda sem banco.
-2. **C1** (recall de texto) logo depois, porque ele **depende** do A1 e é o maior ganho visível.
-3. **D1** (memória) e **E1** (capa no livro) a qualquer momento — são pequenos e independentes.
-4. **B1** (gradiente) quando aparecer o primeiro pôster que o exija; hoje é hipotético fora do
-   teste frio.
+A "sequência sugerida" de 14/09 que estava aqui foi cumprida ou reenquadrada (A2 feito, A1
+parcial por decisão, C1 reenquadrado pela resolução, B1 bloqueado sem caso de teste). O plano
+agora é de **produto**, porque o motor atingiu platô neste corpus:
+
+**Fase 1 — fechar a cadeia do produto** ▶️
+1. **E1** — compilar o livro com uma das nove capas dentro (backup de `styles/` antes).
+2. **`--dpi` automático** — derivar da largura da imagem; hoje é 150 fixo e, com fonte em alta, o
+   comparador AMPLIA o nosso render e penaliza detalhe fino (tive que passar `--dpi 210` à mão).
+3. **D1** — quantizador em blocos de linhas, nos três pontos onde ele materializa `h×w×k×3`.
+4. **Progresso visível no `cover_pipeline`** — restrição do projeto violada desde 14/09.
+
+**Fase 2 — limpeza e documentação oficial** ⏸️ aguarda orientação do usuário.
+
+**Fase 3 — CLI guiada** ⏸️ aguarda orientação do usuário. O usuário conhece CLI, mas não sabe
+que comando rodar — o foco é descobribilidade: o que rodar, em que ordem, o que cada veredito
+significa.
 
 ⚠️ **O que não muda com nenhum destes itens:** a fonte é um clone métrico (a real é paga), e
 os tetos de tipografia miúda seguem onde estão. São premissas, não dívida.

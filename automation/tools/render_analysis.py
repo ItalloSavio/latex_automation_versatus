@@ -35,7 +35,7 @@ rc._write_tex_wrapper(tex, tikz, a, W, H)
 ok, err = rc._compile_lualatex(tex, pdf)
 if not ok:
     print("FALHA no LuaLaTeX:", err[:400]); sys.exit(1)
-if rc._render_pdf(pdf, png, 150) is None:
+if rc._render_pdf(pdf, png, rc.render_dpi(image, W)) is None:
     print("FALHA no render"); sys.exit(1)
 q = vc.compare(str(image), str(png), analysis=a, output_dir=cover_dir, ssim_threshold=0.95)
 print(f"capa{n} [{src}] Score={q['score']:.4f}  SSIM={q['ssim_global']:.4f}  "

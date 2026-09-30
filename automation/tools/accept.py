@@ -389,8 +389,9 @@ def main(argv):
     as_json = "--json" in argv
     argv = [a for a in argv if not a.startswith("--")]
     nums = argv or sorted(
-        "".join(c for c in p.name if c.isdigit())
-        for p in OUT.glob("capa_teste*") if p.is_dir())
+        (p.name[len("capa_teste"):] for p in OUT.glob("capa_teste*")
+         # so as NUMERADAS: "capa_teste_ideal2" virava uma segunda capa2 (desde 23/09)
+         if p.is_dir() and p.name[len("capa_teste"):].isdigit()), key=int)
 
     report, bad, sem_ref = {}, 0, []
     no_teto: list[str] = []

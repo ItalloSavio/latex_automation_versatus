@@ -116,7 +116,7 @@ def render_and_measure(analysis: dict, cover: int, tag: str) -> dict:
     ok, err = rc._compile_lualatex(tex, pdf)
     if not ok:
         return {}
-    if rc._render_pdf(pdf, png, 150) is None:
+    if rc._render_pdf(pdf, png, rc.render_dpi(img, W)) is None:
         return {}
     q = vc.compare(str(img), str(png), analysis=analysis, output_dir=d, ssim_threshold=0.95)
     tmr = _text_match_ref(cover, img, png)

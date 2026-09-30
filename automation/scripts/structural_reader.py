@@ -33,6 +33,31 @@ Public API:
 import numpy as np
 from PIL import Image
 
+
+# ── Quantizacao na paleta, em BLOCOS de linhas ──────────────────────────────────────────
+# `((a[:,:,None,:] - pal)**2).sum(3)` materializa h × w × k × 3 float32 de uma vez. Nas
+# miniaturas do corpus isso nunca apareceu (capa16, 467×657: 0,03 GB), mas um poster de
+# verdade estoura antes de desenhar o primeiro poligono: 12 MP com k=8 alocam 1,15 GB numa
+# unica expressao, com k=16 sao 2,3 GB (pos-mvp §D1). E a direcao que o projeto passou a
+# recomendar em 25/09 — imagem-fonte em ALTA — e exatamente onde isso morde.
+# O calculo por pixel e identico; so muda quantas linhas entram de cada vez. Medido em 30/09
+# contra a expressao unica: indice BYTE-IDENTICO em 31 casos (as 9 do MVP e os dois posteres
+# em alta; paleta real do leitor, a do comparador e uma de 16 cores). Pico de memoria no
+# poster de 1728x2464: 780 MB -> 168 MB com k=8, 1,56 GB -> 160 MB com k=16. Tempo igual.
+_QUANT_BUDGET_BYTES = 64 << 20
+
+
+def _nearest_palette(a, pal):
+    """Indice da cor da paleta mais proxima de cada pixel, calculado em blocos de linhas."""
+    h, w = a.shape[:2]
+    linhas = max(1, _QUANT_BUDGET_BYTES // max(1, w * len(pal) * 3 * 4))
+    out = np.empty((h, w), dtype=np.intp)
+    for y0 in range(0, h, linhas):
+        blk = a[y0:y0 + linhas].astype(np.float32, copy=False)
+        out[y0:y0 + linhas] = np.argmin(((blk[:, :, None, :] - pal[None, None]) ** 2).sum(3), 2)
+    return out
+
+
 try:
     import cv2
     from scipy import ndimage
@@ -313,14 +338,14 @@ def read(image_path, analysis: dict, drop_films: bool = False) -> "list | None":
     min_area = _MIN_AREA_FRAC * w * h
 
     pal = np.array([_hex_to_rgb(c["hex"]) for c in colors], np.float32)
-    idx = np.argmin(((a[:, :, None, :] - pal[None, None]) ** 2).sum(3), 2)
+    idx = _nearest_palette(a, pal)
 
     if drop_films:
         keep = _solid_colors(idx, len(pal))
         if 2 <= len(keep) < len(pal):
             colors = [colors[i] for i in keep]
             pal = pal[keep]
-            idx = np.argmin(((a[:, :, None, :] - pal[None, None]) ** 2).sum(3), 2)
+            idx = _nearest_palette(a, pal)
 
     bgi = int(np.bincount(idx.ravel(), minlength=len(pal)).argmax())
     txt = _text_mask(analysis, w, h, sx, sy, H)

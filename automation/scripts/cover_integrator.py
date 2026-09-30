@@ -668,6 +668,14 @@ def apply_art(merged: dict, art: dict) -> dict:
             continue
         blk = pool[i]
         b = e.get("bbox_cm") or {}
+        # The BASELINE moves with the box. The generator places type by `baseline_y_cm`, not by
+        # the box, and this used to move only the box: the layout penalty (which reads boxes)
+        # saw the cached composition while the page was drawn at the FRESH one. Invisible
+        # while the two agreed; once the replicas were promoted (17/09, 28/09) they diverged,
+        # and capa4's five imprint lines collapsed onto two baselines with overlap measured
+        # 0.0 — found putting the cover inside the book (E1, 2026-09-30).
+        if "baseline_y_cm" in e and "y" in b:
+            e["baseline_y_cm"] = round(e["baseline_y_cm"] + blk["y"] - b["y"], 3)
         b.update({"x": blk["x"], "y": blk["y"], "w": blk["w"], "h": blk["h"]})
         e["bbox_cm"] = b
         if blk.get("pt"):
@@ -814,6 +822,92 @@ def emit(merged: dict, d: Path, tag: str = "integrated", brand: str = "versatus"
     (d / f"{tag}_analysis.json").write_text(
         json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"n": n, "ok": True, "pdf": pdf, "png": png, "info": info, "analysis": merged}
+
+
+# ─── The integrated cover INSIDE the book (E1, 2026-09-30) ───────────────────────────
+# The wiring always existed: main.tex loads styles/versatus-dynamic-cover.tex in the preamble
+# and frontmatter/cover.tex draws \VSBookCoverDynamic -> \RenderDynamicCover, the very command
+# tikz_generator emits. Nobody had compiled the book with one of our covers in it. It took
+# four adaptations (book_cover_tex), because integrated.tikz is made for a standalone page the
+# size of the canvas. Measured on capa4: page 1 of the book against the standalone
+# integrated.png differs in 0.37% of the pixels (anti-alias and the 0.5% stretch), and pages
+# 2–20 are pixel-identical to the book as it was.
+BOOK_COVER = ROOT / "styles" / "versatus-dynamic-cover.tex"
+BOOK_BACKUP_DIR = ROOT / "automation" / "output" / "_backup_livro"
+
+
+def book_cover_tex(integrated_tikz, brand: str = "versatus", origin: str = "") -> str:
+    """The book's cover file for one integrated cover.
+
+    1. ANCHOR — the standalone page has zero margins; the book has margins, so the drawing is
+       set in a box and placed at (current page.south west) as an overlay.
+    2. PAPER — the canvas keeps the image's aspect (capa4: 21 x 29.56 cm) and the book is A4
+       (21 x 29.7): the box is stretched to the paper, 0.5% vertically.
+    3. FONT — the replica was MEASURED with the chain of replicate_cover._write_tex_wrapper;
+       the book sets another sans. Inside the cover, \\sffamily becomes that same chain.
+    4. SPACES — `\\definecolor{c0}{HTML}{DAE1D5}  % 35.2% coverage` leaves a space token before
+       the `%`. On the standalone page the body runs in VERTICAL mode and it is ignored; inside
+       the box (LR mode) each one becomes glue — nine colours pushed the drawing 0.9 cm to the
+       right and the stretch squeezed it to 95.6% of the width (0.2498 -> 0.2828 on an edge).
+    """
+    import re  # noqa: PLC0415
+    body = Path(integrated_tikz).read_text(encoding="utf-8")
+    logo = ""
+    m = re.match(r"\\input\{(logo_\w+)\.tikz\}%?\n", body)
+    if m:
+        logo = f"brands/{brand}/logos/{m.group(1)}.tikz"
+        body = body[m.end():]
+    if body.count(r"\newcommand{\RenderDynamicCover}") != 1:
+        raise ValueError(f"{integrated_tikz}: nao parece saida do tikz_generator")
+    body = body.replace(r"\newcommand{\RenderDynamicCover}", r"\newcommand{\VSReplicaCoverBody}")
+    body = re.sub(r"^(\s*\\definecolor\{[^}]*\}\{[^}]*\}\{[^}]*\})[ \t]*(%.*)?$",
+                  lambda k: k.group(1) + (k.group(2) or "%"), body, flags=re.M)
+    fonts = ("Helvetica Neue", "Helvetica", "TeX Gyre Heros", "Arial")
+    chain = "".join(rf"\IfFontExistsTF{{{f}}}{{\newfontfamily\VSReplicaSans{{{f}}}}}{{%" + "\n"
+                    for f in fonts)
+    chain += r"\newfontfamily\VSReplicaSans{Latin Modern Sans}" + "}" * len(fonts) + "\n"
+    return (
+        "% " + "=" * 76 + "\n"
+        "% Capa do livro — gerada pelo Swiss Cover Replicator (cover_integrator.install_in_book)\n"
+        f"% Origem: {origin}\n"
+        f"% A capa anterior fica em {BOOK_BACKUP_DIR.relative_to(ROOT).as_posix()}/\n"
+        "% " + "=" * 76 + "\n"
+        "% A fonte com que a replica foi MEDIDA (a mesma cadeia do wrapper do replicador).\n"
+        + chain
+        + (rf"\input{{{logo}}}%" + "\n" if logo else "")
+        + "% o desenho, como o gerador o emitiu (so o nome do comando muda)\n"
+        + body.rstrip() + "\n"
+        "% ancorado no canto da pagina e esticado ao papel\n"
+        r"\newsavebox{\VSReplicaBox}" "\n"
+        r"\newcommand{\RenderDynamicCover}{%" "\n"
+        r"  \sbox{\VSReplicaBox}{\let\sffamily\VSReplicaSans\VSReplicaCoverBody}%" "\n"
+        r"  \begin{tikzpicture}[remember picture, overlay]" "\n"
+        r"    \node[anchor=south west, inner sep=0pt, outer sep=0pt] at (current page.south west)" "\n"
+        r"      {\resizebox{\paperwidth}{\paperheight}{\usebox{\VSReplicaBox}}};" "\n"
+        r"  \end{tikzpicture}%" "\n"
+        "}\n")
+
+
+def install_in_book(cover_dir, brand: str = "versatus", tag: str = "integrated") -> dict:
+    """Write styles/versatus-dynamic-cover.tex from `<cover_dir>/<tag>.tikz`.
+
+    The file it replaces is copied to automation/output/_backup_livro/ first — it is tracked
+    in git too, but a cover chosen by hand should never depend on remembering that."""
+    import shutil  # noqa: PLC0415
+    import time    # noqa: PLC0415
+    d = Path(cover_dir).resolve()
+    src = d / f"{tag}.tikz"
+    if not src.exists():
+        raise FileNotFoundError(f"{src} nao existe — rode com --integrar antes")
+    text = book_cover_tex(src, brand=brand, origin=src.relative_to(ROOT).as_posix()
+                          if src.is_relative_to(ROOT) else str(src))
+    backup = None
+    if BOOK_COVER.exists():
+        BOOK_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        backup = BOOK_BACKUP_DIR / f"versatus-dynamic-cover.{time.strftime('%Y%m%d-%H%M%S')}.tex"
+        shutil.copyfile(BOOK_COVER, backup)
+    BOOK_COVER.write_text(text, encoding="utf-8")
+    return {"dst": BOOK_COVER, "backup": backup}
 
 
 def build_refined(n, brand: str = "versatus", rounds: int = 1,

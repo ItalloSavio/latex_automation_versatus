@@ -10,6 +10,9 @@
 > **Estado em 30/09: média 0.9034 · QUATRO em ≥ 0.95 · portão 8/9 OK · auditoria 9/9.**
 > O motor atingiu platô **neste corpus** (8 das 9 no teto de resolução da fonte, e as capas NÃO
 > podem ser reexportadas). O trabalho agora é robustez + produto — ver **"Plano em fases"** no fim.
+> **Fase 1 FEITA em 30/09** (E1 com `--livro`, `--dpi` automático, D1, progresso visível); as
+> Fases 2 e 3 aguardam a orientação do usuário. Achado da Fase 1: o próximo muro para capa em
+> alta é o TEMPO por render — duas causas medidas, com conserto pequeno e resultado idêntico.
 
 ---
 
@@ -155,9 +158,18 @@ quem vai licenciar.
 
 ## D · Escala e robustez
 
-### D1 · Memória do quantizador  `pequeno` · **bloqueia pôster em resolução real** · ▶️ FASE 1
+### D1 · Memória do quantizador  `pequeno` · ✅ **FEITO 30/09 (Fase 1)**
 
-`((a[:,:,None,:] - pal)**2).sum(3)` materializa `h × w × k × 3` em float32 de uma vez:
+**Fechado:** `_nearest_palette` quantiza em blocos de linhas (orçamento de 64 MB) nos três
+pontos (`structural_reader` ×2, `visual_comparator.structural_match`). Provado ANTES de tocar no
+código: índice **byte-idêntico** à expressão única em 31 casos (as 9, os dois pôsteres em alta;
+paleta real, a do comparador e uma de 16 cores); depois, o leitor e o `structural_match` de HEAD
+contra os de agora saem **idênticos** nas 9 e no pôster, com e sem `drop_films`. Pico de memória
+no pôster de 1728×2464: **780 MB → 168 MB** com k=8, **1,56 GB → 160 MB** com k=16. Tempo igual.
+⚠️ O pico do PROCESSO na rodada do pôster segue em ~3,7 GB — não é o quantizador, é de antes
+(o OCR do EasyOCR/torch sobre 4,3 MP é o candidato; não medido isoladamente).
+
+`((a[:,:,None,:] - pal)**2).sum(3)` materializava `h × w × k × 3` em float32 de uma vez:
 
 | imagem | k=8 | k=16 |
 |---|---|---|
@@ -227,16 +239,39 @@ as capas **não podem** ser reexportadas ("foram entregues assim"). O teto de re
 
 ## E · Integração e ferramental
 
-### E1 · Provar a capa DENTRO do livro  `pequeno` · **o único elo nunca demonstrado** · ▶️ FASE 1 (autorizado 30/09: backup + teste)
+### E1 · Provar a capa DENTRO do livro  `pequeno` · ✅ **FEITO 30/09 (Fase 1)**
 
-A fiação existe: `frontmatter/cover.tex` prefere `\VSBookCoverDynamic`, que renderiza
-`\RenderDynamicCover` — exatamente o comando que o `tikz_generator` emite. Mas
-`styles/versatus-dynamic-cover.tex` contém hoje uma capa da marca **Kosen**, gerada pelo
-`vision_extractor` (outro fluxo). **Ninguém compilou o `main.pdf` com uma das nove dentro.**
+```bash
+python automation/scripts/cover_pipeline.py capas_teste/capa_teste4.png --livro
+#   replica (reusa) -> integra -> styles/versatus-dynamic-cover.tex (backup da anterior)
+#   -> latexmk main.tex -> build/pdf/main.pdf        3m33s, com a replica ja pronta
+```
 
-**Motivação:** para um MVP cujo propósito é capa de livro, este é o único elo da cadeia sem
-prova. É rápido, mas exige backup: sobrescreve a capa Kosen, e `styles/` está marcado como
-fora de escopo do replicador.
+**Medido com a capa4:** a página 1 do livro contra o `integrated.png` avulso difere em **0,37%**
+dos pixels (média 0,46 RGB — anti-serrilhado e a esticada de 0,5%); as **páginas 2–20 saem
+pixel-idênticas** ao livro como estava (a capa Kosen); fontes embutidas na capa: TeX Gyre Heros
+regular e bold, as mesmas com que a réplica foi medida; nenhum aviso novo no log. A capa Kosen
+anterior está em `automation/output/_backup_e1/` (e no git).
+
+**Quatro adaptações** (`cover_integrator.book_cover_tex`), porque o tikz é feito para uma página
+avulsa do tamanho do canvas: âncora em `(current page.south west)` por overlay; esticada ao A4
+(o canvas tem a proporção da imagem, 29,56 cm); `\sffamily` local = a cadeia de fontes do
+replicador (o livro usa outra sans); e **espaços** — `\definecolor{…}  % comentário` deixa um
+espaço antes do `%`, que na página avulsa (modo vertical) some e dentro da caixa (modo LR) vira
+cola: 9 cores empurravam o desenho **0,9 cm** e o comprimiam a 95,6% (11% dos pixels errados).
+
+**O E1 achou DOIS defeitos na Fase 7 que número nenhum via:**
+- ✅ **`apply_art` movia a CAIXA e não o BASELINE** — e o gerador desenha pelo baseline. A
+  penalidade de layout (que lê caixas) media a composição do cache enquanto a página saía na
+  composição fresca. Invisível enquanto as duas coincidiam; depois das promoções de 17/09 e
+  28/09 a capa4 saiu com as cinco linhas do rodapé colapsadas em duas **com sobreposição medida
+  0.0**. Corrigido: o baseline acompanha a caixa. A capa4 volta ao layout aprovado de 14/09.
+- 📋 **`apply_art` casa linhas por POSIÇÃO dentro do papel** e supõe que o número de linhas não
+  muda. Na capa8 a composição de hoje quebra o subtítulo em duas linhas; o cache tem um bloco
+  `sub`; a segunda linha fica na posição fresca e se intercala com o rodapé. A penalidade ACUSA
+  (0.0472). Vai acontecer também em uso legítimo — um metadata mais longo em outro livro. Hoje o
+  contorno é `--recompose`; o conserto é reposicionar o BLOCO (re-fluir as linhas dentro da caixa
+  guardada) ou invalidar a entrada quando a estrutura muda. Integrados da capa8 restaurados.
 
 ### E2 · `run_batch.py` fala de 20 capas  `pequeno`
 
@@ -269,6 +304,10 @@ fluxo deveria decidir.
 | **capa8: um `text.string` ERRADO do cache do VLM passou a entrar** (28/09) | Com a polaridade corrigida, a caixa mudou, o `text_match` mudou, e um edit já gravado no cache — antes rejeitado — foi aceito: a linha de y=9.29 lê `'213 park avenue south, new york city'` onde deveria ler `"upstairs at max's kansas city"`. Não colide, mas é conteúdo errado. O cache guarda propostas antigas; uma rodada FRESCA do VLM provavelmente não repropõe isso | pequeno |
 | **capa1: correção de polaridade pendente** | Muda 9 elementos dela, inclusive o título que é o último `ATENCAO`. Não foi rodada porque o entregável é cirurgia manual e pede tratamento próprio (`merge_capa1`) | médio |
 | **4 letras fantasma no pôster em alta** | A máscara de réguas (28/09) consertou 3 de 8; nas restantes a régua da grade encosta no glifo e a sonda de 4px não separa. Só aparece acima de ~150 dpi | médio |
+| **`apply_art` supõe número de linhas fixo por papel** (achado no E1, 30/09) | Ver E1. capa8: subtítulo em 2 linhas × 1 bloco `sub` no cache → intercala com o rodapé, penalidade 0.0472. Contorno: `--recompose` | pequeno |
+| ~~`audit.py` sem argumentos quebra~~ ✅ **FECHADO 30/09** | Desde 23/09 as pastas `capa_teste_ideal*` davam `int("")` → `ValueError` na auditoria inteira, e o `accept.py` contava a `ideal2` como uma segunda capa2. Agora só pastas numeradas | ✅ |
+| ~~`cover_pipeline --out-dir` com outro nome~~ ✅ **guarda 30/09** | O replicador grava em `<pai>/<nome-da-imagem>`; com outro nome a réplica inteira rodava e só no fim o comando acusava "não produziu analysis.json". Agora recusa na hora e diz o caminho certo | ✅ |
+| Arquivo `--brand` solto na raiz do repositório | 171 bytes, de 08/07 — sobra de um comando em que `--brand` virou nome de arquivo. Não é meu; candidato da limpeza (Fase 2) | pequeno |
 | capa2: wordmark traçado e placeholder se sobrepõem | O `logo.mark` escreveu `Versatus (Logo)` mas o `vers` traçado pelo leitor continua embaixo | pequeno |
 | capa6: três linhas que o OCR NUNCA leu | `wednesday`, `october 6 1993`, `east of mass. on 15th st.` — não estão nem na referência, então nenhuma medida as cobra. O passe de refinamento as VIU e adicionou (`october 6 1993` com box_local 1.000), mas as adições colidiram com blocos existentes e a rede de segurança reverteu tudo. É o caso-alvo da próxima iteração do refinamento | médio |
 | `text.add` de uma linha nasce regular e assentado no fundo da caixa | `apply_edit` segue a convenção "linha solta = regular" e usa a base da caixa como linha de base. Para uma palavra de título isso dá peso e altura errados, que só `text.weight`/`text.move` seguintes corrigem — e na capa19 a correção de corpo que veio depois sobrecorrigiu | pequeno |
@@ -312,12 +351,38 @@ A "sequência sugerida" de 14/09 que estava aqui foi cumprida ou reenquadrada (A
 parcial por decisão, C1 reenquadrado pela resolução, B1 bloqueado sem caso de teste). O plano
 agora é de **produto**, porque o motor atingiu platô neste corpus:
 
-**Fase 1 — fechar a cadeia do produto** ▶️
-1. **E1** — compilar o livro com uma das nove capas dentro (backup de `styles/` antes).
-2. **`--dpi` automático** — derivar da largura da imagem; hoje é 150 fixo e, com fonte em alta, o
-   comparador AMPLIA o nosso render e penaliza detalhe fino (tive que passar `--dpi 210` à mão).
-3. **D1** — quantizador em blocos de linhas, nos três pontos onde ele materializa `h×w×k×3`.
-4. **Progresso visível no `cover_pipeline`** — restrição do projeto violada desde 14/09.
+**Fase 1 — fechar a cadeia do produto** ✅ **FEITA 30/09**
+1. ✅ **E1** — `cover_pipeline.py <imagem> --livro` integra, instala a capa em
+   `styles/versatus-dynamic-cover.tex` (backup em `automation/output/_backup_livro/`) e compila o
+   livro. Capa4 no livro: 0,37% dos pixels diferentes da capa avulsa, páginas 2–20 idênticas.
+   Achou dois defeitos da Fase 7 (ver E1): um corrigido, um na fila (F).
+2. ✅ **`--dpi` automático** — `replicate_cover.render_dpi()`: a resolução da fonte, piso 150. As 9
+   ficam em 150 (fontes de 56–89 dpi, auditoria 9/9 delta zero); o pôster sai a 210, o valor que
+   eu passava à mão. Todo ponto que renderiza para COMPARAR com a fonte usa a mesma função — o
+   laço, o portão do VLM (`edit_gate.cover_measure`), `refine_replica`, `audit`, `judge_bench`
+   e `render_analysis` —, senão mediriam em quadros diferentes.
+3. ✅ **D1** — ver D1: byte-idêntico, pico de 780 MB → 168 MB no pôster.
+4. ✅ **Progresso visível** — `_progresso.md` na pasta da capa, reescrito a cada etapa, render e
+   linha de log (etapa k de N, tempo por etapa, renders, Score atual, última atividade, hora da
+   última escrita); cabeçalhos do console com o tempo decorrido; stdout com line-buffering (num
+   pipe o Python bufferizava tudo até o fim); o `cover_pipeline` grava o veredito do portão no
+   mesmo arquivo; o `_run_status.md` do `run_batch` aponta para ele. Sem ETA de propósito: o
+   estágio do VLM varia 10× entre capas e um número inventado é pior que nenhum.
+
+**Achados da Fase 1 que NÃO eram dela — o próximo muro é o TEMPO por render** (medido 30/09).
+Com a memória e o quadro resolvidos, o pôster em alta roda — mas a ~4–5 min por render (máquina
+disputada), e uma capa leva de 26 a 71 renders: horas, contra os 30 min aceitáveis. Duas causas,
+as duas com prova de que o resultado não muda:
+
+| causa | medido | conserto proposto |
+|---|---|---|
+| `_background_color` e `_pal` do comparador usam `np.unique(axis=0)`, o caminho LENTO do numpy (ordena linhas RGB), e o `compare()` chama isso ≥2× por render na imagem inteira e 1× por caixa de texto | pôster **41,9 s → 0,39 s** por chamada (107×), capa8 4,8 s → 0,034 s; mesma cor, mesma ordem de desempate (RGB empacotado num inteiro + `bincount`) | pequeno |
+| o wrapper testa `Helvetica Neue` → `Helvetica` → `TeX Gyre Heros`; as duas primeiras não existem aqui, e cada consulta falha faz o `luaotfload` **reconstruir o banco de fontes** ("Reload initiated") — duas vezes por render, porque o LuaLaTeX roda 2× | capa8: **75 s → 21 s** por compilação com a fonte resolvida direto, PDFs **pixel-idênticos**. Já estava no `cover.log` de 28/09 — custo antigo, não regressão | pequeno — resolver a cadeia UMA vez por sessão e escrever só a fonte que existe |
+
+Perfil de um render do pôster (com cProfile e máquina disputada, então os absolutos estão
+inflados): LuaLaTeX 102 s + `compare()` 399 s, dos quais `_background_color` 141 s,
+`structural_match` 133 s (`_pal` 81 s dentro dele), `_content_split` 75 s.
+⚠️ Nenhum dos dois consertos foi aplicado: não eram da Fase 1 e esperam a decisão do usuário.
 
 **Fase 2 — limpeza e documentação oficial** ⏸️ aguarda orientação do usuário.
 

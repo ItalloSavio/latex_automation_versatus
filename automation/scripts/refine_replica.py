@@ -95,7 +95,8 @@ def _describe(edit: dict) -> str:
 
 
 def refine(image_path, cover_dir, analysis_path=None, rounds: int = 3,
-           refresh: bool = False, mock_rounds=None, dpi: int = 150, log=print) -> dict:
+           refresh: bool = False, mock_rounds=None, dpi: "int | None" = None,
+           log=print) -> dict:
     image_path = Path(image_path).resolve()
     cover_dir = Path(cover_dir).resolve()
     analysis_path = Path(analysis_path) if analysis_path else cover_dir / "analysis.json"
@@ -106,6 +107,7 @@ def refine(image_path, cover_dir, analysis_path=None, rounds: int = 3,
 
     analysis = eg.assign_ids(json.loads(analysis_path.read_text(encoding="utf-8")))
     W, H = analysis["canvas"]["width_cm"], analysis["canvas"]["height_cm"]
+    dpi = dpi or rc.render_dpi(image_path, W)     # o MESMO quadro do replicador
     tikz, tex, pdf = cover_dir / "cover.tikz", cover_dir / "cover.tex", cover_dir / "cover.pdf"
     render = cover_dir / "render.png"
 

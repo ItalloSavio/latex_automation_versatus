@@ -61,7 +61,7 @@ def audit(n):
     ok, err = rc._compile_lualatex(tex, pdf)
     if not ok:
         return n, disk, None, f"LuaLaTeX falhou: {err[:120]}"
-    if rc._render_pdf(pdf, png, 150) is None:
+    if rc._render_pdf(pdf, png, rc.render_dpi(image, W)) is None:
         return n, disk, None, "render falhou"
     fresh = _score(image, png, a, cover_dir)
     return n, disk, fresh, None
@@ -69,7 +69,10 @@ def audit(n):
 
 def main(argv):
     nums = [int(x) for x in argv] if argv else sorted(
-        int("".join(c for c in p.name if c.isdigit())) for p in OUT.glob("capa_teste*"))
+        int(p.name[len("capa_teste"):]) for p in OUT.glob("capa_teste*")
+        # so as pastas NUMERADAS: "capa_teste_ideal" dava int("") e quebrava a auditoria
+        # inteira, e "capa_teste_ideal2" virava uma segunda capa2 (desde 23/09)
+        if p.name[len("capa_teste"):].isdigit())
     print(f"{'capa':>6} {'em disco':>9} {'re-render':>10} {'delta':>9}  veredito")
     bad = 0
     for n in nums:

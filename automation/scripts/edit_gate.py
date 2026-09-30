@@ -1110,7 +1110,7 @@ def cover_measure(n: int):
         gen.generate(a, tikz)
         rc._write_tex_wrapper(tex, tikz, a, W, H)
         ok, _ = rc._compile_lualatex(tex, pdf)
-        if not ok or rc._render_pdf(pdf, png, 150) is None:
+        if not ok or rc._render_pdf(pdf, png, rc.render_dpi(img, W)) is None:
             return None
         return vc.compare(str(img), str(png), analysis=a, output_dir=cdir)
 

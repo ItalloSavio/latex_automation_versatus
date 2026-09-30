@@ -1,7 +1,12 @@
 # Swiss Cover Replicator — escopo do sistema
 
-> ## 🟢 MVP FECHADO — 2026-09-14 · atualizado 28/09
+> ## 🟢 MVP FECHADO — 2026-09-14 · atualizado 30/09
 > **9 capas · média 0.9034 · auditoria 9/9 · portão de aceite 8/9 OK · QUATRO em ≥0.95.**
+>
+> 30/09 — **Fase 1 do plano de produto FEITA**: a capa entra no LIVRO com um comando
+> (`--livro`, provado com a capa4: 0,37% de diferença da capa avulsa, páginas 2–20 idênticas),
+> `--dpi` automático, quantizador em blocos (D1) e progresso ao vivo em `_progresso.md`. Fases 2
+> (limpeza + doc oficial) e 3 (CLI guiada) aguardam o usuário. Ver `pos-mvp.md`, "Plano em fases".
 >
 > 28/09: capa6 **0.9541** e capa8 **0.9511** promovidas (a capa8 saiu de `ATENCAO` para `OK`
 > quando o medidor de tinta passou a enxergar polaridade). O único `ATENCAO` restante é o
@@ -13,7 +18,9 @@
 > ```bash
 > python automation/scripts/cover_pipeline.py minha_capa.png              # a réplica
 > python automation/scripts/cover_pipeline.py minha_capa.png --integrar   # + conteúdo do livro
+> python automation/scripts/cover_pipeline.py minha_capa.png --livro      # + a capa DENTRO do livro
 > ```
+> Durante a rodada: `automation/output/replicated/<nome>/_progresso.md` (etapa, tempo, renders).
 >
 > O que fazer a seguir está em **`pos-mvp.md`**, com a evidência medida de cada item e três
 > hipóteses explicitamente MORTAS para ninguém repetir.
@@ -35,7 +42,10 @@ delas me fez otimizar contra o usuário durante uma sessão inteira.
 - **Orçamento pequeno.** API do Gemini se gasta com critério — mas se gasta, porque é o único
   caminho medido para fidelidade de caractere.
 - **O usuário PRECISA de feedback de progresso.** Uma rodada de 15 minutos sem saída é
-  inaceitável. O `run_batch.py` escreve `_run_status.md`; o `cover_pipeline.py` não tem nada.
+  inaceitável. O `run_batch.py` escreve `_run_status.md`; desde 30/09 toda réplica escreve
+  `_progresso.md` na pasta da capa (`replicate_cover._Progress`) e o console mostra o tempo
+  decorrido em cada estágio. ⚠️ Capa em ALTA ainda leva ~4–5 min por render — ver os dois
+  consertos pendentes em `pos-mvp.md` ("Achados da Fase 1").
 - **Determinismo, não achismo.** Parar porque não há mais o que propor é resposta válida;
   parar porque um número cruzou um limiar arbitrário, não. Se é teto, meça e registre o teto.
 
@@ -92,6 +102,12 @@ Regra: fechar item ABERTO de causa conhecida e correção barata ANTES de atacar
 | F2 | `\VSLogoEscolhida` indefinido — os 4 layouts em `covers/` não compilavam | — | ✅ FECHADO (09/09) — cada arquivo se declarava como O pacote `styles/versatus-covers` E definia `\VSBookCover`, então eram 4 cópias rivais das quais só uma podia carregar. Viraram `\VSCoverLayoutA..D`, carregados pelo pacote; `\VSCoverOption` aceita `LayoutA..LayoutD`. A/B do pacote **intactos**. Provado: livro compila (exit 0) e os 4 layouts rendem 4 páginas |
 | F3 | `audit.py` e `judge_bench.py` NÃO EXISTIAM | — | ✅ FECHADO (16/09) — `audit.py` reconstruído em 09/09 (eu havia "corrigido" o caminho deles aqui numa sessão anterior, mas os arquivos viviam no scratchpad e sumiram: a doc apontava para um fantasma). **`judge_bench.py` reescrito em 16/09** com 3 pares ISOLADOS congelados em `automation/bench/cases/` — ⚠️ o primeiro par que montei comparava duas RODADAS do pipeline (confundido); o par tem que diferir em UM elemento. Empate agora conta como **`CEGA`**, não como erro: somar "não distingue" a "inverteu" faz uma métrica muda parecer invertida, e as duas coisas pedem respostas diferentes |
 | T7 | título claro sobre fundo escuro sai grande demais e é APAGADO | 8, 1 | ✅ **FECHADO (28/09) na capa8, pendente na capa1** — `_measure_ink` só via pixel escuro e media o FUNDO; 19 de 73 elementos afetados. capa8 0.9380→**0.9511**, `ATENCAO`→**`OK`**. A capa1 muda 9 elementos e não foi rodada (cirurgia manual). Era a causa dos DOIS `ATENCAO` do portão, catalogados como outra coisa |
+| F5 | a capa nunca tinha entrado no LIVRO (E1) | 4 | ✅ **FECHADO (30/09)** — `cover_pipeline.py <img> --livro` → `cover_integrator.install_in_book` (backup da anterior) → `latexmk main.tex`. Capa4: página 1 a **0,37%** da capa avulsa, páginas 2–20 **idênticas** ao livro anterior, fontes TeX Gyre Heros. Quatro adaptações em `book_cover_tex` — a última foi ESPAÇO: `\definecolor{…}  % comentário` deixa um espaço que em modo LR vira cola e empurrava o desenho 0,9 cm |
+| F6 | `apply_art` movia a CAIXA e não o BASELINE | 4 (todas com cache) | ✅ **FECHADO (30/09, achado pelo E1)** — o gerador desenha pelo `baseline_y_cm`; a penalidade lê caixas. A capa4 saía com 5 linhas colapsadas em 2 e **sobreposição medida 0.0**. Invisível até as promoções de 17/09 e 28/09 separarem composição fresca e cache |
+| F7 | `apply_art` supõe o MESMO número de linhas por papel | 8 | 📋 ABERTO (30/09) — subtítulo em 2 linhas contra 1 bloco `sub` no cache: a 2ª linha fica na posição fresca e se intercala com o rodapé. Penalidade acusa (0.0472). Contorno: `--recompose`. Acontece também com metadata mais longo em outro livro |
+| R4 | `--dpi` fixo em 150 ampliava o render de fonte em alta | pôster | ✅ **FECHADO (30/09)** — `replicate_cover.render_dpi()`: a resolução da fonte, piso 150. As 9 seguem a 150 (auditoria 9/9 delta 0). Usado por TODO ponto que compara com a fonte (laço, portão do VLM, refine, audit, bench) |
+| R5 | quantizador materializava `h×w×k×3` (D1) | pôster | ✅ **FECHADO (30/09)** — `_nearest_palette` em blocos de 64 MB; índice byte-idêntico em 31 casos; pôster 780 MB → 168 MB |
+| R6 | render de capa em ALTA leva minutos | pôster | 📋 ABERTO (30/09) — duas causas MEDIDAS, resultado idêntico nos dois consertos: `np.unique(axis=0)` no comparador (41,9 s → 0,39 s por chamada com `bincount`) e o `luaotfload` reconstruindo o banco de fontes a cada compilação por causa da cadeia `Helvetica Neue → …` (75 s → 21 s, PDFs pixel-idênticos). Aguarda o usuário |
 | F4 | o juiz não via conteúdo AUSENTE | 19, 8 | ✅ **FECHADO (16/09) — era erro de REFERENCIAL, não de fórmula.** `accept.missing_content()` + quadro congelado (`make_reference.py`). A capa19 entregue pela metade vai de `OK` para `REVISAR`; o portão nas 9 vai de 8/9 para 7/9 (a capa1 cai para `ATENCAO` por defeito REAL). Ver a seção do portão de aceite |
 
 ## Direção estratégica (o reframe — LER ISTO)
@@ -144,7 +160,8 @@ capa2 0.7234. **Média 0.9034, QUATRO em ≥0.95, SETE em ≥0.90, auditoria 9/9
 
 **Estado do projeto (30/09):** o motor atingiu platô NESTE corpus — medido: 8 das 9 no teto de
 resolução da fonte, e as capas **não podem ser reexportadas** (decisão do usuário). O trabalho
-agora é de produto, em três fases (ver `pos-mvp.md`, "Plano em fases").
+agora é de produto, em três fases (ver `pos-mvp.md`, "Plano em fases"). **Fase 1 feita no
+mesmo dia** (F5, F6, R4, R5 e o progresso); Fases 2 e 3 aguardam a orientação do usuário.
 
 ⚠️ O ranking das 20 (média 0.857, de 02/09) está VENCIDO e foi removido daqui: onze daquelas
 capas saíram do escopo em 10–11/09 e os números das nove mudaram desde então. As outras onze
@@ -371,6 +388,7 @@ O padrão do comando reflete isso:
 ```bash
 python automation/scripts/cover_pipeline.py capa.png              # só a réplica
 python automation/scripts/cover_pipeline.py capa.png --integrar   # + conteúdo do livro
+python automation/scripts/cover_pipeline.py capa.png --livro      # + capa no livro e compila (30/09)
 ```
 
 `cover_integrator.build_from_image(path)` substitui o `build(n)` que montava caminho a partir
@@ -1796,6 +1814,13 @@ Em `ocr_extractor.py`:
 Em `cover_assembler.py` (estágio de aviso):
 - **`_RES_MIN_LINE_PX = 16`** / **`_RES_WARN_FRAC = 0.30`** — abaixo do piso a leitura não é
   confiável; acima de 30% das linhas nessa situação, a rodada AVISA que o teto é a fonte.
+
+Em `replicate_cover.py` / `structural_reader.py` / `visual_comparator.py` (Fase 1, 30/09):
+- **`_DPI_FLOOR = 150`** — `render_dpi()` renderiza na resolução da fonte, nunca abaixo disto.
+  O comparador redimensiona o render para o tamanho da FONTE; render mais grosso que ela é
+  AMPLIADO e perde o detalhe fino antes de qualquer medida. O piso mantém as 9 como estavam.
+- **`_QUANT_BUDGET_BYTES = 64 MB`** — `_nearest_palette` quantiza em blocos de linhas com este
+  orçamento. O cálculo por pixel é o mesmo (byte-idêntico); só muda quantas linhas por vez.
 
 Em `image_analyzer.py`:
 - gate de diagonal usa **std do canal MÁXIMO > 15** (a média dos 3 canais mascara

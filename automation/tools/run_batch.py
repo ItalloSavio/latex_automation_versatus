@@ -51,7 +51,8 @@ def _write(rows, total, current, t0):
              ""]
     if current:
         lines += [f"**Rodando agora:** capa{current[0]} ({current[1]}) — "
-                  f"{_fmt(time.time() - current[2])}", ""]
+                  f"{_fmt(time.time() - current[2])} · etapa a etapa em "
+                  f"`capa_teste{current[0]}/_progresso.md`", ""]
     elif done == total:
         lines += ["**Concluída.**", ""]
     lines += ["| capa | modo | Score | SSIM | content | leitor? | tempo |",

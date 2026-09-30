@@ -30,7 +30,7 @@ Options:
     --semantic         Enable VLM enrichment pass (requires GEMINI_API_KEY)
     --max-passes N     Proposal rounds of the correction loop; stops early when a round lands nothing (default: 5)
     --ssim-threshold F Minimum acceptable SSIM (default: 0.95)
-    --dpi N            PDF render DPI (default: 150)
+    --dpi N            PDF render DPI (default: the source's own dpi, floor 150)
     --width-cm F       Canvas width in cm (default: 21.0)
     --height-cm F      Canvas height in cm (default: derived from image aspect)
 """
@@ -195,7 +195,7 @@ def replicate(
     semantic:       bool  = False,
     max_passes:     int   = 5,
     ssim_threshold: float = 0.95,
-    dpi:            int   = 150,
+    dpi:            "int | None" = None,
     width_cm:       float = 21.0,
     height_cm:      "float | None" = None,
     vlm:            bool  = False,
@@ -228,6 +228,11 @@ def replicate(
         _log(f"  [canvas] {w_px}x{h_px}px → {width_cm} x {height_cm} cm "
              f"(aspect {w_px/h_px:.3f})")
 
+    if dpi is None:
+        dpi = render_dpi(image_path, width_cm)
+        _log(f"  [render] {dpi} dpi (a fonte tem {_source_dpi(image_path, width_cm):.0f} dpi; "
+             f"piso {_DPI_FLOOR})")
+
     out_dir = Path(out_dir).resolve() if out_dir else (
         _AUTOMATION / "output" / "replicated"
     )
@@ -244,6 +249,8 @@ def replicate(
     diff_path     = cover_dir / "diff.png"
 
     _banner(f"REPLICATE: {image_path.name}")
+    _PROG.start(cover_dir, image_path.name, vlm)
+    _log(f"  [progresso] ao vivo em {cover_dir / '_progresso.md'}")
 
     # ── Stages 1–5: Assembly ─────────────────────────────────────────────────
     _step(1, "Analise completa (CV + OCR + padroes + fonte)")
@@ -268,9 +275,12 @@ def replicate(
         _write_tex_wrapper(tex_path, tikz_path, a, width_cm, height_cm)
         ok, _err = _compile_lualatex(tex_path, pdf_path)
         if not ok or _render_pdf(pdf_path, render_path, dpi) is None:
+            _PROG.render(None)
             return None
-        return comparator.compare(image_path, render_path, analysis=a,
-                                  output_dir=cover_dir, ssim_threshold=ssim_threshold)
+        q = comparator.compare(image_path, render_path, analysis=a,
+                               output_dir=cover_dir, ssim_threshold=ssim_threshold)
+        _PROG.render(q)
+        return q
 
     # ── Stage 7: layer selection (measured "confidence") ──────────────────
     # Each detector (grid, circles) proposes a LAYER. Instead of trusting a
@@ -362,6 +372,7 @@ def replicate(
     # not be reproduced from any stored analysis, and whose reported score was the stale one
     # (capa18 read 0.6935 while its own analysis renders 0.6592). The reported quality is
     # taken from THIS render, so the number and the file are the same thing.
+    _step(14, "Render final e gravacao")
     _final_q = _score_of(analysis)
     if _final_q:
         quality = _final_q
@@ -386,6 +397,7 @@ def replicate(
         _log(f"  Diff map      : {diff_path}")
     _log(f"  PDF           : {pdf_path}")
     _log(f"  Render PNG    : {render_path}")
+    _PROG.finish(quality)
 
     return {
         "analysis_path":  str(analysis_path),
@@ -931,6 +943,30 @@ def _compile_lualatex(
 
 # ─── Stage 9: PDF render ─────────────────────────────────────────────────────
 
+# The comparator resizes the render to the SOURCE size before measuring, so a render coarser
+# than the source gets UPSCALED — and the thin detail a high-res source brought is blurred away
+# before anything measures it. The 1728px poster rendered at the old fixed 150 dpi (1240px) was
+# being judged on an interpolated copy of our own render; I passed --dpi 210 by hand to get
+# around it (2026-09-25). The render now follows the source. 150 stays as the FLOOR, so the nine
+# MVP covers (56–89 dpi sources) render exactly as before.
+_DPI_FLOOR = 150
+
+
+def _source_dpi(image_path, width_cm: float) -> float:
+    from PIL import Image  # noqa: PLC0415
+    with Image.open(image_path) as im:
+        return im.size[0] * 2.54 / width_cm
+
+
+def render_dpi(image_path, width_cm: float = 21.0) -> int:
+    """The render resolution that never upscales: the source's own dpi, never below 150.
+
+    Every place that renders a replica to COMPARE it with the source must use this — the loop,
+    the gate, the audit — or they measure in different frames."""
+    import math  # noqa: PLC0415
+    return max(_DPI_FLOOR, math.ceil(_source_dpi(image_path, width_cm)))
+
+
 def _render_pdf(pdf_path: Path, png_path: Path, dpi: int) -> "Path | None":
     """Render first page of PDF to PNG using pymupdf."""
     try:
@@ -1049,11 +1085,148 @@ def _banner(msg: str) -> None:
 
 
 def _step(n: int, msg: str) -> None:
-    print(f"\n[{n:02d}] {msg}")
+    print(f"\n[{n:02d}] {msg}{_PROG.stage(n, msg)}")
 
 
 def _log(msg: str) -> None:
     print(msg)
+    _PROG.log(msg)
+
+
+# ─── Progress — a long run must never be silent ──────────────────────────────
+# Project constraint (CLAUDE.md): a 15-minute run with no output is unacceptable. The stage
+# headers were the only sign of life — no elapsed time, nothing about what was still ahead —
+# and when stdout is a pipe (an editor task, `> log.txt`) Python block-buffers it, so even
+# they surfaced only at the end. Now every header carries the elapsed time and the render
+# count, and the same state is kept in `_progresso.md` inside the cover's folder: a file you
+# can leave open in the editor while the run goes. No ETA on purpose — the VLM stage alone
+# varies by 10× between covers, and a made-up number is worse than none; the file shows the
+# durations MEASURED on the MVP instead.
+_ETAPAS = (
+    ("analise",   "analise da imagem (OCR + CV + paleta)"),
+    ("selecao",   "selecao medida: leitor x detectores, camadas, texto"),
+    ("inicial",   "estado inicial: TikZ -> LuaLaTeX -> PNG -> comparacao"),
+    ("correcoes", "correcoes: calibrador de tipo e cor"),
+    ("vlm",       "VLM no plato (propoe; o portao mede cada edit)"),
+    ("final",     "render final e gravacao"),
+)
+_ETAPA_DO_ESTAGIO = {1: "analise", 6: "analise", 7: "selecao", 8: "inicial", 9: "inicial",
+                     10: "inicial", 11: "inicial", 12: "correcoes", 13: "vlm", 14: "final"}
+_TEMPO_MEDIDO = ("Tempo medido: 7–14 min por capa do MVP (fonte de ate 0,8 MP) com o VLM em cache, "
+                 "12,5 min com o VLM fresco (capa19, 18/09). Imagem em ALTA e bem mais lenta: o "
+                 "poster de 4,3 MP levou ~4–5 min POR RENDER em 30/09 (ver pos-mvp.md, 'Achados "
+                 "da Fase 1').")
+
+
+def _fmt_dt(sec: float) -> str:
+    m, s = divmod(int(sec), 60)
+    return f"{m}m{s:02d}s" if m else f"{s}s"
+
+
+class _Progress:
+    """Elapsed time, render count and the stage checklist — on the console AND in a file.
+    Inert until start(): other modules that load this one to reuse its helpers never write."""
+
+    def __init__(self):
+        self.path = None
+
+    def start(self, cover_dir: Path, image_name: str, vlm: bool) -> None:
+        self.path = Path(cover_dir) / "_progresso.md"
+        self.image, self.t0 = image_name, time.time()
+        self.plano = [e for e in _ETAPAS if vlm or e[0] != "vlm"]
+        self.inicio, self.fim = {}, {}
+        self.atual, self.detalhe, self.ultima = None, "", ""
+        self.renders, self.score, self.final, self.notas = 0, None, None, []
+        self._write()
+
+    def stage(self, n: int, msg: str) -> str:
+        if self.path is None:
+            return ""
+        self._enter(_ETAPA_DO_ESTAGIO.get(n, self.atual))
+        self.detalhe = msg.strip()
+        self._write()
+        return f"   (decorrido {_fmt_dt(time.time() - self.t0)} · renders: {self.renders})"
+
+    def render(self, q) -> None:
+        if self.path is None:
+            return
+        self.renders += 1
+        if q:
+            self.score = q.get("score")
+        self._write()
+
+    def log(self, msg: str) -> None:
+        if self.path is not None and msg.strip():
+            self.ultima = msg.strip()
+            self._write()
+
+    def finish(self, q) -> None:
+        if self.path is None:
+            return
+        self._enter("final")
+        self.fim["final"] = time.time()
+        self.final = (q or {}).get("score")
+        self._write()
+
+    def note(self, lines) -> None:
+        """Lines added by whoever called replicate() — cover_pipeline puts the verdict here."""
+        if self.path is not None:
+            self.notas += list(lines)
+            self._write()
+
+    def _enter(self, etapa) -> None:
+        if not etapa or etapa == self.atual:
+            return
+        agora = time.time()
+        if self.atual:
+            self.fim.setdefault(self.atual, agora)
+        self.inicio.setdefault(etapa, agora)
+        self.atual = etapa
+
+    def _write(self) -> None:
+        agora, chaves = time.time(), [k for k, _ in self.plano]
+        # The file is rewritten on EVENTS (stage, render, log line), and one render of a
+        # high-res source takes minutes — so say when it was written, or a live run looks stuck.
+        L = [f"# Replica — {self.image}", "",
+             f"_atualizado as {time.strftime('%H:%M:%S')} — o arquivo e reescrito a cada "
+             f"etapa, render ou linha de log_", ""]
+        if "final" in self.fim:
+            sc = f" · Score final **{self.final:.4f}**" if self.final is not None else ""
+            L.append(f"**✅ Concluida** em {_fmt_dt(self.fim['final'] - self.t0)} · "
+                     f"renders: {self.renders}{sc}")
+        else:
+            k = chaves.index(self.atual) + 1 if self.atual in chaves else 0
+            sc = f" · Score atual {self.score:.4f}" if self.score is not None else ""
+            L.append(f"**Etapa {k} de {len(chaves)}** — {self.detalhe or 'iniciando'} · "
+                     f"decorrido {_fmt_dt(agora - self.t0)} · renders: {self.renders}{sc}")
+        L += ["", "| # | etapa | estado | tempo |", "|---|---|---|---:|"]
+        for i, (key, nome) in enumerate(self.plano, 1):
+            if key in self.fim and key in self.inicio:
+                est, dt = "✅", _fmt_dt(self.fim[key] - self.inicio[key])
+            elif key == self.atual:
+                est, dt = "▶️ em curso", _fmt_dt(agora - self.inicio[key]) + "…"
+            elif "final" in self.fim:
+                est, dt = "— nao rodou", ""        # e.g. --max-passes 0
+            else:
+                est, dt = "⏳", ""
+            L.append(f"| {i} | {nome} | {est} | {dt} |")
+        if self.ultima and "final" not in self.fim:
+            L += ["", f"Ultima atividade: `{self.ultima[:160].replace('`', chr(39))}`"]
+        L += ["", _TEMPO_MEDIDO]
+        if self.notas:
+            L += [""] + self.notas
+        try:
+            self.path.write_text("\n".join(L) + "\n", encoding="utf-8")
+        except OSError:
+            pass                        # progress must never break the run
+
+
+_PROG = _Progress()
+
+
+def progress_note(lines) -> None:
+    """Append lines to the running cover's `_progresso.md` (no-op when nothing is running)."""
+    _PROG.note(lines)
 
 
 # ─── CLI ─────────────────────────────────────────────────────────────────────
@@ -1061,7 +1234,9 @@ def _log(msg: str) -> None:
 if __name__ == "__main__":
     import argparse
 
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    # line_buffering: with stdout on a pipe (editor task, `> log`) Python block-buffers and
+    # the stage headers surfaced only at the end of a 15-minute run. See _Progress.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
     parser = argparse.ArgumentParser(
@@ -1076,8 +1251,8 @@ if __name__ == "__main__":
                         help="rodadas de proposta do laco de correcao; para antes se uma rodada nao aceita nada (default: 5)")
     parser.add_argument("--ssim-threshold", type=float, default=0.95,
                         help="SSIM minimo aceitavel (default: 0.95)")
-    parser.add_argument("--dpi",            type=int,   default=150,
-                        help="DPI para render do PDF (default: 150)")
+    parser.add_argument("--dpi",            type=int,   default=None,
+                        help="DPI do render (default: o da imagem-fonte, nunca abaixo de 150)")
     parser.add_argument("--width-cm",       type=float, default=21.0,
                         help="Largura da canvas em cm (default: 21.0)")
     parser.add_argument("--height-cm",      type=float, default=None,

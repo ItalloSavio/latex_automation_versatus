@@ -102,11 +102,15 @@ com o usuário em 30/09:
 
 | fase | o quê | estado |
 |---|---|---|
-| **1** | fechar a cadeia do produto: capa DENTRO do livro · `--dpi` automático · quantizador em blocos · progresso visível no `cover_pipeline` | ▶️ em execução |
+| **1** | fechar a cadeia do produto: capa DENTRO do livro · `--dpi` automático · quantizador em blocos · progresso visível no `cover_pipeline` | ✅ **feita 30/09** — `--livro`, `render_dpi()`, `_nearest_palette`, `_progresso.md` |
 | **2** | limpeza e documentação oficial (9 markdowns na raiz → conjunto claro) | ⏸️ **aguarda orientação do usuário** |
 | **3** | sistema amigável: **CLI guiada** — o usuário conhece CLI mas não sabe que comando rodar | ⏸️ **aguarda orientação do usuário** |
 
-⚠️ **Ao terminar a Fase 1, REPORTE e ESPERE.** O usuário quer orientar as fases 2 e 3.
+⚠️ **A Fase 1 terminou e foi REPORTADA em 30/09. NÃO comece a 2 nem a 3 sem a orientação do
+usuário.** Achado dela que também espera decisão: o **tempo por render** de capa em alta
+(~4–5 min) tem duas causas medidas com conserto pequeno e resultado idêntico — `np.unique(axis=0)`
+no comparador (107× mais lento que `bincount`) e o `luaotfload` reconstruindo o banco de fontes
+a cada compilação (75 s → 21 s). Ver `pos-mvp.md`, "Achados da Fase 1".
 
 ### Já feito — não refaça
 
@@ -116,6 +120,7 @@ com o usuário em 30/09:
 | teto de resolução medido + estágio de aviso (`_report_resolution`) · regra de parágrafo no OCR | 23–25/09 |
 | `text.add` não desenha sobre arte traçada · réguas mascaradas no OCR (parcial) · aterramento recusa no-op · **polaridade da tinta** (capa8 `ATENCAO`→`OK`) · 249 linhas mortas removidas | 28/09 |
 | `[PASS]` de 0.95 como parada — **não existe mais** (removido em 14/09; o laço só para quando nada é aceito) | conferido 28/09 |
+| **Fase 1**: capa no livro (`--livro`) · `--dpi` automático · quantizador em blocos · `_progresso.md` · `apply_art` move o baseline junto · `audit`/`accept` sem argumentos não quebram mais | 30/09 |
 
 ### Bloqueado, com motivo
 

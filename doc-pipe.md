@@ -543,9 +543,18 @@ python automation/scripts/cover_pipeline.py minha_capa.png --rebuild
 
 # recompõe o layout e guarda no cache de arte se a penalidade melhorar
 python automation/scripts/cover_pipeline.py minha_capa.png --integrar --recompose
+
+# + a capa DENTRO do livro: instala em styles/versatus-dynamic-cover.tex (a anterior vai para
+#   automation/output/_backup_livro/) e compila main.tex -> build/pdf/main.pdf
+python automation/scripts/cover_pipeline.py minha_capa.png --livro
 ```
 
 Toda rodada termina com o **veredito** do portão de aceite (§12b).
+
+**Acompanhar uma rodada longa:** abra `automation/output/replicated/<nome-da-imagem>/_progresso.md`
+no editor — ele diz em que etapa a réplica está, quanto tempo cada etapa levou, quantos renders
+já foram feitos e o Score atual, e recebe o veredito no fim. O render sai na resolução da própria
+imagem (nunca abaixo de 150 dpi); `--dpi N` força outro valor.
 
 **Direção de arte à mão:** `automation/art/<nome-da-imagem>.json` guarda a posição da marca e
 de cada bloco em cm. Edite o arquivo e acrescente `"locked": true` — a composição automática

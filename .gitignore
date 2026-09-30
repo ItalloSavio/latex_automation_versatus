@@ -27,6 +27,8 @@ venv/
 automation/output/replicated/
 automation/output/diff_map.png
 automation/output/cover_analysis.json
+# backups que o pipeline faz antes de sobrescrever (ex.: a capa do livro, em --livro)
+automation/output/_backup_*/
 
 # Debug artifacts from replication runs
 **/_debug_*.png

@@ -369,6 +369,15 @@ agora é de **produto**, porque o motor atingiu platô neste corpus:
    mesmo arquivo; o `_run_status.md` do `run_batch` aponta para ele. Sem ETA de propósito: o
    estágio do VLM varia 10× entre capas e um número inventado é pior que nenhum.
 
+**Validação:** auditoria **9/9 delta zero** e portão **8/9 inalterado**; o `--livro` rodado de
+verdade na capa4; o pôster pelo `cover_pipeline` sem `--dpi` escolheu **210 dpi** sozinho e
+manteve o `_progresso.md` vivo — interrompido de propósito após 11 renders em 62 min, porque
+terminar custaria horas antes dos consertos de tempo abaixo; e uma réplica curta da capa6 pelo
+`cover_pipeline` (`--rebuild --max-passes 0`, máquina livre) fechou ponta a ponta: 9m28s,
+"✅ Concluída", o tempo de cada etapa, a etapa que não rodou marcada como tal e o veredito `OK`
+gravado no arquivo. ⚠️ Nela a seleção levou **~70 s por render numa capa PEQUENA** — o custo do
+`luaotfload` (abaixo) não é só de capa grande.
+
 **Achados da Fase 1 que NÃO eram dela — o próximo muro é o TEMPO por render** (medido 30/09).
 Com a memória e o quadro resolvidos, o pôster em alta roda — mas a ~4–5 min por render (máquina
 disputada), e uma capa leva de 26 a 71 renders: horas, contra os 30 min aceitáveis. Duas causas,

@@ -1,0 +1,214 @@
+% =====================================================================
+%  Conteúdo de 'Versatus-HPC-Storage-Solution-Brief_v0.3.pdf' — gerado pelo conversor pdf-para-latex
+%  O desenho (fontes, tamanhos, cores) está em estilo.sty.
+%  Cada \begin{coluna}{x}{y}{largura} é um quadro: o texto dentro dele flui
+%  e você pode editar à vontade. \espaco{bp} é a distância até o elemento
+%  anterior, medida no original. \quebra é uma quebra de linha mantida só
+%  para ficar idêntico ao original (pode apagar ao reescrever o trecho).
+%  \entrelinha{bp} antes de um elemento troca a entrelinha só dele.
+%  Depois de editar, recompile com:
+%    python pdf-para-latex/conversor/pdf_para_latex.py <pdf de entrada> --so-compilar
+% =====================================================================
+\documentclass{article}
+\usepackage{estilo}
+
+\begin{document}
+
+%% ====================================================================
+%%  Página 1
+%% ====================================================================
+\begin{pagina}
+  \imagemlivre{p1-grafismo-1}{0}{639.75}{194.16}{202.17}
+
+  % quadro 1: começa em "Destaques:"
+  \begin{coluna}{43.5}{219}{178.5}
+    \imagem{p1-imagem-1}{118.5}{40.5}
+    \espaco{40.5}
+    \fio{preto}{0.75}
+    \espaco{11.7}
+    \rotulo{Destaques:}
+    \espaco{7.65}
+    \entrelinha{12}
+    \begin{lista}{pequeno}{quadrado}{8.25}{6.45}
+      \item Mantenha as GPUs ocupadas com uma camada flash para treino, checkpoint e scratch
+      \item Pague flash só pelo dado quente: o Hybrid Tiering leva o restante para disco, no mesmo namespace
+      \item Opere sem um time de storage, com Management Console e Observability
+      \item Escolha o hardware: blueprints em Lenovo, Supermicro e Gigabyte
+      \item Cresça em capacidade sem aumentar a conta de software: licença por servidor, não por terabyte
+      \item Fique livre de lock-in com código upstream, de um membro da OpenSFS, e suporte em português, espanhol e inglês
+    \end{lista}
+    \espaco{13.65}
+    \fio{preto}{0.75}
+  \end{coluna}
+
+  % quadro 2: começa em "Storage paralelo"
+  \begin{coluna}{264}{100.38}{288}
+    \titulo{Storage paralelo\newline para treinamento de modelos\newline e simulação computacional com\quebra Versatus HPC Storage}
+    \espaco{19.57}
+    \subtitulo{O desempenho do Lustre™, a simplicidade de um\quebra appliance, no hardware que você escolhe.}
+    \espaco{52.05}
+    \corpo{Treinar modelos, rodar simulações e analisar dados em escala exige um sistema de arquivos que acompanhe dezenas ou centenas de GPUs e CPUs ao mesmo tempo. Quando o storage não acompanha, os aceleradores ficam parados esperando checkpoints e a carga de datasets — e cada hora de GPU ociosa é investimento parado.}
+    \corpo{Nem todo dado precisa ficar no meio mais rápido o tempo todo. Com a tierização inteligente e automática do Versatus HPC Storage, SSDs e discos rígidos trabalham juntos em um único storage híbrido: os dados em uso ficam nos SSDs, onde o desempenho faz diferença, e o restante desce sozinho para os discos rígidos, que guardam grandes volumes por uma fração do custo. Para quem usa, nada muda — os arquivos continuam no mesmo lugar.}
+    \corpo{Sistemas de arquivos paralelos costumam exigir especialistas para instalar, ajustar e manter. O Versatus HPC Storage é a distribuição Lustre enterprise que traz a esse mundo a facilidade de um appliance: implantação, atualizações e monitoramento ficam reunidos em um console de gerenciamento simples, com alertas quando algo precisa de atenção. Sua equipe aproveita todo o desempenho do storage sem precisar manter um time de storage. Ele foi projetado para oferecer:}
+    \espaco{15}
+    \begin{lista}{corpo}{ponto}{9}{0}
+      \item Throughput paralelo para todos os nós de computação e GPU
+      \item Acesso aos mesmos dados por POSIX, S3, NFS e SMB
+      \item Conexão por InfiniBand ou Ethernet
+      \item Regras de ciclo de vida por projeto, usuário, idade ou tamanho
+      \item I/O de cada job visível no painel, com alertas
+      \item Clientes e formato de dados do sistema de arquivos Lustre padrão
+    \end{lista}
+  \end{coluna}
+\end{pagina}
+
+%% ====================================================================
+%%  Página 2
+%% ====================================================================
+\begin{pagina}
+
+  % quadro 1: começa em "Desempenho de supercomputador"
+  \begin{coluna}{43.5}{85.5}{241.5}
+    \secao{Desempenho de supercomputador\quebra onde ele faz diferença}
+    \espaco{6}
+    \corpo{O sistema de arquivos Lustre distribui dados e metadados por muitos servidores e deixa cada cliente ler e gravar em todos eles em paralelo. Não existe um servidor de arquivos único no caminho, nem a sobrecarga de protocolo do NFS: a banda agregada cresce conforme você adiciona servidores de objetos, e os metadados escalam com servidores dedicados.}
+    \espaco{15}
+    \fio{preto}{0.75}
+    \espaco{7.35}
+    \begin{faixa}{36}
+      \celula{0}{7.53}{73.62}{%
+        \titulo{8 de 10}
+      }
+      \celula{73.62}{0}{167.88}{%
+        \entrelinha{12}
+        \pequeno{dos maiores supercomputadores do mundo usavam o sistema de arquivos Lustre no início de 2026, segundo a The Lustre Collective\sobrescrito{1}}
+      }
+    \end{faixa}
+    \espaco{7.65}
+    \fio{preto}{0.75}
+    \espaco{22.5}
+    \corpo{O Versatus HPC Storage combina essa arquitetura com uma camada flash dimensionada para o que mais pesa no dia a dia de HPC e IA: leitura de datasets de treinamento, gravação de checkpoints e áreas de scratch. Muitos processos podem acessar o mesmo arquivo ao mesmo tempo, com consistência garantida pelo gerenciador de locks distribuído do sistema de arquivos — e as GPUs continuam calculando em vez de esperar I/O.}
+    \espaco{15}
+    \fio{preto}{0.75}
+    \espaco{9}
+    \imagem{p2-figura-1}{241.5}{220.3}
+    \espaco{12.13}
+    \nota{Arquitetura do Versatus HPC Storage. Os clientes, com o módulo padrão do sistema de arquivos Lustre, acessam metadados e dados em paralelo; o Hybrid Tiering move dados entre flash e disco no mesmo namespace.}
+    \espaco{7.58}
+    \fio{preto}{0.75}
+  \end{coluna}
+
+  % quadro 2: começa em "Dado quente em flash, o resto em disco"
+  \begin{coluna}{310.5}{85.5}{241.5}
+    \secao{Dado quente em flash, o resto em disco}
+    \espaco{6}
+    \corpo{Guardar todos os bytes em flash raramente faz sentido no orçamento. Com o Hybrid Tiering, o Versatus HPC Storage mantém em NVMe apenas os dados que estão em uso e move automaticamente o restante para discos de alta capacidade — sem stubs, sem cópias manuais e sem mudar o caminho dos arquivos.}
+    \corpo{O Policy Engine varre o namespace em paralelo e aplica\quebra as regras de posicionamento, migração e expurgo que você definir, por projeto, usuário, idade, tamanho ou padrão de acesso. Um dataset pode nascer em flash e descer para disco quando o projeto termina. O licenciamento segue a mesma lógica: assinatura por servidor de storage, não por terabyte. Crescer em capacidade com disco de alta densidade não aumenta a conta de software.}
+    \espaco{24}
+    \secao{Opere sem um time de storage}
+    \espaco{6}
+    \corpo{Sistemas de arquivos paralelos são poderosos, mas ninguém na sua equipe precisa virar especialista neles. O Management Console concentra implantação, configuração, upgrades e operação em uma interface gráfica e em APIs, a partir de blueprints que já chegam dimensionados para o seu ambiente. O Observability mostra a saúde do sistema e o I/O de cada job, com alertas. Quando o cluster fica lento, você vê qual\quebra workload está pressionando o storage, em vez de adivinhar.}
+    \corpo{Por trás do software estão os engenheiros Lustre da Versatus HPC, com anos de experiência em sistemas de arquivos paralelos na academia, na pesquisa e na indústria de óleo e gás da América Latina.}
+    \espaco{24}
+    \secao{Os mesmos dados,\newline por qualquer protocolo}
+    \espaco{6}
+    \corpo{Nem todo usuário monta um sistema de arquivos paralelo. Os Protocol Gateways dão acesso ao mesmo namespace por S3, NFS e SMB, para instrumentos, pipelines em objeto e estações de trabalho, sem cópias.}
+  \end{coluna}
+
+  % quadro 3: começa em "1. The Lustre Collective, fevereiro de 2…"
+  \begin{coluna}[base]{43.5}{809.92}{508.5}
+    \fio{cinzaclaro}{0.75}
+    \espaco{5.17}
+    \nota{1. The Lustre Collective, fevereiro de 2026.}
+  \end{coluna}
+\end{pagina}
+
+%% ====================================================================
+%%  Página 3
+%% ====================================================================
+\begin{pagina}
+
+  % quadro 1: começa em "Aberto por design"
+  \begin{coluna}{43.5}{85.5}{241.5}
+    \secao{Aberto por design}
+    \espaco{6}
+    \corpo{O Versatus HPC Storage é construído sobre o código upstream do sistema de arquivos Lustre, mantido por\quebra uma comunidade que inclui laboratórios nacionais, nuvens públicas e fabricantes de hardware. Os clientes são os do sistema de arquivos Lustre padrão, e o formato dos dados também. Se um dia você decidir sair, seus dados e seus clientes continuam exatamente onde estão.}
+    \corpo{Você escolhe o fabricante do servidor e a rede. Sem appliance proprietário e sem depender de um único fornecedor: soberania sobre a sua infraestrutura de dados, com suporte local.}
+    \espaco{15}
+    \fio{cinzaclaro}{0.75}
+    \espaco{8.95}
+    \begin{faixa}{71.1}
+      \celula{0}{16.55}{111}{%
+        \imagem{p3-imagem-1}{99}{38.25}
+      }
+      \celula{111}{0}{130.5}{%
+        \pequeno{A Versatus HPC é membro da OpenSFS (Open Scalable File Systems), a organização sem fins lucrativos que apoia o desenvolvimento aberto do sistema de arquivos Lustre.}
+      }
+    \end{faixa}
+    \espaco{9.19}
+    \fio{cinzaclaro}{0.75}
+    \espaco{68.25}
+    \secao{Blueprints prontos para produção}
+    \espaco{6}
+    \corpo{Cada blueprint reúne lista de materiais fechada por fabricante, automação de implantação, desempenho medido e publicado, e uma matriz de suporte que deixa claro quem atende o quê. Detalhes de cada OEM sob consulta.}
+    \espaco{22.5}
+    \entrelinha{11.32}
+    \begin{tabela}{pequeno}{51,63.75,63,63.75}{0}{4.5}{4.5}
+      \fiotabela{preto}{0.75}
+      \linha{7.83}{4.1}{ & \textbf{Entry} & \textbf{AI Training} & \textbf{Capacity}}
+      \fiotabela{preto}{0.75}
+      \linha{4.83}{4.71}{\textbf{Mídia} & Flash + disco & All-flash NVMe & Flash + HDD de alta capacidade}
+      \fiotabela{cinzaclaro}{0.75}
+      \linha{4.83}{4.78}{\textbf{Dimensionado por} & Capacidade: 0,5 a 2 PB & Throughput:\newline 8 a 512 GPUs & Capacidade: acima de 2 PB}
+      \fiotabela{cinzaclaro}{0.75}
+      \linha{4.83}{10.71}{\textbf{Indicado para} & Departamentos, universidades & Treino e fine-tuning & Centros regionais e indústria}
+      \fiotabela{preto}{0.75}
+    \end{tabela}
+  \end{coluna}
+
+  % quadro 2: começa em "Para quem é o Versatus HPC Storage"
+  \begin{coluna}{310.5}{85.5}{241.5}
+    \secao{Para quem é o Versatus HPC Storage}
+    \espaco{6}
+    \corpo{\textbf{Research computing.} Clusters departamentais e universitários de 20 a 500 nós que precisam de storage paralelo e não têm quem o opere.}
+    \corpo{\textbf{Treinamento e fine-tuning de IA.} De 8 a 512 GPUs, com checkpoints rápidos e datasets que não cabem todos em flash.}
+    \corpo{\textbf{HPC industrial.} CFD, energia e genômica: projetos longos e dados que esfriam com o tempo.}
+    \espaco{15}
+    \begin{chamada}{cinzaclaro}{2.25}{9.75}
+      \corpo{Para inferência com KV cache em hiperescala ou plataformas multi-tenant de GPU como serviço, considere outra arquitetura. Ajudamos você a decidir.}
+    \end{chamada}
+    \espaco{24}
+    \secao{Suporte e serviços}
+    \espaco{6}
+    \begin{lista}{corpo}{ponto}{9}{0}
+      \item Níveis de suporte com engenheiros Lustre, 24×7
+      \item Monitoramento proativo do ambiente
+      \item Migração a partir de ambientes Lustre comunitários, BeeGFS ou NFS
+      \item Treinamento da sua equipe para o dia a dia
+    \end{lista}
+    \espaco{24}
+    \secao{O que vem a seguir}
+    \espaco{6}
+    \corpo{No roadmap do produto: \textbf{Parallel Namespace Search}, \textbf{Client Flash Cache} nos nós de GPU, \textbf{Inline Compression} e \textbf{Metadata Writeback Cache}.}
+    \espaco{52.5}
+    \begin{caixa}{preto}{10.5}{11.33}{12}{12}
+      \secao[branco]{Saiba mais}
+      \espaco{6}
+      \corpo[branco]{Conte como é o seu cluster e enviaremos um blueprint dimensionado para ele.}
+      \espaco{7.5}
+      \corpo[branco]{\textbf{www.versatushpc.com.br contato@versatushpc.com.br}}
+      \espaco{32.17}
+      \nota[cinzaclaro]{\espacejado{14.97}{EMPOWERING SCIENCE WITH INTELLIGENCE}}
+    \end{caixa}
+  \end{coluna}
+
+  % quadro 3: começa em "The LUSTRE™ mark is a registered or unre…"
+  \begin{coluna}[base]{43.5}{809.92}{508.5}
+    \fio{cinzaclaro}{0.75}
+    \espaco{5.17}
+    \nota{The LUSTRE™ mark is a registered or unregistered trademark of Open Scalable File Systems, Inc. and European Open Filesystems SCE in the United States, European Union,\quebra and other countries. Unauthorized use strictly prohibited.}
+    \nota{© 2026 Versatus HPC. OpenSFS é marca de Open Scalable File Systems, Inc. Lenovo, Supermicro, Gigabyte, InfiniBand e demais marcas pertencem aos seus respectivos titulares. Recursos de roadmap sujeitos a alteração.}
+  \end{coluna}
+\end{pagina}
+
+\end{document}

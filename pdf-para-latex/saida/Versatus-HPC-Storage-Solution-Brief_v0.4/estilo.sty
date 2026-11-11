@@ -1,0 +1,55 @@
+% =====================================================================
+%  estilo.sty — o desenho de 'Versatus-HPC-Storage-Solution-Brief_v0.3.pdf'
+%  Gerado pelo conversor pdf-para-latex. Pode editar à vontade: todos os
+%  valores foram medidos no PDF original (em bp, a unidade do PDF).
+% =====================================================================
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{estilo}[2026/11/11 gerado de Versatus-HPC-Storage-Solution-Brief_v0.3.pdf]
+
+% --- Página -----------------------------------------------------------
+\RequirePackage[paperwidth=594.96bp,paperheight=841.92bp,margin=0pt,nohead,nofoot]{geometry}
+
+% --- Fonte ------------------------------------------------------------
+\RequirePackage[default,semibold]{sourcesanspro}
+\RequirePackage{diagramacao}
+
+% --- Cores ------------------------------------------------------------
+\definecolor{branco}{HTML}{FFFFFF}
+\definecolor{cinza}{HTML}{6B6867}
+\definecolor{cinzaclaro}{HTML}{BCB9B9}
+\definecolor{preto}{HTML}{201F1E}
+\definecolor{vermelho}{HTML}{D8373A}
+\definecolor{vermelhoclaro}{HTML}{DD4F51}
+
+% --- Escala tipográfica ----------------------------------------------
+%  \definirestilo[espacejamento]{nome}{tamanho}{entrelinha}{peso}{itálico}{cor}{espaço entre dois blocos seguidos}
+%  espacejamento: em % do corpo (negativo = letras mais juntas), como o LetterSpace do fontspec.
+%  Cada estilo vira um comando: \corpo{...}, \secao{...}. Cor diferente: \secao[branco]{...}
+\definirestilo[-1.56]{titulo}{21.5}{23.75}{seminegrito}{nao}{vermelho}{0}
+\definirestilo{secao}{14}{15}{seminegrito}{nao}{vermelho}{0}
+\definirestilo{rotulo}{12.5}{16.5}{regular}{nao}{preto}{0}
+\definirestilo{subtitulo}{12.5}{16.5}{regular}{sim}{preto}{0}
+\definirestilo{corpo}{10}{15}{regular}{nao}{preto}{15}
+\definirestilo{pequeno}{8.5}{11.85}{regular}{nao}{preto}{0}
+\definirestilo{nota}{7}{9.75}{regular}{nao}{cinza}{1.5}
+
+% --- Marcadores de lista ----------------------------------------------
+%  \definirmarcador{nome}{deslocamento a partir da margem}{desenho}
+\definirmarcador{quadrado}{0}{\textcolor{vermelhoclaro}{\rule[0.75bp]{3.0bp}{3.0bp}}}
+\definirmarcador{ponto}{0.75}{\textcolor{preto}{•}}
+
+% --- Sobrescrito (chamada de nota) -----------------------------------
+\newcommand\sobrescrito[1]{\raisebox{3.04bp}{\fontsize{5.52bp}{5.52bp}\selectfont #1}}
+
+% --- Cabeçalho e número de página (aparecem em todas as páginas) ------
+\definircabecalho{43.5}{40.88}{508.5}{%
+  \entrelinha{11.25}
+  \pequeno{\textbf{Versatus HPC Storage}\newline Solution Brief}
+}
+\definirnumeropagina{551.76}{50.25}{pequeno}{cinza}{2}
+
+% --- Imagens -----------------------------------------------------------
+%  Coloque o arquivo com o nome do espaço (pdf, png ou jpg) nesta pasta.
+\pastaimagens{../../imagens/}
+
+\endinput

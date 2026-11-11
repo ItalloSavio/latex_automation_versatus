@@ -1,0 +1,401 @@
+% =====================================================================
+%  diagramacao.sty — componentes de página do conversor PDF -> LaTeX
+% ---------------------------------------------------------------------
+%  Este arquivo é FIXO: é a mesma biblioteca para qualquer documento.
+%  O que muda de um documento para outro (fontes, tamanhos, cores,
+%  cabeçalho) fica em estilo.sty, que o conversor gera.
+%
+%  Modelo de página: cada página é desenhada por QUADROS posicionados
+%  (como num programa de diagramação). Dentro de um quadro o conteúdo
+%  FLUI: editar um texto refaz as quebras de linha e empurra o que vem
+%  depois. Todas as medidas são em pontos PostScript (bp), a mesma
+%  unidade do PDF de origem, medidas a partir do canto superior
+%  esquerdo da página.
+%
+%  Componentes:
+%    \begin{pagina} ... \end{pagina}             uma página
+%    \begin{coluna}[topo|base]{x}{y}{largura}     quadro de texto que flui
+%    \<estilo>[cor]{texto}                        bloco de texto (\corpo, \secao...)
+%    \espaco{bp}                                  espaço explícito antes do próximo elemento
+%    \fio[dx]{cor}{espessura}[largura]            fio horizontal
+%    \begin{lista}[cor]{estilo}{marcador}{recuo}{espaço}  \item ...
+%    \begin{tabela}{estilo}{larguras}{recuo 1ª col.}{recuo demais}{recuo dir.}
+%        \fiotabela{cor}{espessura}   \linha{acima}{abaixo}{c1 & c2 & ...}
+%    \begin{faixa}{altura} \celula{dx}{dy}{largura}{conteúdo} \end{faixa}
+%    \begin{caixa}{cor}{acima}{abaixo}{esquerda}{direita} ... \end{caixa}
+%    \begin{chamada}{cor}{espessura}{recuo} ... \end{chamada}
+%    \imagem[dx]{nome}{largura}{altura}           espaço reservado no fluxo
+%    \imagemlivre{nome}{x}{y}{largura}{altura}    espaço reservado em posição fixa
+% =====================================================================
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{diagramacao}[2026/11/11 v1.0 Componentes do conversor PDF para LaTeX]
+
+\RequirePackage{xcolor}
+\RequirePackage{graphicx}
+% os corpos medidos (21,5 · 8,5 · 7bp...) não existem nas fontes matemáticas
+% padrão; sem isto o LaTeX avisa a cada tamanho (inofensivo, mas polui o log)
+\RequirePackage{anyfontsize}
+
+\makeatletter
+
+% ---------------------------------------------------------------------
+%  Registradores
+% ---------------------------------------------------------------------
+\newdimen\dg@L        % entrelinha do bloco em construção
+\newdimen\dg@W        % largura do fluxo atual
+\newdimen\dg@gap      % espaço pendente (\espaco)
+\newdimen\dg@a
+\newbox\dg@caixa      % elemento em construção
+\newbox\dg@fluxo      % quadro em construção
+\newbox\dg@cel        % conteúdo interno (célula, caixa, chamada)
+\newif\ifdg@primeiro
+\newif\ifdg@pendente
+\def\dg@ultimo{}
+
+% ---------------------------------------------------------------------
+%  Página: geometria sem margens; cada página é um picture com origem
+%  no canto superior esquerdo e unidade de 1bp.
+% ---------------------------------------------------------------------
+\setlength\parindent{0pt}
+\setlength\topskip{0pt}
+\pagestyle{empty}
+
+\def\dg@moldura{}     % cabeçalho e número de página (definidos em estilo.sty)
+
+\newenvironment{pagina}{%
+  \clearpage\noindent
+  \setlength\unitlength{1bp}%
+  \begin{picture}(0,0)%
+  \dg@moldura
+}{%
+  \end{picture}\par
+}
+
+% Coloca uma caixa com o topo (ou a base) no ponto (x, y).
+\newcommand\dg@colocar[4]{% {topo|base}{x}{y}{caixa}
+  \def\dg@tmpa{#1}\def\dg@tmpb{base}%
+  \ifx\dg@tmpa\dg@tmpb
+    \put(#2,-#3){\raisebox{\depth}{\usebox{#4}}}%
+  \else
+    \put(#2,-#3){\raisebox{-\height}{\usebox{#4}}}%
+  \fi}
+
+% ---------------------------------------------------------------------
+%  Fluxo
+% ---------------------------------------------------------------------
+\newcommand\dg@iniciarfluxo[1]{% largura (expressão de dimensão)
+  \dg@W=\dimexpr #1\relax
+  \hsize=\dg@W \linewidth=\dg@W
+  \offinterlineskip
+  \dg@primeirotrue \dg@pendentefalse \def\dg@ultimo{}}
+
+% Acrescenta \dg@caixa ao fluxo, com o espaço certo antes dela.
+%   #1 = tipo do elemento   #2 = espaço padrão entre dois elementos do mesmo tipo
+\newcommand\dg@anexar[2]{%
+  \ifdg@primeiro
+    \dg@primeirofalse
+  \else
+    \ifdg@pendente
+      \vskip\dg@gap\relax \dg@pendentefalse
+    \else
+      \edef\dg@tmpa{#1}%
+      \ifx\dg@tmpa\dg@ultimo \vskip #2bp\relax \fi
+    \fi
+  \fi
+  \box\dg@caixa
+  \edef\dg@ultimo{#1}}
+
+\newcommand\espaco[1]{\dg@gap=#1bp\relax \dg@pendentetrue}
+
+% Quadro de texto. [topo|base] diz se y é o topo ou a base do quadro.
+\NewDocumentEnvironment{coluna}{O{topo} m m m +b}{%
+  \setbox\dg@fluxo=\vtop{\dg@iniciarfluxo{#4bp}#5}%
+  \dg@colocar{#1}{#2}{#3}{\dg@fluxo}}{}
+
+% ---------------------------------------------------------------------
+%  Texto
+% ---------------------------------------------------------------------
+% Parágrafo alinhado à esquerda, sem hifenização, sem espaço extra após
+% ponto e com espaço entre palavras rígido (como num navegador).
+% \dg@folga: uma linha pode passar 0,75bp da largura (invisível no papel).
+% O navegador e o LaTeX medem o mesmo texto com diferença de frações de
+% ponto; sem a folga, uma linha que cabia no original por um fio quebraria.
+\newdimen\dg@folga \dg@folga=0.75bp
+\newcommand\dg@paragrafo{%
+  \parindent=0pt \parskip=0pt \leftskip=0pt
+  \rightskip=-\dg@folga plus 1fil \parfillskip=0pt plus 1fil
+  \baselineskip=\dg@L \lineskip=0pt \lineskiplimit=-\maxdimen
+  \hyphenpenalty=10000 \exhyphenpenalty=0 \frenchspacing
+  \spaceskip=\fontdimen2\font \xspaceskip=\spaceskip
+  \hbadness=10000 \hfuzz=\maxdimen \emergencystretch=0pt
+  \adjdemerits=0 \finalhyphendemerits=0 \doublehyphendemerits=0}
+
+% Escora: altura 0,7 da entrelinha acima da linha de base, 0,3 abaixo.
+% É o que dá ao bloco uma altura previsível, independente das letras.
+\newcommand\dg@escora{\rule[-0.3\dg@L]{0pt}{\dg@L}}
+
+% \definirestilo[espacejamento]{nome}{tamanho}{entrelinha}{peso}{itálico sim|nao}{cor}{espaço entre blocos}
+%   peso: regular | seminegrito | ou o nome de uma face criada com \newfontface
+%   espacejamento: em % do corpo, como o LetterSpace do fontspec (negativo aperta)
+\NewDocumentCommand\definirestilo{O{0}mmmmmmm}{%
+  \expandafter\def\csname dg@fonte@#2\endcsname{%
+    \fontsize{#3bp}{#4bp}\selectfont\dg@peso{#5}\dg@italico{#6}%
+    \ifdim #1pt=0pt \else\addfontfeature{LetterSpace=#1}\fi}%
+  \expandafter\def\csname dg@lsp@#2\endcsname{#1}%
+  \expandafter\def\csname dg@L@#2\endcsname{#4}%
+  \expandafter\def\csname dg@cor@#2\endcsname{#7}%
+  \expandafter\def\csname dg@esp@#2\endcsname{#8}%
+  \expandafter\NewDocumentCommand\csname #2\endcsname{O{}+m}{\dg@bloco{#2}{##1}{##2}}}
+
+\newcommand\dg@peso[1]{%
+  \def\dg@tmpa{#1}\def\dg@tmpb{seminegrito}\def\dg@tmpc{regular}%
+  \ifx\dg@tmpa\dg@tmpb \bfseries
+  \else\ifx\dg@tmpa\dg@tmpc \mdseries
+  \else \csname #1\endcsname
+  \fi\fi}
+\newcommand\dg@italico[1]{%
+  \def\dg@tmpa{#1}\def\dg@tmpb{sim}%
+  \ifx\dg@tmpa\dg@tmpb \itshape \else \upshape \fi}
+
+% \entrelinha{bp}: o PRÓXIMO elemento (bloco, lista ou tabela) usa esta
+% entrelinha em vez da do estilo. Aparece onde o original foge da escala.
+\def\dg@Lprox{}
+\newcommand\entrelinha[1]{\def\dg@Lprox{#1}}
+
+% Constrói o bloco em \dg@caixa, com altura normalizada.
+%   #1 estilo   #2 recuo esquerdo (bp)   #3 cor   #4 marcador (ou vazio)   #5 texto
+\newcommand\dg@montarbloco[5]{%
+  \ifx\dg@Lprox\@empty
+    \dg@L=\csname dg@L@#1\endcsname bp\relax
+  \else
+    \dg@L=\dg@Lprox bp\relax
+  \fi
+  \setbox\dg@caixa=\vtop{%
+    \hsize=\dg@W
+    \csname dg@fonte@#1\endcsname
+    \dg@paragrafo
+    \dg@espacopalavra{\csname dg@lsp@#1\endcsname}%
+    \leftskip=#2bp\relax
+    \noindent{%
+      \if\relax\detokenize{#3}\relax
+        \color{\csname dg@cor@#1\endcsname}%
+      \else
+        \color{#3}%
+      \fi
+      #4\dg@escora#5\dg@escora}\par}%
+  \ht\dg@caixa=0.7\dg@L}
+
+\newcommand\dg@bloco[3]{% estilo, cor, texto
+  \dg@montarbloco{#1}{0}{#2}{}{#3}%
+  \def\dg@Lprox{}%
+  \dg@anexar{#1}{\csname dg@esp@#1\endcsname}}
+
+% \quebra: quebra de linha do original mantida só para ficar idêntico a ele.
+% Ao reescrever o parágrafo, pode apagar — o LaTeX volta a quebrar sozinho.
+\newcommand\quebra{\newline}
+
+% Espacejamento (LetterSpace, em % do corpo). O LetterSpace do LaTeX não
+% alarga o espaço entre palavras e o do navegador alarga (medido): o
+% mesmo valor é somado ao espaço, senão as palavras escorregam.
+\newcommand\dg@espacopalavra[1]{%
+  \ifdim #1pt=0pt\else
+    \spaceskip=\dimexpr\fontdimen2\font+\fpeval{(#1)*\f@size/100}pt\relax
+    \xspaceskip=\spaceskip
+  \fi}
+\newcommand\espacejado[2]{{\addfontfeature{LetterSpace=#1}\dg@espacopalavra{#1}#2}}
+
+% ---------------------------------------------------------------------
+%  Fios
+% ---------------------------------------------------------------------
+\NewDocumentCommand\fio{O{0} m m O{}}{% [dx] cor espessura [largura]
+  \setbox\dg@caixa=\hbox{\hskip#1bp{\color{#2}%
+    \vrule width \if\relax\detokenize{#4}\relax\dimexpr\dg@W-#1bp\relax\else#4bp\fi
+           height #3bp depth 0pt}}%
+  \dg@anexar{fio}{0}}
+
+% ---------------------------------------------------------------------
+%  Listas
+% ---------------------------------------------------------------------
+% \definirmarcador{nome}{deslocamento}{desenho}
+\NewDocumentCommand\definirmarcador{mmm}{%
+  \expandafter\def\csname dg@marc@#1\endcsname{\hskip#2bp\relax #3}}
+
+\ExplSyntaxOn
+\seq_new:N \l__dg_itens_seq
+\seq_new:N \l__dg_celulas_seq
+\clist_new:N \l__dg_larguras_clist
+
+% [cor] estilo marcador recuo espaço  — itens separados por \item
+\NewDocumentEnvironment{lista}{O{} m m m m +b}
+  {
+    \seq_set_split:Nnn \l__dg_itens_seq { \item } { #6 }
+    \seq_remove_all:Nn \l__dg_itens_seq { }
+    \bool_set_true:N \l_tmpa_bool
+    \seq_map_inline:Nn \l__dg_itens_seq
+      {
+        \bool_if:NF \l_tmpa_bool { \espaco{#5} }
+        \bool_set_false:N \l_tmpa_bool
+        \dg@montarbloco{#2}{#4}{#1}
+          { \llap{\makebox[#4bp][l]{\use:c{dg@marc@#3}}} }
+          { ##1 }
+        \dg@anexar{lista}{0}
+      }
+    \def\dg@Lprox{}
+  }{}
+
+% ---------------------------------------------------------------------
+%  Tabela
+% ---------------------------------------------------------------------
+\tl_new:N \l__dg_tab_estilo_tl
+\tl_new:N \l__dg_tab_rec_um_tl
+\tl_new:N \l__dg_tab_rec_tl
+\tl_new:N \l__dg_tab_rec_dir_tl
+\int_new:N \l__dg_col_int
+
+% estilo, larguras (lista separada por vírgula), recuo esq. da 1ª coluna,
+% recuo esq. das demais, recuo direito
+\NewDocumentEnvironment{tabela}{m m m m m +b}
+  {
+    \tl_set:Nn \l__dg_tab_estilo_tl {#1}
+    \clist_set:Nn \l__dg_larguras_clist {#2}
+    \tl_set:Nn \l__dg_tab_rec_um_tl {#3}
+    \tl_set:Nn \l__dg_tab_rec_tl {#4}
+    \tl_set:Nn \l__dg_tab_rec_dir_tl {#5}
+    \setbox\dg@caixa=\vtop{\offinterlineskip #6}
+    \def\dg@Lprox{}
+    \dg@anexar{tabela}{0}
+  }{}
+
+\NewDocumentCommand\fiotabela{mm}{\hbox{{\color{#1}\vrule width \dg@W height #2bp depth 0pt}}}
+
+% acima, abaixo, células separadas por &
+\NewDocumentCommand\linha{m m +m}
+  {
+    \vskip #1bp\relax
+    \seq_set_split:Nnn \l__dg_celulas_seq { & } { #3 }
+    \int_zero:N \l__dg_col_int
+    \hbox
+      {
+        \seq_map_inline:Nn \l__dg_celulas_seq
+          {
+            \int_incr:N \l__dg_col_int
+            \__dg_celula_tabela:nn
+              { \clist_item:Nn \l__dg_larguras_clist { \l__dg_col_int } }
+              { ##1 }
+          }
+      }
+    \vskip #2bp\relax
+  }
+
+\cs_new_protected:Npn \__dg_celula_tabela:nn #1#2
+  {
+    \tl_set:Ne \l_tmpa_tl
+      { \int_compare:nNnTF { \l__dg_col_int } = { 1 }
+          { \l__dg_tab_rec_um_tl } { \l__dg_tab_rec_tl } }
+    \hbox_to_wd:nn { #1 bp }
+      {
+        \hskip \l_tmpa_tl bp
+        \group_begin:
+          \dim_set:Nn \dg@W { #1 bp - \l_tmpa_tl bp - \l__dg_tab_rec_dir_tl bp }
+          \dg@montarbloco{\l__dg_tab_estilo_tl}{0}{}{}{#2}
+          \box\dg@caixa
+        \group_end:
+        \hss
+      }
+  }
+\ExplSyntaxOff
+
+% ---------------------------------------------------------------------
+%  Faixa: elementos lado a lado, cada um na sua posição medida
+% ---------------------------------------------------------------------
+\def\dg@faixaaltura{0}
+\NewDocumentEnvironment{faixa}{m +b}{%
+  \def\dg@faixaaltura{#1}%
+  \setbox\dg@caixa=\hbox{\setlength\unitlength{1bp}\begin{picture}(0,#1)#2\end{picture}}%
+  \dg@anexar{faixa}{0}}{}
+
+\NewDocumentCommand\celula{m m m +m}{% dx dy largura conteúdo
+  \setbox\dg@cel=\vtop{\dg@iniciarfluxo{#3bp}#4}%
+  \put(#1,\fpeval{\dg@faixaaltura-(#2)}){\raisebox{-\height}{\usebox{\dg@cel}}}}
+
+% ---------------------------------------------------------------------
+%  Caixa com fundo
+% ---------------------------------------------------------------------
+\NewDocumentEnvironment{caixa}{m m m m m +b}{% cor acima abaixo esquerda direita
+  \setbox\dg@cel=\vtop{\dg@iniciarfluxo{\dg@W-#4bp-#5bp}#6}%
+  \dg@a=\dimexpr #2bp+\ht\dg@cel+\dp\dg@cel+#3bp\relax
+  \setbox\dg@caixa=\hbox{%
+    \rlap{{\color{#1}\vrule width \dg@W height 0pt depth \dg@a}}%
+    \hskip#4bp\lower\dimexpr#2bp+\ht\dg@cel\relax\box\dg@cel}%
+  \dg@anexar{caixa}{0}}{}
+
+% ---------------------------------------------------------------------
+%  Chamada: texto com uma barra vertical à esquerda
+% ---------------------------------------------------------------------
+\NewDocumentEnvironment{chamada}{m m m +b}{% cor espessura recuo
+  \setbox\dg@cel=\vtop{\dg@iniciarfluxo{\dg@W-#3bp}#4}%
+  \setbox\dg@caixa=\hbox{%
+    \rlap{{\color{#1}\vrule width #2bp height \ht\dg@cel depth \dp\dg@cel}}%
+    \hskip#3bp\box\dg@cel}%
+  \dg@anexar{chamada}{0}}{}
+
+% ---------------------------------------------------------------------
+%  Imagens: espaço reservado com nome. Se existir um arquivo com esse
+%  nome na pasta de imagens (pdf, png, jpg), ele entra no lugar.
+% ---------------------------------------------------------------------
+\def\dg@pastaimagens{}
+\newcommand\pastaimagens[1]{\def\dg@pastaimagens{#1}}
+
+\newcommand\dg@acharimagem[1]{%
+  \let\dg@arquivo\relax
+  \@for\dg@ext:=pdf,png,jpg,jpeg\do{%
+    \ifx\dg@arquivo\relax
+      \IfFileExists{\dg@pastaimagens#1.\dg@ext}{\edef\dg@arquivo{\dg@pastaimagens#1.\dg@ext}}{}%
+    \fi}}
+
+\newcommand\dg@desenharimagem[3]{% nome largura altura
+  \dg@acharimagem{#1}%
+  \ifx\dg@arquivo\relax
+    {\setlength\unitlength{1bp}%
+     \begin{picture}(#2,#3)%
+       {\color{dgreservado}\put(0,0){\rule{#2bp}{#3bp}}}%
+       {\color{dgreservadotraco}\linethickness{0.5bp}\put(0,0){\framebox(#2,#3){}}}%
+       \put(0,0){\makebox(#2,#3){\fontsize{6.5bp}{8bp}\selectfont\color{dgreservadotraco}%
+         \begin{tabular}{@{}c@{}}#1\\[-1bp]\fpeval{round(#2,1)} × \fpeval{round(#3,1)} bp\end{tabular}}}%
+     \end{picture}}%
+  \else
+    \parbox[b][#3bp][c]{#2bp}{\centering\includegraphics[width=#2bp,height=#3bp,keepaspectratio]{\dg@arquivo}}%
+  \fi}
+
+\definecolor{dgreservado}{HTML}{F2F1F0}
+\definecolor{dgreservadotraco}{HTML}{A8A5A3}
+
+\NewDocumentCommand\imagem{O{0} m m m}{%
+  \setbox\dg@caixa=\hbox{\hskip#1bp\dg@desenharimagem{#2}{#3}{#4}}%
+  \dg@anexar{imagem}{0}}
+
+\NewDocumentCommand\imagemlivre{m m m m m}{%
+  \put(#2,-#3){\raisebox{-\height}{\dg@desenharimagem{#1}{#4}{#5}}}}
+
+% ---------------------------------------------------------------------
+%  Cabeçalho e número de página (repetidos em todas as páginas)
+% ---------------------------------------------------------------------
+\def\dg@cabecalho{}
+\def\dg@numero{}
+\def\dg@moldura{\dg@cabecalho\dg@numero}
+
+% \definircabecalho{x}{y do topo}{largura}{conteúdo}
+\NewDocumentCommand\definircabecalho{m m m +m}{%
+  \def\dg@cabecalho{%
+    \setbox\dg@fluxo=\vtop{\dg@iniciarfluxo{#3bp}#4}%
+    \dg@colocar{topo}{#1}{#2}{\dg@fluxo}}}
+
+% \definirnumeropagina{x da borda direita}{y da linha de base}{estilo}{cor}{a partir da página}
+\NewDocumentCommand\definirnumeropagina{m m m m m}{%
+  \def\dg@numero{%
+    \ifnum\value{page}<#5\relax\else
+      \put(#1,-#2){\llap{\csname dg@fonte@#3\endcsname\color{#4}\thepage}}%
+    \fi}}
+
+\makeatother
+\endinput
